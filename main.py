@@ -441,7 +441,9 @@ async def ask_ai(prompt: str, system: str = "You are NexusBot, a helpful Discord
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)  bot.invite_cache = {}
+bot = commands.Bot(command_prefix="!", intents=intents)
+bot.invite_cache = {}
+
 
 def upsell_embed(required: str) -> discord.Embed:
     return discord.Embed(
