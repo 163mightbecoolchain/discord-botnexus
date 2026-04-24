@@ -1,0 +1,16 @@
+[project]
+name = "main"
+
+[phases.setup]
+commands = [
+  "python -m pip install --upgrade pip"
+]
+
+[phases.install]
+commands = [
+  "pip install -r requirements.txt"
+]
+
+[env]
+PYTHONUNBUFFERED = "1"
+
