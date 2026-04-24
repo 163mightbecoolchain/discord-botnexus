@@ -477,17 +477,15 @@ def fmt_item(item_id):
 @bot.event
 async def on_ready():
     await db_init()
-    for guild in bot.guilds:
-        await ensure_guild_tables(guild.id)
-        try:        
-    invites = await guild.invites()
-    bot.invite_cache[guild.id] = {inv.code: inv.uses for inv in invites}
-        except:
-    bot.invite_cache[guild.id] = {}
-
-        except Exception:
-            bot.invite_cache[guild.id] = {}
-    print(f"✅ NexusBot v5 online as {bot.user} — {len(bot.guilds)} servers")
+for guild in bot.guilds:
+    await ensure_guild_tables(guild.id)
+    try:
+        invites = await guild.invites()
+        bot.invite_cache[guild.id] = {inv.code: inv.uses for inv in invites}
+    except Exception:
+        bot.invite_cache[guild.id] = {}
+  
+    print(f"✅ Toph Beifong online as {bot.user} — {len(bot.guilds)} servers")
     await bot.tree.sync()
     await bot.change_presence(
         activity=discord.Activity(type=discord.ActivityType.watching, name="/help | nexusbot.gg")
