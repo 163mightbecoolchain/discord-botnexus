@@ -528,7 +528,7 @@ async def on_member_join(member: discord.Member):
     tier = await get_tier(member.guild.id)
     log_ch = await get_log_channel(member.guild)
 
- # ─── Invite tracking ──────────────────────────────────────
+ 
     used_invite = None
     inviter_name = "неизвестно"
     inviter_id = 0
@@ -562,6 +562,7 @@ async def on_member_join(member: discord.Member):
                 member.id,
                 member.name
             )
+    # ─── Invite tracking ──────────────────────────────────────
 
     # ─── Anti-raid ────────────────────────────────────────────
     if tier >= TIER_PREMIUM and await get_security(member.guild.id, "anti_raid"):
