@@ -96,7 +96,7 @@ TIER_PRO     = 2   # €9.99/mo
 TIER_NAMES   = {0: "Free", 1: "⭐ Premium", 2: "💎 Pro"}
 TIER_COLORS  = {0: 0x6b7fa3, 1: 0x00E5FF, 2: 0xFFD700}
 
-OWNER_IDS    = set(474658252840370176)  # Добавь свой Discord ID: {123456789}
+OWNER_IDS = {474658252840370176}    # Добавь свой Discord ID: {123456789}
 
 # ─── RATE LIMITING ───────────────────────────────────────────
 _cooldowns: dict = {}
