@@ -479,10 +479,10 @@ async def on_ready():
     await db_init()
 for guild in bot.guilds:
     await ensure_guild_tables(guild.id)
-    try:
-        invites = await guild.invites()
-        bot.invite_cache[guild.id] = {inv.code: inv.uses for inv in invites}
-    except Exception:
+try:
+    invites = await guild.invites()
+    bot.invite_cache[guild.id] = {inv.code: inv.uses for inv in invites}
+except Exception:
         bot.invite_cache[guild.id] = {}
   
     print(f"✅ Toph Beifong online as {bot.user} — {len(bot.guilds)} servers")
