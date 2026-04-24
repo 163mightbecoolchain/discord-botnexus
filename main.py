@@ -441,7 +441,7 @@ async def ask_ai(prompt: str, system: str = "You are NexusBot, a helpful Discord
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)  bot.invite_cache = {}
 
 def upsell_embed(required: str) -> discord.Embed:
     return discord.Embed(
@@ -478,8 +478,10 @@ async def on_ready():
     for guild in bot.guilds:
         await ensure_guild_tables(guild.id)
         try:
-            invites = await guild.invites()
-            bot.invite_cache[guild.id] = {inv.code: inv.uses for inv in invites}
+    invites = await guild.invites()
+    bot.invite_cache[guild.id] = {inv.code: inv.uses for inv in invites}
+except:
+    bot.invite_cache[guild.id] = {}
         except Exception:
             bot.invite_cache[guild.id] = {}
     print(f"✅ NexusBot v5 online as {bot.user} — {len(bot.guilds)} servers")
@@ -519,33 +521,41 @@ async def on_member_join(member: discord.Member):
     tier = await get_tier(member.guild.id)
     log_ch = await get_log_channel(member.guild)
 
-    # ─── Invite tracking ──────────────────────────────────────
-    used_invite = None
-    inviter_name = "неизвестно"
-    inviter_id = 0
-    invite_code = "неизвестно"
+# ─── Invite tracking ──────────────────────────────────────
+used_invite = None
+inviter_name = "неизвестно"
+inviter_id = 0
+invite_code = "неизвестно"
 
-    if tier >= TIER_PREMIUM:
-        old_cache = bot.invite_cache.get(member.guild.id, {}).copy()
-        await asyncio.sleep(2)
-        try:
-            new_invites = await member.guild.invites()
-            bot.invite_cache[member.guild.id] = {inv.code: inv.uses for inv in new_invites}
-            for inv in new_invites:
-                if inv.code in old_cache and inv.uses > old_cache[inv.code]:
-                    used_invite = inv
-                    break
-        except Exception:
-            pass
+if tier >= TIER_PREMIUM:
+    old_cache = bot.invite_cache.get(member.guild.id, {}).copy()
+    await asyncio.sleep(2)
 
-        if used_invite and used_invite.inviter:
-            inviter_name = used_invite.inviter.name
-            inviter_id = used_invite.inviter.id
-            invite_code = used_invite.code
-            await save_invite(
-                member.guild.id, invite_code, inviter_id, inviter_name,
-                member.id, member.name
-            )
+    try:
+        new_invites = await member.guild.invites()
+        bot.invite_cache[member.guild.id] = {inv.code: inv.uses for inv in new_invites}
+
+        for inv in new_invites:
+            if inv.code in old_cache and inv.uses > old_cache[inv.code]:
+                used_invite = inv
+                break
+    except:
+        pass
+
+    if used_invite and used_invite.inviter:
+        inviter_name = used_invite.inviter.name
+        inviter_id = used_invite.inviter.id
+        invite_code = used_invite.code
+
+        await save_invite(
+            member.guild.id,
+            invite_code,
+            inviter_id,
+            inviter_name,
+            member.id,
+            member.name
+        )
+
 
     # ─── Anti-raid ────────────────────────────────────────────
     if tier >= TIER_PREMIUM and await get_security(member.guild.id, "anti_raid"):
