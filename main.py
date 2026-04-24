@@ -536,7 +536,7 @@ async def on_member_join(member: discord.Member):
 
     if tier >= TIER_PREMIUM:
         old_cache = bot.invite_cache.get(member.guild.id, {}).copy()
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
         try:
             new_invites = await member.guild.invites()
