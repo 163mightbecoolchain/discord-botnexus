@@ -78,13 +78,13 @@ from functools import wraps
 load_dotenv()
 
 TOKEN        = os.getenv("DISCORD_TOKEN")
-GROQ_KEY     = os.getenv("GROQ_API_KEY")      # FREE — console.groq.com
-GEMINI_KEY   = os.getenv("GEMINI_API_KEY")    # FREE fallback — aistudio.google.com
+GROQ_KEY     = os.getenv("GROQ_API")      # FREE — console.groq.com
+GEMINI_KEY   = os.getenv("GEMINI_API")    # FREE fallback — aistudio.google.com
 WEATHER_KEY  = os.getenv("WEATHER_API_KEY")
-HENRIK_KEY   = os.getenv("HENRIK_API_KEY")
-RIOT_KEY     = os.getenv("RIOT_API_KEY")
-STEAM_KEY    = os.getenv("STEAM_API_KEY")
-LOSTARK_KEY  = os.getenv("LOSTARK_API_KEY")
+HENRIK_KEY   = os.getenv("VALORANT_API_KEY")
+RIOT_KEY     = os.getenv("RIOT_API")
+STEAM_KEY    = os.getenv("STEAM_API")
+LOSTARK_KEY  = os.getenv("lostspark_api")
 DB_PATH      = "nexusbot.db"
 
 ALBION_BASE  = "https://gameinfo.albiononline.com/api/gameinfo"
