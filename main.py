@@ -1420,7 +1420,20 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
     """
     base_url = ALBION_SERVERS.get(server, ALBION_SERVERS["eu"])
     results = []
-    all_locations = "Black+Market,Brecilien," + ",".join(CITY_LOCATIONS)
+
+    # ВАЖНО: пробелы в названиях городов кодируем через %20, не +
+    # Albion Data API чувствителен к этому
+    all_locations = ",".join([
+        "Black Market", "Brecilien",
+        "Caerleon", "Bridgewatch", "Fort Sterling",
+        "Lymhurst", "Martlock", "Thetford"
+    ])
+    # URL-encode пробелы
+    locations_param = all_locations.replace(" ", "%20")
+
+    print(f"[BM DEBUG] Starting fetch: keys={len(category_keys)}, tier={tier}, server={server}")
+    fetched = 0
+    found = 0
 
     async with aiohttp.ClientSession() as s:
         for key in category_keys:
@@ -1431,24 +1444,31 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
             for enchant in range(0, 5):
                 item_id = build_item_id(template, tier, enchant)
                 tier_label = f"{tier}.{enchant}"
-                url = f"{base_url}/stats/prices/{item_id}?locations={all_locations}"
+                url = f"{base_url}/stats/prices/{item_id}?locations={locations_param}"
 
                 try:
-                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                        if r.status != 200: continue
+                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                        fetched += 1
+                        if r.status != 200:
+                            print(f"[BM DEBUG] {item_id}: HTTP {r.status}")
+                            continue
                         prices = await r.json()
-                except Exception:
+                except Exception as ex:
+                    print(f"[BM DEBUG] {item_id}: request error: {ex}")
+                    continue
+
+                if not prices:
                     continue
 
                 bm_price = 0
                 brec_sell = 0
-                brec_buy = 0   # buy_price_max = лучший ордер на покупку
-                city_data = {}  # city_name → {sell, buy}
+                brec_buy = 0
+                city_data = {}
 
                 for p in prices:
-                    city = p.get("city", "")
-                    sell = p.get("sell_price_min", 0)   # мин. цена продажи (рынок)
-                    buy  = p.get("buy_price_max", 0)    # макс. ордер на покупку
+                    city = p.get("city", "").strip()
+                    sell = p.get("sell_price_min", 0) or 0
+                    buy  = p.get("buy_price_max", 0) or 0
 
                     if city == "Black Market":
                         if sell > 0: bm_price = max(bm_price, sell)
@@ -1456,55 +1476,67 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
                         if sell > 0: brec_sell = sell
                         if buy > 0:  brec_buy  = buy
                     elif city in CITY_LOCATIONS:
-                        city_data[city] = {"sell": sell, "buy": buy}
+                        if sell > 0 or buy > 0:
+                            city_data[city] = {"sell": sell, "buy": buy}
 
+                # Если нет цены на ЧР — предмет не торгуется там
                 if bm_price == 0:
+                    print(f"[BM DEBUG] {item_id}: no Black Market price, skip")
                     continue
 
-                # Найти лучший город для покупки (минимальная цена продажи)
+                # Лучший город — минимальная цена продажи
                 best_city = None
                 best_city_sell = 9_999_999_999
                 best_city_buy  = 0
 
-                for city, prices_dict in city_data.items():
-                    sell = prices_dict["sell"]
-                    buy  = prices_dict["buy"]
+                for city, pd in city_data.items():
+                    sell = pd["sell"]
+                    buy  = pd["buy"]
                     if sell > 0 and sell < best_city_sell:
                         best_city_sell = sell
                         best_city      = city
                         best_city_buy  = buy
 
-                city_sell_profit = bm_price - best_city_sell if best_city else 0
-                city_sell_pct    = round(city_sell_profit / best_city_sell * 100, 1) if best_city and best_city_sell > 0 else 0
+                # Если нет цены в городах — используем ордер на покупку (buy)
+                if not best_city:
+                    for city, pd in city_data.items():
+                        buy = pd["buy"]
+                        if buy > 0 and buy < best_city_sell:
+                            best_city_sell = buy
+                            best_city      = city
+                            best_city_buy  = buy
 
-                # Профит от Бреккилена
+                city_sell_profit = bm_price - best_city_sell if best_city and best_city_sell < 9_999_999_999 else 0
+                city_sell_pct    = round(city_sell_profit / best_city_sell * 100, 1) if city_sell_profit > 0 and best_city_sell > 0 else 0
+
                 brec_price = brec_sell if brec_sell > 0 else brec_buy
                 brec_is_buy_order = brec_buy > 0 and brec_sell == 0
                 brec_profit = bm_price - brec_price if brec_price > 0 else 0
                 brec_pct    = round(brec_profit / brec_price * 100, 1) if brec_price > 0 else 0
 
+                found += 1
+                print(f"[BM DEBUG] {item_id}: BM={bm_price} best_city={best_city}({best_city_sell if best_city_sell < 9_999_999_999 else 0}) profit={city_sell_profit}({city_sell_pct}%)")
+
                 results.append({
-                    "name":           f"{display} {tier_label}",
-                    "display":        display,
-                    "tier_label":     tier_label,
-                    "item_id":        item_id,
-                    "icon_url":       item_icon_url(item_id),
-                    "bm":             bm_price,
-                    # Лучший город
-                    "best_city":      best_city,
-                    "best_city_sell": best_city_sell if best_city else 0,
-                    "best_city_buy":  best_city_buy,
-                    "city_profit":    city_sell_profit,
-                    "city_pct":       city_sell_pct,
-                    # Все города
-                    "city_data":      city_data,
-                    # Бреккилен
-                    "brec_price":     brec_price,
+                    "name":              f"{display} {tier_label}",
+                    "display":           display,
+                    "tier_label":        tier_label,
+                    "item_id":           item_id,
+                    "icon_url":          item_icon_url(item_id),
+                    "bm":                bm_price,
+                    "best_city":         best_city,
+                    "best_city_sell":    best_city_sell if best_city_sell < 9_999_999_999 else 0,
+                    "best_city_buy":     best_city_buy,
+                    "city_profit":       city_sell_profit,
+                    "city_pct":          city_sell_pct,
+                    "city_data":         city_data,
+                    "brec_price":        brec_price,
                     "brec_is_buy_order": brec_is_buy_order,
-                    "brec_profit":    brec_profit,
-                    "brec_pct":       brec_pct,
+                    "brec_profit":       brec_profit,
+                    "brec_pct":          brec_pct,
                 })
 
+    print(f"[BM DEBUG] Done: fetched={fetched}, results={found}")
     results.sort(key=lambda x: x["city_pct"], reverse=True)
     return results
 
@@ -1624,19 +1656,31 @@ async def blackmarket(
             from google.oauth2.service_account import Credentials as GCredentials
             import json as _json
 
-            # GOOGLE_CREDENTIALS может быть строкой JSON или путём к файлу
+            # GOOGLE_CREDENTIALS должен быть JSON строкой или base64
+            # НЕ пытаемся открывать как файл — в Railway это всегда строка
             raw = GOOGLE_CREDS.strip()
+
+            creds_data = None
             if raw.startswith("{"):
+                # Прямой JSON
                 creds_data = _json.loads(raw)
             else:
-                # Может быть base64 или путь — пробуем как путь
-                import base64
+                # Попробуем base64
                 try:
-                    decoded = base64.b64decode(raw).decode("utf-8")
+                    import base64
+                    decoded = base64.b64decode(raw + "==").decode("utf-8")
                     creds_data = _json.loads(decoded)
                 except Exception:
-                    with open(raw) as f:
-                        creds_data = _json.load(f)
+                    await interaction.channel.send(
+                        "❌ Google Sheets: не удалось разобрать `GOOGLE_CREDENTIALS`\n"
+                        "Значение должно быть JSON содержимым файла одной строкой.\n"
+                        "**Как сделать правильно:**\n"
+                        "1. Скачай JSON ключ из Google Cloud Console\n"
+                        "2. Открой файл текстовым редактором\n"
+                        "3. Скопируй **всё содержимое** и вставь в переменную `GOOGLE_CREDENTIALS` в Railway\n"
+                        "Значение должно начинаться с `{\"type\": \"service_account\"...`"
+                    )
+                    return
 
             creds = GCredentials.from_service_account_info(
                 creds_data,
@@ -1763,6 +1807,41 @@ async def tournament(interaction: discord.Interaction, name: str, participants: 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  RUN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="bmtest", description="[DEBUG] Тест API Albion Data Project")
+@app_commands.describe(item_id="ID предмета (напр. T8_MAIN_SWORD)")
+async def bmtest(interaction: discord.Interaction, item_id: str = "T8_MAIN_SWORD"):
+    """Быстрый тест — проверяет что API отвечает и возвращает цены."""
+    await interaction.response.defer()
+    url = f"https://west.albion-online-data.com/api/v2/stats/prices/{item_id}?locations=Black%20Market,Caerleon,Martlock,Brecilien"
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                status = r.status
+                data = await r.json()
+
+        e = discord.Embed(title=f"🔧 BM Test — {item_id}", color=0x00E5FF)
+        e.add_field(name="HTTP Status", value=str(status), inline=True)
+        e.add_field(name="Записей в ответе", value=str(len(data)), inline=True)
+        e.add_field(name="URL", value=f"`{url}`", inline=False)
+
+        lines = []
+        for p in data:
+            city  = p.get("city", "?")
+            sell  = p.get("sell_price_min", 0) or 0
+            buy   = p.get("buy_price_max", 0) or 0
+            upd   = p.get("sell_price_min_date", "")[:10]
+            lines.append(f"**{city}**: sell=`{sell:,}` buy=`{buy:,}` upd=`{upd}`")
+
+        if lines:
+            e.add_field(name="Цены", value="\n".join(lines), inline=False)
+        else:
+            e.add_field(name="Цены", value="❌ Пустой ответ", inline=False)
+
+        await interaction.followup.send(embed=e)
+    except Exception as ex:
+        await interaction.followup.send(f"❌ Ошибка запроса: `{ex}`")
+
 
 if __name__ == "__main__":
     bot.run(TOKEN)
