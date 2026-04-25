@@ -68,7 +68,10 @@ LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
 
-DB_PATH     = "nexusbot.db"
+# База данных — используем путь из переменной окружения если есть
+# На Railway: добавь Volume и укажи DB_PATH=/data/nexusbot.db в переменных
+# Без этого данные сбрасываются при каждом деплое!
+DB_PATH     = os.getenv("DB_PATH", "nexusbot.db")
 ALBION_BASE = "https://gameinfo.albiononline.com/api/gameinfo"
 ALBION_DATA = "https://west.albion-online-data.com/api/v2"
 
@@ -345,27 +348,41 @@ async def refresh_invite_cache(guild) -> bool:
 @bot.event
 async def on_ready():
     await db_init()
-    # Заполняем глобальный кэш инвайтов для всех серверов
+    print(f"🗄️  DB path: {DB_PATH}")
+
+    # Заполняем кэш инвайтов
     _invite_cache.clear()
     for guild in bot.guilds:
         await refresh_invite_cache(guild)
 
-    # Принудительная синхронизация всех slash команд
+    # ── Принудительная синхронизация команд ──────────────────
+    # Шаг 1: очищаем ВСЕ старые команды у Discord
+    try:
+        bot.tree.clear_commands(guild=None)
+        print("🧹 Старые команды очищены")
+    except Exception as ex:
+        print(f"⚠️ Не удалось очистить команды: {ex}")
+
+    # Шаг 2: копируем все команды заново и синхронизируем
     try:
         synced = await bot.tree.sync()
-        print(f"✅ Синхронизировано {len(synced)} команд")
+        print(f"✅ Синхронизировано {len(synced)} команд глобально")
+        for cmd in synced:
+            print(f"   /{cmd.name}")
     except Exception as ex:
-        print(f"❌ Ошибка синхронизации команд: {ex}")
+        print(f"❌ Ошибка синхронизации: {ex}")
 
-    # Запуск фоновых задач
+    # ── Запуск фоновых задач ─────────────────────────────────
     if not hasattr(bot, "_tasks_started"):
         bot._tasks_started = True
         bot.loop.create_task(birthday_check_loop())
         bot.loop.create_task(price_watch_loop())
         print("✅ Фоновые задачи запущены")
 
-    print(f"✅ NexusBot v5 | {bot.user} | Invite cache: {len(_invite_cache)} entries")
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/help | nexusbot.gg"))
+    print(f"✅ NexusBot v5 | {bot.user} | {len(bot.guilds)} серверов | {len(_invite_cache)} инвайтов в кэше")
+    await bot.change_presence(activity=discord.Activity(
+        type=discord.ActivityType.watching, name="/help | nexusbot.gg"))
+
 
 @bot.event
 async def on_app_command_error(interaction, error):
