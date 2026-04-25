@@ -382,7 +382,7 @@ async def on_member_join(member):
     inviter_id = 0
 
     # Give Discord time to update invite counters
-    await asyncio.sleep(3)
+    await asyncio.sleep(5)
 
     try:
         fresh_invites = await member.guild.fetch_invites()
