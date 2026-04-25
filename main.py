@@ -299,7 +299,7 @@ _invite_cache: dict = {}
 async def refresh_invite_cache(guild) -> bool:
     """Загружает инвайты гильдии в кэш. Возвращает True если успешно."""
     try:
-        invites = await guild.fetch_invites()
+        invites = await guild.invites()
         for inv in invites:
             _invite_cache[f"{guild.id}:{inv.code}"] = inv.uses or 0
         print(f"✅ Invite cache loaded for {guild.name}: {len(invites)} invites")
@@ -392,7 +392,7 @@ async def on_member_join(member):
     await asyncio.sleep(3)
 
     try:
-        fresh_invites = await member.guild.fetch_invites()
+        fresh_invites = await member.guild.invites()
         print(f"[INVITE DEBUG] Fresh invites: {[(inv.code, inv.uses) for inv in fresh_invites]}")
 
         for inv in fresh_invites:
@@ -421,7 +421,7 @@ async def on_member_join(member):
     # Разовые инвайты — исчезли из списка после использования
     if not used_code:
         try:
-            fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.fetch_invites()}
+            fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.invites()}
             for cache_key in list(old_snapshot.keys()):
                 if cache_key not in fresh_codes:
                     used_code = cache_key.split(":", 1)[1]
