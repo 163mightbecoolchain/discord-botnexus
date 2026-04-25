@@ -355,19 +355,13 @@ async def on_ready():
     for guild in bot.guilds:
         await refresh_invite_cache(guild)
 
-    # ── Принудительная синхронизация команд ──────────────────
-    # Шаг 1: очищаем ВСЕ старые команды у Discord
-    try:
-        bot.tree.clear_commands(guild=None)
-        print("🧹 Старые команды очищены")
-    except Exception as ex:
-        print(f"⚠️ Не удалось очистить команды: {ex}")
-
-    # Шаг 2: копируем все команды заново и синхронизируем
+    # ── Синхронизация команд ──────────────────────────────────
+    # НЕ очищаем tree — это удаляет все зарегистрированные команды!
+    # Просто синхронизируем текущее состояние с Discord
     try:
         synced = await bot.tree.sync()
         print(f"✅ Синхронизировано {len(synced)} команд глобально")
-        for cmd in synced:
+        for cmd in sorted(synced, key=lambda c: c.name):
             print(f"   /{cmd.name}")
     except Exception as ex:
         print(f"❌ Ошибка синхронизации: {ex}")
