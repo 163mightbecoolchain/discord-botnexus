@@ -383,20 +383,20 @@ async def on_member_join(member):
 
     # Give Discord time to update invite counters
     await asyncio.sleep(8)
-
     try:
-    fresh_invites = await member.guild.fetch_invites()
-    for inv in fresh_invites:
-        cache_key = f"{gid}:{inv.code}"
-        old_uses = old_cache.get(cache_key, 0)
-        new_uses = inv.uses or 0
-        if new_uses > old_uses:
-            used_code = inv.code
-            if inv.inviter:
-                inviter_name = inv.inviter.name
-                inviter_id = inv.inviter.id
-            bot.invite_cache[cache_key] = new_uses
-            break
+        fresh_invites = await member.guild.fetch_invites()
+        for inv in fresh_invites:
+            cache_key = f"{gid}:{inv.code}"
+            old_uses = old_cache.get(cache_key, 0)
+            new_uses = inv.uses or 0
+            if new_uses > old_uses:
+                used_code = inv.code
+                if inv.inviter:
+                    inviter_name = inv.inviter.name
+                    inviter_id = inv.inviter.id
+                # Update cache immediately
+                bot.invite_cache[cache_key] = new_uses
+                break
         # Sync full cache after scan
         for inv in fresh_invites:
             bot.invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
