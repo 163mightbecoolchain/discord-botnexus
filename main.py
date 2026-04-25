@@ -874,16 +874,102 @@ async def purge(interaction: discord.Interaction, count: int):
 #  FREE COMMANDS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@bot.tree.command(name="help", description="Все команды")
-async def help_cmd(interaction: discord.Interaction):
+@bot.tree.command(name="help", description="Все команды бота")
+@app_commands.describe(page="Раздел: general / albion / games / security / pro / ai")
+async def help_cmd(interaction: discord.Interaction, page: str = "general"):
     tier = await get_tier(interaction.guild_id)
-    e = discord.Embed(title="📖 NexusBot v5", color=TIER_COLORS[tier])
-    e.add_field(name="🆓 Free", value="`/ping` `/userinfo` `/serverinfo` `/rank` `/leaderboard` `/coins` `/poll` `/remind` `/lfg` `/weather` `/translate` `/stats` `/kills` `/deaths` `/guild` `/battle` `/compare` `/history` `/rs` `/mc`", inline=False)
-    e.add_field(name="⭐ Premium €4.99", value="`/security` `/invcheck` `/invuser` `/invdel` `/warn` `/warnings` `/clearwarn` `/purge` `/ai` `/summarize` `/roast` `/giveaway` `/val` `/cs2` `/lol` `/lostark`", inline=False)
-    e.add_field(name="💎 Pro €9.99", value="`/blackmarket` `/party` `/tournament`", inline=False)
-    e.add_field(name="Текущий тир", value=TIER_NAMES[tier], inline=True)
-    e.set_footer(text="nexusbot.gg · AI: Groq/Gemini (free) · Albion API (free)")
+    tier_name = TIER_NAMES[tier]
+    color = TIER_COLORS[tier]
+    page = page.lower()
+
+    pages = {
+        "general": {
+            "title": "📖 Основные команды",
+            "fields": [
+                ("🆓 Информация", "`/ping` — latency бота\n`/userinfo` — инфо о пользователе\n`/serverinfo` — инфо о сервере\n`/subinfo` — статус подписки"),
+                ("🆓 XP и экономика", "`/rank` — твой уровень и XP\n`/leaderboard` — топ 10 активных\n`/coins` — баланс монет"),
+                ("🆓 Утилиты", "`/poll` — создать опрос с реакциями\n`/remind` — напоминание в личку\n`/lfg` — Looking For Group пост\n`/weather` — погода в городе\n`/translate` — перевод текста"),
+                ("🆓 Комьюнити", "`/birthday` — зарегистрировать ДР\n`/suggestion` — предложение с голосованием\n`/ticket` — открыть тикет поддержки"),
+                ("⭐ Premium", "`/starboard` — настроить зал славы\n`/serverstats` — статистика активности\n`/giveaway` — розыгрыш\n`/roast` — AI роаст участника\n`/summarize` — AI резюме чата\n`/imagine` — генерация изображений"),
+            ]
+        },
+        "albion": {
+            "title": "⚔️ Albion Online",
+            "fields": [
+                ("🆓 Игроки", "`/stats [player]` — статистика игрока\n`/kills [player]` — последние убийства\n`/deaths [player]` — последние смерти\n`/history [player]` — активность за 7 дней\n`/compare [p1] [p2]` — сравнение двух игроков"),
+                ("🆓 Гильдии и битвы", "`/guild [name]` — инфо о гильдии + топ участников\n`/battle` — последние ZvZ битвы\n`/party [p1..p5]` — анализ состава группы"),
+                ("💎 Pro — Рынок", "`/blackmarket [category] [tier] [server]` — топ профитных предметов\n  категории: `weapon` `armor` `bag` или конкретный ключ (`sword`, `bow`...)\n  сервера: `eu` `us` `asia`\n`/craftcalc [tier] [server]` — таблица крафта → Google Sheets\n`/flipper [category] [tier]` — арбитраж между городами"),
+                ("💎 Pro — Экспертиза", "`/guildwar` — топ гильдий по ZvZ активности\n`/pricewatch` — слежка за ценой предмета\n`/askalbion` — AI эксперт по игре"),
+            ]
+        },
+        "games": {
+            "title": "🎮 Другие игры",
+            "fields": [
+                ("🆓 Minecraft", "`/mc [address]` — статус сервера (онлайн, версия, MOTD)"),
+                ("🆓 Old School RuneScape", "`/rs [username]` — навыки и уровни игрока"),
+                ("⭐ Premium — Valorant", "`/val [Name#TAG]` — ранг, RR, пиковый ранг\nТребует: `HENRIK_API_KEY`"),
+                ("⭐ Premium — CS2", "`/cs2 [steam_id]` — K/D, убийства, победы, HS%\nТребует: `STEAM_API_KEY`"),
+                ("⭐ Premium — League of Legends", "`/lol [summoner] [region]` — ранг, LP, винрейт\nТребует: `RIOT_API_KEY`"),
+                ("⭐ Premium — Lost Ark", "`/lostark [character]` — персонажи и item level\nТребует: `LOSTARK_API_KEY`"),
+            ]
+        },
+        "security": {
+            "title": "🛡️ Безопасность (Premium)",
+            "fields": [
+                ("Настройка", "`/security status` — статус всех модулей\n`/security toggle [module]` — вкл/выкл модуль\n`/security setlog [#channel]` — канал для логов"),
+                ("Модули логирования", "`joins` `leaves` `bans` `timeouts` `msg_delete` `msg_edit`\n`invites` `suspicious` `nick_change` `role_change` `avatar_change`\n`voice` `channels` `roles` `server_edit` `reactions` `threads`"),
+                ("Авто-защита", "`anti_raid` — авто-кик при 8+ входах за 10 сек\n`anti_spam` — авто-таймаут при 6+ сообщениях за 5 сек\n`/lockdown [on/off]` — запрет входа новым аккаунтам\n`/slowmode [sec]` — замедление канала"),
+                ("Инвайты", "`/invcheck [code]` — кто использовал инвайт\n`/invuser [member]` — кого пригласил пользователь\n`/invdel [code]` — удалить инвайт"),
+                ("Модерация", "`/warn [member] [reason]` — выдать варн\n`/warnings [member]` — список варнов\n`/clearwarn [id]` — снять варн\n`/purge [count]` — удалить сообщения\n`/report [msg_id] [reason]` — пожаловаться на сообщение"),
+            ]
+        },
+        "pro": {
+            "title": "💎 Pro команды (€9.99/мес)",
+            "fields": [
+                ("Albion: Чёрный рынок", "`/blackmarket category:weapon tier:8 server:eu`\n`/blackmarket category:sword tier:7`\nКатегории оружия: `sword` `claymore` `axe` `bow` `spear` `firestaff` и др.\nБроня: `mercjacket` `assjacket` `huntjacket` и др."),
+                ("Albion: Крафт", "`/craftcalc tier:8 server:eu`\nЭкспортирует таблицу крафта всех предметов в Google Sheets.\nТребует: `GOOGLE_CREDENTIALS` + `SHEET_ID` в переменных Railway"),
+                ("Albion: Торговля", "`/flipper category:weapon tier:8` — арбитраж между городами\n`/pricewatch action:add item_key:sword tier:8` — слежка за ценой\n`/pricewatch action:list` — список подписок\n`/pricewatch action:remove item_key:1` — удалить"),
+                ("Турниры и статистика", "`/tournament [name] [participants]` — сетка турнира\n`/guildwar [limit]` — топ гильдий по ZvZ\n`/party [p1] [p2] [p3]` — анализ состава статика"),
+            ]
+        },
+        "ai": {
+            "title": "🤖 AI команды",
+            "fields": [
+                ("Бесплатные AI", "Бот использует **Groq** (Llama 3.3 70B) или **Gemini** — оба бесплатные.\nДобавь `GROQ_API_KEY` или `GEMINI_API_KEY` в Railway Variables."),
+                ("⭐ Premium — Текст", "`/ai [question]` — спросить AI что угодно\n`/summarize [count]` — AI резюме последних N сообщений\n`/askalbion [question]` — AI эксперт по Albion Online"),
+                ("⭐ Premium — Развлечения", "`/roast [member]` — AI роаст участника сервера\n`/imagine [prompt] [style]` — генерация изображения\n  стили: `realistic` `anime` `pixel` `oil-painting`\n  Бесплатно через Pollinations.ai — ключ не нужен!"),
+                ("💎 Pro — Albion AI", "`/party` — AI вердикт на состав группы\n`/askalbion` — советы по крафту, PvP, экономике"),
+            ]
+        },
+    }
+
+    if page not in pages:
+        page = "general"
+
+    data = pages[page]
+    e = discord.Embed(title=data["title"], color=color)
+
+    for name, val in data["fields"]:
+        e.add_field(name=name, value=val, inline=False)
+
+    # Навигация
+    nav_pages = {
+        "general": "📖 Основные",
+        "albion": "⚔️ Albion",
+        "games": "🎮 Игры",
+        "security": "🛡️ Безопасность",
+        "pro": "💎 Pro",
+        "ai": "🤖 AI",
+    }
+    nav = " · ".join(
+        f"**[{v}]**" if k == page else f"`/help page:{k}`"
+        for k, v in nav_pages.items()
+    )
+    e.add_field(name="Навигация", value=nav, inline=False)
+    e.set_footer(text=f"Текущий тир: {tier_name} · nexusbot.gg · 56 команд")
+
     await interaction.response.send_message(embed=e)
+
 
 @bot.tree.command(name="ping")
 async def ping(interaction: discord.Interaction):
@@ -2363,27 +2449,44 @@ ITEM_MATERIAL_TYPE = {
     "bag": "fiber",
 }
 
-@bot.tree.command(name="craftcalc", description="Интерактивный калькулятор крафта — открывается в браузере [Pro]")
+@bot.tree.command(name="craftcalc", description="Таблица крафта Albion → Google Sheets [Pro]")
 @app_commands.describe(
     tier="Тир: 6, 7 или 8",
-    server="Сервер: eu / us / asia"
+    server="Сервер: eu / us / asia",
+    tax="Налог рынка: 8 (обычный) или 4 (премиум город)"
 )
-@cooldown(15)
-async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str = "eu"):
+@cooldown(20)
+async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str = "eu", tax: int = 8):
     if await get_tier(interaction.guild_id) < TIER_PRO:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
+
+    if not GOOGLE_CREDS or not SHEET_ID:
+        e = discord.Embed(title="⚙️ Настройка Google Sheets", color=0xFF4444)
+        e.description = (
+            "Для использования `/craftcalc` нужно настроить Google Sheets.\n\n"
+            "**1.** Зайди в [Google Cloud Console](https://console.cloud.google.com)\n"
+            "**2.** Создай Service Account → скачай JSON ключ\n"
+            "**3.** Открой JSON файл, скопируй содержимое\n"
+            "**4.** В Railway Variables добавь:\n"
+            "`GOOGLE_CREDENTIALS` = содержимое JSON одной строкой\n"
+            "`SHEET_ID` = ID таблицы из URL\n\n"
+            "**5.** Дай сервис-аккаунту доступ Editor к таблице"
+        )
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+
     await interaction.response.defer()
 
     if tier not in (6, 7, 8):
         return await interaction.followup.send("❌ Тир: 6, 7 или 8")
+    if tax not in (4, 8):
+        return await interaction.followup.send("❌ Налог: 4 или 8")
 
+    tax_rate = tax / 100
     server_name = ALBION_SERVER_NAMES.get(server, "EU")
     base_url = ALBION_SERVERS.get(server, ALBION_SERVERS["eu"])
     locations = "Black%20Market,Caerleon,Bridgewatch,Fort%20Sterling,Lymhurst,Martlock,Thetford,Brecilien"
 
-    # Список всех предметов для таблицы
     ALL_CALC_ITEMS = [
-        # (display_name, bm_item_key, mat_type)
         ("Меч", "sword", "ore"), ("Палаш", "broadsword", "ore"),
         ("Клеймор", "claymore", "ore"), ("Парные мечи", "dualsword", "ore"),
         ("Боевой топор", "axe", "ore"), ("Большой топор", "greataxe", "ore"),
@@ -2407,388 +2510,187 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
         ("Сумка", "bag", "fiber"),
     ]
 
-    await interaction.followup.send(f"⏳ Загружаю цены для **T{tier}** · {server_name}... (~30 сек)")
-
-    # Загружаем цены материалов
-    mat_types = ["ore", "wood", "fiber", "hide", "rock"]
-    mat_prices = {}
+    mat_names_ru = {"ore": "Руда", "wood": "Дерево", "fiber": "Волокно", "hide": "Кожа"}
     mat_item_ids = {
-        "ore":   f"T{tier}_ORE",
-        "wood":  f"T{tier}_WOOD",
-        "fiber": f"T{tier}_FIBER",
-        "hide":  f"T{tier}_HIDE",
-        "rock":  f"T{tier}_ROCK",
+        "ore": f"T{tier}_ORE", "wood": f"T{tier}_WOOD",
+        "fiber": f"T{tier}_FIBER", "hide": f"T{tier}_HIDE",
     }
-    mat_names_ru = {"ore": "Руда", "wood": "Дерево", "fiber": "Волокно", "hide": "Кожа", "rock": "Камень"}
+    base_count = {6: 8, 7: 10, 8: 12}[tier]
+    ench_mults = [1, 2, 4, 8, 16]
 
+    await interaction.followup.send(f"⏳ Загружаю цены T{tier} · {server_name}... (~30 сек)")
+
+    # ── Загружаем цены материалов ─────────────────────────────
+    mat_prices = {}
     async with aiohttp.ClientSession() as s:
-        for mat in mat_types:
-            url = f"{base_url}/stats/prices/{mat_item_ids[mat]}?locations={locations}"
+        for mat, mat_id in mat_item_ids.items():
+            url = f"{base_url}/stats/prices/{mat_id}?locations={locations}"
             try:
                 async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status != 200: continue
                     data = await r.json()
-                best = 9_999_999_999
-                best_city = ""
+                best = 9_999_999_999; best_city = ""
                 for p in data:
-                    city = p.get("city",""); sell = p.get("sell_price_min",0) or 0
-                    if sell > 0 and city not in ("Black Market","Brecilien"):
+                    city = p.get("city", ""); sell = p.get("sell_price_min", 0) or 0
+                    if sell > 0 and city not in ("Black Market", "Brecilien"):
                         if sell < best: best = sell; best_city = city
                 mat_prices[mat] = {"price": best if best < 9_999_999_999 else 0, "city": best_city}
             except Exception:
                 mat_prices[mat] = {"price": 0, "city": ""}
 
-    # Загружаем цены предметов (базовые, .0 зачаровка)
-    item_data_list = []
+    # ── Загружаем цены всех предметов ─────────────────────────
+    item_rows = []
     async with aiohttp.ClientSession() as s:
         for display, key, mat in ALL_CALC_ITEMS:
             bm_data = BM_ITEMS.get(key)
             if not bm_data: continue
             _, template = list(bm_data.items())[0]
+            mat_price = mat_prices.get(mat, {}).get("price", 0)
+            mat_city = CITY_NAMES_RU.get(mat_prices.get(mat, {}).get("city", ""), "—")
 
-            row = {"name": display, "key": key, "mat": mat, "tiers": []}
             for enchant in range(5):
                 item_id = build_item_id(template, tier, enchant)
+                mult = ench_mults[enchant]
+                mats = base_count * mult
+                cost = mats * mat_price
+
                 url = f"{base_url}/stats/prices/{item_id}?locations={locations}"
+                bm = market = brec = 0
                 try:
                     async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                        if r.status != 200:
-                            row["tiers"].append({"enchant": enchant, "bm": 0, "market": 0, "item_id": item_id})
-                            continue
-                        prices = await r.json()
-                    bm = market = brec = 0
-                    for p in prices:
-                        city = p.get("city",""); sell = p.get("sell_price_min",0) or 0
-                        if city == "Black Market" and sell > 0: bm = max(bm, sell)
-                        elif city == "Brecilien" and sell > 0: brec = sell
-                        elif sell > 0 and city not in ("Black Market","Brecilien"):
-                            market = min(market, sell) if market > 0 else sell
-                    row["tiers"].append({"enchant": enchant, "bm": bm, "market": market, "brec": brec, "item_id": item_id})
+                        if r.status == 200:
+                            prices = await r.json()
+                            for p in prices:
+                                city = p.get("city", ""); sell = p.get("sell_price_min", 0) or 0
+                                if city == "Black Market" and sell > 0: bm = max(bm, sell)
+                                elif city == "Brecilien" and sell > 0: brec = sell
+                                elif sell > 0 and city not in ("Black Market", "Brecilien"):
+                                    market = min(market, sell) if market > 0 else sell
                 except Exception:
-                    row["tiers"].append({"enchant": enchant, "bm": 0, "market": 0, "brec": 0, "item_id": item_id})
-            item_data_list.append(row)
+                    pass
 
-    # Количество материалов
-    mat_counts = {6: 8, 7: 10, 8: 12}
-    base_count = mat_counts.get(tier, 12)
-    ench_mults = [1, 2, 4, 8, 16]
+                tax_val = tax_rate
+                profit_bm   = round(bm   * (1-tax_val) - cost) if bm   > 0 and cost > 0 else ""
+                profit_mkt  = round(market * (1-tax_val) - cost) if market > 0 and cost > 0 else ""
+                profit_brec = round(brec * (1-tax_val) - cost) if brec  > 0 and cost > 0 else ""
+                pct_bm   = round(profit_bm   / cost * 100, 1) if isinstance(profit_bm,   int) and cost > 0 else ""
+                pct_mkt  = round(profit_mkt  / cost * 100, 1) if isinstance(profit_mkt,  int) and cost > 0 else ""
+                pct_brec = round(profit_brec / cost * 100, 1) if isinstance(profit_brec, int) and cost > 0 else ""
 
-    # Генерируем HTML
-    mat_prices_json = {k: v for k, v in mat_prices.items()}
-    item_data_json = item_data_list
+                item_rows.append([
+                    display,
+                    f"T{tier}.{enchant}",
+                    mat_names_ru.get(mat, mat),
+                    mat_city,
+                    mat_price or "",
+                    mats,
+                    cost or "",
+                    bm or "",
+                    profit_bm,
+                    f"{pct_bm}%" if pct_bm != "" else "",
+                    market or "",
+                    profit_mkt,
+                    f"{pct_mkt}%" if pct_mkt != "" else "",
+                    brec or "",
+                    profit_brec,
+                    f"{pct_brec}%" if pct_brec != "" else "",
+                ])
 
-    html = f'''<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Калькулятор крафта — T{tier} · Albion Online</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-:root{{--bg:#0f1117;--surface:#1a1d26;--surface2:#22263a;--border:#2a2f45;--text:#e8ecf8;--muted:#6b7fa3;--green:#1D9E75;--red:#E24B4A;--gold:#f0c040;--blue:#378ADD}}
-body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px}}
-.header{{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}}
-.header h1{{font-size:18px;font-weight:600;color:var(--text)}}
-.header .sub{{font-size:12px;color:var(--muted);margin-top:2px}}
-.controls{{display:flex;gap:12px;flex-wrap:wrap;padding:16px 24px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:60px;z-index:99}}
-.ctrl-group{{display:flex;flex-direction:column;gap:4px;min-width:140px}}
-.ctrl-group label{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}}
-input,select{{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;width:100%}}
-input:focus,select:focus{{outline:none;border-color:var(--blue)}}
-.metrics{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 24px}}
-.metric{{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px}}
-.metric-label{{font-size:11px;color:var(--muted);margin-bottom:4px}}
-.metric-value{{font-size:22px;font-weight:600}}
-.metric-value.pos{{color:var(--green)}}
-.metric-value.neg{{color:var(--red)}}
-.metric-value.neutral{{color:var(--text)}}
-.table-wrap{{padding:0 24px 24px;overflow-x:auto}}
-table{{width:100%;border-collapse:collapse;font-size:13px}}
-thead th{{background:var(--surface);border:1px solid var(--border);padding:9px 12px;text-align:right;font-weight:500;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;position:sticky;top:116px}}
-thead th:first-child{{text-align:left}}
-tbody tr{{border-bottom:1px solid var(--border);transition:background .1s}}
-tbody tr:hover{{background:var(--surface2)}}
-td{{padding:9px 12px;text-align:right;border-right:1px solid var(--border);vertical-align:middle}}
-td:first-child{{text-align:left;font-weight:500;color:var(--text);border-left:1px solid var(--border)}}
-td:last-child{{border-right:1px solid var(--border)}}
-.pos{{color:var(--green);font-weight:600}}
-.neg{{color:var(--red);font-weight:600}}
-.muted{{color:var(--muted)}}
-.badge{{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}}
-.badge-g{{background:rgba(29,158,117,.15);color:var(--green)}}
-.badge-r{{background:rgba(226,75,74,.15);color:var(--red)}}
-.badge-n{{background:var(--surface2);color:var(--muted)}}
-.ench-tabs{{display:flex;gap:4px;margin-bottom:12px;padding:0 24px}}
-.ench-tab{{padding:5px 14px;border-radius:20px;border:1px solid var(--border);cursor:pointer;font-size:12px;color:var(--muted);background:var(--surface);transition:all .15s}}
-.ench-tab.active{{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500}}
-.filter-row{{padding:8px 24px;display:flex;gap:12px;align-items:center}}
-.filter-row input[type=text]{{width:220px}}
-.filter-row select{{width:160px}}
-</style>
-</head>
-<body>
-<div class="header">
-  <div>
-    <div class="h1" style="font-size:18px;font-weight:600">⚔️ Калькулятор крафта — T{tier}</div>
-    <div class="sub">{server_name} · albion-online-data.com · {datetime.datetime.utcnow().strftime("%d.%m.%Y %H:%M")} UTC</div>
-  </div>
-  <div style="font-size:12px;color:var(--muted)">Введи цены материалов ↓ и цены предметов для расчёта</div>
-</div>
+    # ── Google Sheets ─────────────────────────────────────────
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials as GCreds
+        import json as _json
 
-<div class="controls">
-  <div class="ctrl-group">
-    <label>Руда T{tier}</label>
-    <input type="number" id="p-ore" value="{mat_prices.get('ore',{}).get('price',0)}" min="0" step="100" oninput="recalc()">
-  </div>
-  <div class="ctrl-group">
-    <label>Дерево T{tier}</label>
-    <input type="number" id="p-wood" value="{mat_prices.get('wood',{}).get('price',0)}" min="0" step="100" oninput="recalc()">
-  </div>
-  <div class="ctrl-group">
-    <label>Волокно T{tier}</label>
-    <input type="number" id="p-fiber" value="{mat_prices.get('fiber',{}).get('price',0)}" min="0" step="100" oninput="recalc()">
-  </div>
-  <div class="ctrl-group">
-    <label>Кожа T{tier}</label>
-    <input type="number" id="p-hide" value="{mat_prices.get('hide',{}).get('price',0)}" min="0" step="100" oninput="recalc()">
-  </div>
-  <div class="ctrl-group" style="min-width:180px">
-    <label>Налог рынка (%)</label>
-    <input type="number" id="tax" value="8" min="0" max="15" step="0.5" oninput="recalc()">
-  </div>
-  <div class="ctrl-group" style="min-width:180px">
-    <label>Возврат фокуса (%)</label>
-    <input type="number" id="focus" value="0" min="0" max="53" step="1" oninput="recalc()">
-  </div>
-</div>
+        raw = GOOGLE_CREDS.strip()
+        if raw.startswith("{"):
+            creds_data = _json.loads(raw)
+        else:
+            import base64
+            creds_data = _json.loads(base64.b64decode(raw + "==").decode("utf-8"))
 
-<div class="metrics">
-  <div class="metric"><div class="metric-label">Выгодных на ЧР</div><div class="metric-value pos" id="m-pos">—</div></div>
-  <div class="metric"><div class="metric-label">Убыточных на ЧР</div><div class="metric-value neg" id="m-neg">—</div></div>
-  <div class="metric"><div class="metric-label">Лучший профит (ЧР)</div><div class="metric-value pos" id="m-best">—</div></div>
-  <div class="metric"><div class="metric-label">Средний профит (ЧР)</div><div class="metric-value neutral" id="m-avg">—</div></div>
-</div>
+        creds = GCreds.from_service_account_info(
+            creds_data,
+            scopes=["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(SHEET_ID)
 
-<div class="ench-tabs">
-  <div class="ench-tab active" onclick="setEnch(0)">T{tier}.0</div>
-  <div class="ench-tab" onclick="setEnch(1)">T{tier}.1</div>
-  <div class="ench-tab" onclick="setEnch(2)">T{tier}.2</div>
-  <div class="ench-tab" onclick="setEnch(3)">T{tier}.3</div>
-  <div class="ench-tab" onclick="setEnch(4)">T{tier}.4</div>
-</div>
+        tab_name = f"Крафт T{tier} {server.upper()} налог{tax}%"
+        try:
+            ws = sh.worksheet(tab_name)
+            ws.clear()
+        except gspread.WorksheetNotFound:
+            ws = sh.add_worksheet(title=tab_name, rows=300, cols=20)
 
-<div class="filter-row">
-  <input type="text" id="search" placeholder="Поиск предмета..." oninput="renderTable()">
-  <select id="filter-profit" onchange="renderTable()">
-    <option value="all">Все предметы</option>
-    <option value="pos">Только выгодные</option>
-    <option value="neg">Только убыточные</option>
-    <option value="nodata">Нет данных</option>
-  </select>
-  <select id="sort-by" onchange="renderTable()">
-    <option value="profit-bm-desc">Профит ЧР ↓</option>
-    <option value="profit-bm-asc">Профит ЧР ↑</option>
-    <option value="pct-desc">% профит ↓</option>
-    <option value="cost-desc">Себестоимость ↓</option>
-    <option value="name">По названию</option>
-  </select>
-</div>
+        header = [
+            "Предмет", "Тир.Зач", "Материал", "Лучший город мат.",
+            "Цена мат. (1 шт)", "Кол-во мат.", "Себестоимость",
+            "Цена ЧР", "Профит ЧР (−8% налог)", "% профит ЧР",
+            "Цена рынок", "Профит рынок", "% профит рынок",
+            "Цена Бреккилен", "Профит Брек.", "% профит Брек.",
+        ]
+        all_rows = [header] + item_rows
+        ws.update("A1", all_rows)
 
-<div class="table-wrap">
-<table>
-<thead>
-<tr>
-  <th style="text-align:left;min-width:140px">Предмет</th>
-  <th>Материал</th>
-  <th>Кол-во мат.</th>
-  <th>Себестоимость</th>
-  <th>Цена ЧР</th>
-  <th>Профит ЧР</th>
-  <th>% профит ЧР</th>
-  <th>Цена рынок</th>
-  <th>Профит рынок</th>
-  <th>Цена Брек.</th>
-  <th>Профит Брек.</th>
-  <th>Статус</th>
-</tr>
-</thead>
-<tbody id="tbody"></tbody>
-</table>
-</div>
+        # Форматирование шапки
+        ws.format("A1:P1", {
+            "backgroundColor": {"red": 0.1, "green": 0.1, "blue": 0.2},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "horizontalAlignment": "CENTER",
+        })
 
-<script>
-const MAT_NAMES = {{ore:"Руда",wood:"Дерево",fiber:"Волокно",hide:"Кожа",rock:"Камень"}};
-const BASE_COUNT = {base_count};
-const ENCH_MULTS = {ench_mults};
-let currentEnch = 0;
+        # Заморозить шапку
+        ws.freeze(rows=1)
 
-const ITEMS = {json.dumps(item_data_json, ensure_ascii=False)};
+        # Условное форматирование — зелёный если профит > 0, красный если < 0
+        # (через gspread это сложно, поэтому красим вручную топ профитные строки)
+        profit_col_idx = 9  # колонка "% профит ЧР" (I)
+        green_rows = []
+        red_rows = []
+        for i, row in enumerate(item_rows, start=2):
+            pct = row[9]  # % профит ЧР
+            if pct == "": continue
+            try:
+                val = float(str(pct).replace("%",""))
+                if val > 0: green_rows.append(i)
+                elif val < 0: red_rows.append(i)
+            except Exception: pass
 
-function fmt(n) {{
-  if (!n && n !== 0) return "—";
-  return Math.round(n).toLocaleString("ru-RU");
-}}
-function fmtPct(n) {{
-  if (n === null || n === undefined) return "—";
-  return (n >= 0 ? "+" : "") + n.toFixed(1) + "%";
-}}
+        # Красим зелёные строки (топ 20)
+        for row_i in green_rows[:20]:
+            ws.format(f"A{row_i}:P{row_i}", {
+                "backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85}
+            })
+        # Красим красные строки (топ 10 убыточных)
+        for row_i in red_rows[:10]:
+            ws.format(f"A{row_i}:P{row_i}", {
+                "backgroundColor": {"red": 0.95, "green": 0.85, "blue": 0.85}
+            })
 
-function setEnch(e) {{
-  currentEnch = e;
-  document.querySelectorAll(".ench-tab").forEach((t,i) => t.classList.toggle("active", i===e));
-  recalc();
-}}
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+        total = len(item_rows)
+        profitable = len([r for r in item_rows if r[9] and str(r[9]) != "" and float(str(r[9]).replace("%","").replace("","0") or 0) > 0])
 
-function getPrices() {{
-  return {{
-    ore:   +document.getElementById("p-ore").value || 0,
-    wood:  +document.getElementById("p-wood").value || 0,
-    fiber: +document.getElementById("p-fiber").value || 0,
-    hide:  +document.getElementById("p-hide").value || 0,
-    rock:  0,
-  }};
-}}
+        e = discord.Embed(title=f"📊 Таблица крафта T{tier} · {server_name}", color=0x00E5FF)
+        e.add_field(name="Таблица", value=f"[Открыть Google Sheets]({sheet_url})\nВкладка: **{tab_name}**", inline=False)
+        e.add_field(name="Предметов", value=str(total), inline=True)
+        e.add_field(name="Выгодных (ЧР)", value=str(profitable), inline=True)
+        e.add_field(name="Зачаровки", value="T.0 → T.4 (все)", inline=True)
+        mat_lines = "\n".join(
+            f"**{mat_names_ru[m]}**: {mat_prices.get(m,{}).get('price',0):,} ({CITY_NAMES_RU.get(mat_prices.get(m,{}).get('city',''), '—')})"
+            for m in ["ore", "wood", "fiber", "hide"]
+        )
+        e.add_field(name="📦 Цены материалов", value=mat_lines, inline=False)
+        e.set_footer(text=f"Налог {tax}% учтён · albion-online-data.com · {datetime.datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC")
+        await interaction.channel.send(embed=e)
 
-function calcRow(item, enchant) {{
-  const prices = getPrices();
-  const tax = +document.getElementById("tax").value / 100;
-  const focus = +document.getElementById("focus").value / 100;
-  const matPrice = prices[item.mat] || 0;
-  const mult = ENCH_MULTS[enchant] || 1;
-  const mats = Math.round(BASE_COUNT * mult * (1 - focus));
-  const cost = mats * matPrice;
-
-  const td = item.tiers[enchant];
-  if (!td) return {{mats, cost, bm:0, market:0, brec:0, costOk: cost > 0}};
-
-  const bm = td.bm || 0;
-  const market = td.market || 0;
-  const brec = td.brec || 0;
-
-  const profitBm = bm > 0 && cost > 0 ? bm * (1-tax) - cost : null;
-  const profitMkt = market > 0 && cost > 0 ? market * (1-tax) - cost : null;
-  const profitBrec = brec > 0 && cost > 0 ? brec * (1-tax) - cost : null;
-  const pctBm = profitBm !== null && cost > 0 ? profitBm / cost * 100 : null;
-
-  return {{mats, cost, bm, market, brec, profitBm, profitMkt, profitBrec, pctBm, costOk: cost > 0}};
-}}
-
-function recalc() {{
-  renderTable();
-  updateMetrics();
-}}
-
-function updateMetrics() {{
-  const rows = ITEMS.map(item => calcRow(item, currentEnch));
-  const withBm = rows.filter(r => r.profitBm !== null);
-  const pos = withBm.filter(r => r.profitBm > 0).length;
-  const neg = withBm.filter(r => r.profitBm <= 0).length;
-  const best = withBm.length ? Math.max(...withBm.map(r => r.profitBm)) : 0;
-  const avg = withBm.length ? withBm.reduce((a,r) => a + r.profitBm, 0) / withBm.length : 0;
-  document.getElementById("m-pos").textContent = pos || "—";
-  document.getElementById("m-neg").textContent = neg || "—";
-  document.getElementById("m-best").textContent = best ? fmt(best) : "—";
-  document.getElementById("m-avg").textContent = avg ? fmt(avg) : "—";
-}}
-
-function renderTable() {{
-  const search = document.getElementById("search").value.toLowerCase();
-  const filterProfit = document.getElementById("filter-profit").value;
-  const sortBy = document.getElementById("sort-by").value;
-
-  let rows = ITEMS.map(item => ({{item, calc: calcRow(item, currentEnch)}}));
-
-  if (search) rows = rows.filter(r => r.item.name.toLowerCase().includes(search));
-  if (filterProfit === "pos") rows = rows.filter(r => r.calc.profitBm !== null && r.calc.profitBm > 0);
-  if (filterProfit === "neg") rows = rows.filter(r => r.calc.profitBm !== null && r.calc.profitBm <= 0);
-  if (filterProfit === "nodata") rows = rows.filter(r => r.calc.profitBm === null);
-
-  rows.sort((a,b) => {{
-    if (sortBy === "profit-bm-desc") return (b.calc.profitBm||−Infinity) - (a.calc.profitBm||−Infinity);
-    if (sortBy === "profit-bm-asc") return (a.calc.profitBm||Infinity) - (b.calc.profitBm||Infinity);
-    if (sortBy === "pct-desc") return (b.calc.pctBm||-Infinity) - (a.calc.pctBm||-Infinity);
-    if (sortBy === "cost-desc") return b.calc.cost - a.calc.cost;
-    return a.item.name.localeCompare(b.item.name, "ru");
-  }});
-
-  const tbody = document.getElementById("tbody");
-  tbody.innerHTML = rows.map(({{item, calc}}) => {{
-    const {{mats, cost, bm, market, brec, profitBm, profitMkt, profitBrec, pctBm}} = calc;
-    const costStr = cost > 0 ? fmt(cost) : '<span class="muted">нет цены</span>';
-    const bmStr = bm > 0 ? fmt(bm) : '<span class="muted">—</span>';
-    const mktStr = market > 0 ? fmt(market) : '<span class="muted">—</span>';
-    const brecStr = brec > 0 ? fmt(brec) : '<span class="muted">—</span>';
-
-    const pBmStr = profitBm !== null
-      ? `<span class="${{profitBm>=0?"pos":"neg"}}">${{fmt(profitBm)}}</span>`
-      : '<span class="muted">—</span>';
-    const pMktStr = profitMkt !== null
-      ? `<span class="${{profitMkt>=0?"pos":"neg"}}">${{fmt(profitMkt)}}</span>`
-      : '<span class="muted">—</span>';
-    const pBrecStr = profitBrec !== null
-      ? `<span class="${{profitBrec>=0?"pos":"neg"}}">${{fmt(profitBrec)}}</span>`
-      : '<span class="muted">—</span>';
-    const pctStr = pctBm !== null ? `<span class="${{pctBm>=0?"pos":"neg"}}">${{fmtPct(pctBm)}}</span>` : '<span class="muted">—</span>';
-
-    let badge = '<span class="badge badge-n">нет данных</span>';
-    if (profitBm !== null) {{
-      badge = profitBm > 0
-        ? `<span class="badge badge-g">+${{fmtPct(pctBm)}}</span>`
-        : `<span class="badge badge-r">${{fmtPct(pctBm)}}</span>`;
-    }}
-
-    return `<tr>
-      <td>${{item.name}}</td>
-      <td>${{MAT_NAMES[item.mat]||item.mat}}</td>
-      <td>${{mats}}</td>
-      <td>${{costStr}}</td>
-      <td>${{bmStr}}</td>
-      <td>${{pBmStr}}</td>
-      <td>${{pctStr}}</td>
-      <td>${{mktStr}}</td>
-      <td>${{pMktStr}}</td>
-      <td>${{brecStr}}</td>
-      <td>${{pBrecStr}}</td>
-      <td>${{badge}}</td>
-    </tr>`;
-  }}).join("");
-}}
-
-recalc();
-</script>
-</body>
-</html>'''
-
-    # Отправляем HTML как файл в Discord
-    import io
-    file_bytes = html.encode("utf-8")
-    file = discord.File(fp=io.BytesIO(file_bytes), filename=f"craftcalc_T{tier}_{server}.html")
-
-    e = discord.Embed(
-        title=f"🔨 Калькулятор крафта T{tier} · {server_name}",
-        description=(
-            f"Скачай файл и открой в браузере — полностью интерактивная таблица.\n\n"
-            f"**Что умеет:**\n"
-            f"• Все предметы T{tier}.0–T{tier}.4 в одной таблице\n"
-            f"• Меняй цены материалов → профит пересчитывается мгновенно\n"
-            f"• Налог рынка и возврат фокуса учитываются\n"
-            f"• Фильтр по выгодным/убыточным предметам\n"
-            f"• Сортировка по профиту, % профиту, себестоимости\n"
-            f"• Цены ЧР, обычного рынка и Бреккилена"
-        ),
-        color=0xFFD700
-    )
-    e.add_field(
-        name="📦 Загруженные цены материалов",
-        value="\n".join(
-            f"**{mat_names_ru[m]}**: {mat_prices.get(m,{}).get('price',0):,} "
-            f"({CITY_NAMES_RU.get(mat_prices.get(m,{}).get('city',''),mat_prices.get(m,{}).get('city','—'))})"
-            for m in ["ore","wood","fiber","hide"]
-        ),
-        inline=False
-    )
-    e.set_footer(text=f"albion-online-data.com · {datetime.datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC")
-    await interaction.channel.send(embed=e, file=file)
+    except ImportError:
+        await interaction.channel.send("❌ Установи: `pip install gspread google-auth`")
+    except _json.JSONDecodeError as ex:
+        await interaction.channel.send(f"❌ Ошибка JSON в GOOGLE_CREDENTIALS: `{ex}`")
+    except Exception as ex:
+        await interaction.channel.send(f"❌ Ошибка Google Sheets: `{ex}`")
 
 
 
