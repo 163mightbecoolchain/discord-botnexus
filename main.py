@@ -119,6 +119,33 @@ async def db_init():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
                 member_id INTEGER, member_name TEXT, joined_at TEXT);
+            CREATE TABLE IF NOT EXISTS birthdays (
+                guild_id INTEGER, user_id INTEGER, birthday TEXT,
+                PRIMARY KEY (guild_id, user_id));
+            CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL, channel_id INTEGER, status TEXT DEFAULT 'open',
+                created_at TEXT);
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL, text TEXT, votes_up INTEGER DEFAULT 0,
+                votes_down INTEGER DEFAULT 0, message_id INTEGER, created_at TEXT);
+            CREATE TABLE IF NOT EXISTS starboard (
+                guild_id INTEGER, message_id INTEGER, starboard_msg_id INTEGER,
+                PRIMARY KEY (guild_id, message_id));
+            CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id INTEGER PRIMARY KEY,
+                starboard_channel INTEGER DEFAULT 0,
+                starboard_threshold INTEGER DEFAULT 3,
+                suggestion_channel INTEGER DEFAULT 0,
+                ticket_category INTEGER DEFAULT 0,
+                birthday_channel INTEGER DEFAULT 0,
+                lockdown INTEGER DEFAULT 0,
+                price_watch TEXT DEFAULT '{}');
+            CREATE TABLE IF NOT EXISTS price_watch (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL, item_id TEXT, threshold_pct REAL DEFAULT 5.0,
+                last_price INTEGER DEFAULT 0, created_at TEXT);
         """)
         await db.commit()
 
@@ -1804,9 +1831,925 @@ async def tournament(interaction: discord.Interaction, name: str, participants: 
     e.set_footer(text=f"Создал {interaction.user.display_name} · NexusBot Pro")
     await interaction.response.send_message(embed=e)
 
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  RUN
+#  GUILD SETTINGS HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def get_guild_settings(gid: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT * FROM guild_settings WHERE guild_id=?", (gid,)) as c:
+            row = await c.fetchone()
+            if not row:
+                return {"guild_id": gid, "starboard_channel": 0, "starboard_threshold": 3,
+                        "suggestion_channel": 0, "ticket_category": 0, "birthday_channel": 0,
+                        "lockdown": 0, "price_watch": "{}"}
+            cols = [d[0] for d in c.description]
+            return dict(zip(cols, row))
+
+async def set_guild_setting(gid: int, key: str, value):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"""
+            INSERT INTO guild_settings (guild_id, {key}) VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET {key}=excluded.{key}
+        """, (gid, value))
+        await db.commit()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  🔒 SECURITY EXTRA: LOCKDOWN / SLOWMODE / AUTOBAN / REPORT
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="lockdown", description="Режим локдауна — запрет входа новых участников [Premium]")
+@app_commands.describe(action="on / off", min_age="Минимальный возраст аккаунта в днях (по умолчанию 7)")
+async def lockdown(interaction: discord.Interaction, action: str = "on", min_age: int = 7):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
+    enabled = action.lower() in ("on", "вкл", "yes", "1")
+    await set_guild_setting(interaction.guild_id, "lockdown", 1 if enabled else 0)
+    if enabled:
+        e = discord.Embed(title="🔒 ЛОКДАУН ВКЛЮЧЁН", color=0xFF0000)
+        e.add_field(name="Статус", value="Новые участники с аккаунтом младше **{} дней** будут автоматически кикнуты".format(min_age), inline=False)
+        e.add_field(name="Выключить", value="`/lockdown action:off`", inline=False)
+        # Store min_age in settings
+        _, settings = await get_security(interaction.guild_id)
+        settings["lockdown_min_age"] = min_age
+        log_ch_id, _ = await get_security(interaction.guild_id)
+        await save_security(interaction.guild_id, log_ch_id, settings)
+    else:
+        e = discord.Embed(title="🔓 Локдаун выключен", color=0x00FF9D)
+        e.description = "Новые участники снова могут заходить свободно."
+    await interaction.response.send_message(embed=e)
+
+@bot.tree.command(name="slowmode", description="Установить slow mode в канале [Premium]")
+@app_commands.describe(seconds="Задержка в секундах (0 = выключить, макс 21600)")
+async def slowmode(interaction: discord.Interaction, seconds: int = 0):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    if not interaction.user.guild_permissions.manage_channels:
+        return await interaction.response.send_message("❌ Нужно Manage Channels.", ephemeral=True)
+    seconds = max(0, min(seconds, 21600))
+    await interaction.channel.edit(slowmode_delay=seconds)
+    if seconds == 0:
+        await interaction.response.send_message("✅ Slow mode выключен.")
+    else:
+        await interaction.response.send_message(f"✅ Slow mode: **{seconds} сек** между сообщениями.")
+
+@bot.tree.command(name="report", description="Пожаловаться на сообщение модераторам [Premium]")
+@app_commands.describe(message_id="ID сообщения", reason="Причина жалобы")
+async def report(interaction: discord.Interaction, message_id: str, reason: str = "Не указана"):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    ch = await get_log_ch(interaction.guild)
+    if not ch:
+        return await interaction.response.send_message("❌ Канал логов не настроен. Используй `/security setlog`", ephemeral=True)
+    try:
+        msg_id = int(message_id)
+        msg = await interaction.channel.fetch_message(msg_id)
+        e = discord.Embed(title="🚨 Жалоба на сообщение", color=0xFF4444, timestamp=datetime.datetime.utcnow())
+        e.add_field(name="От кого", value=interaction.user.mention, inline=True)
+        e.add_field(name="Автор сообщения", value=msg.author.mention, inline=True)
+        e.add_field(name="Канал", value=interaction.channel.mention, inline=True)
+        e.add_field(name="Причина", value=reason, inline=False)
+        e.add_field(name="Содержимое", value=msg.content[:500] or "*(вложение/эмбед)*", inline=False)
+        e.add_field(name="Ссылка", value=f"[Перейти]({msg.jump_url})", inline=True)
+        await ch.send(embed=e)
+        await interaction.response.send_message("✅ Жалоба отправлена модераторам.", ephemeral=True)
+    except (ValueError, discord.NotFound):
+        await interaction.response.send_message("❌ Сообщение не найдено. Убедись что ID правильный.", ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  🎂 BIRTHDAYS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="birthday", description="Зарегистрировать день рождения")
+@app_commands.describe(action="set / check / setchannel", date="Дата в формате ДД.ММ (напр. 25.12)", member="Участник для /birthday check")
+async def birthday(interaction: discord.Interaction, action: str = "set", date: str = "", member: discord.Member = None):
+    if action.lower() == "setchannel":
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ Нужно Manage Server.", ephemeral=True)
+        await set_guild_setting(interaction.guild_id, "birthday_channel", interaction.channel_id)
+        return await interaction.response.send_message(f"✅ Канал поздравлений → {interaction.channel.mention}")
+
+    if action.lower() == "check":
+        target = member or interaction.user
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT birthday FROM birthdays WHERE guild_id=? AND user_id=?",
+                                  (interaction.guild_id, target.id)) as c:
+                row = await c.fetchone()
+        if row:
+            await interaction.response.send_message(f"🎂 День рождения **{target.display_name}**: **{row[0]}**")
+        else:
+            await interaction.response.send_message(f"❓ У **{target.display_name}** не указан день рождения.")
+        return
+
+    # set
+    if not date:
+        return await interaction.response.send_message("❌ Укажи дату: `/birthday date:25.12`", ephemeral=True)
+    try:
+        parts = date.strip().split(".")
+        if len(parts) != 2: raise ValueError
+        day, month = int(parts[0]), int(parts[1])
+        if not (1 <= day <= 31 and 1 <= month <= 12): raise ValueError
+        formatted = f"{day:02d}.{month:02d}"
+    except ValueError:
+        return await interaction.response.send_message("❌ Формат даты: **ДД.ММ** (напр. `25.12`)", ephemeral=True)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""INSERT INTO birthdays (guild_id, user_id, birthday) VALUES (?,?,?)
+            ON CONFLICT(guild_id,user_id) DO UPDATE SET birthday=excluded.birthday""",
+            (interaction.guild_id, interaction.user.id, formatted))
+        await db.commit()
+    await interaction.response.send_message(f"🎂 День рождения сохранён: **{formatted}**", ephemeral=True)
+
+async def birthday_check_loop():
+    """Фоновая задача — проверяет дни рождения каждый день в 09:00 UTC."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = datetime.datetime.utcnow()
+        if now.hour == 9 and now.minute < 5:
+            today = f"{now.day:02d}.{now.month:02d}"
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT guild_id, user_id FROM birthdays WHERE birthday=?", (today,)
+                ) as c:
+                    rows = await c.fetchall()
+            for gid, uid in rows:
+                settings = await get_guild_settings(gid)
+                ch_id = settings.get("birthday_channel", 0)
+                guild = bot.get_guild(gid)
+                if not guild: continue
+                ch = guild.get_channel(ch_id) or discord.utils.get(guild.text_channels, name="general")
+                if not ch: continue
+                member = guild.get_member(uid)
+                if not member: continue
+                e = discord.Embed(title="🎂 День рождения!", color=0xFF69B4)
+                e.description = f"Сегодня день рождения у {member.mention}! 🎉\nПоздравьте его/её!"
+                e.set_thumbnail(url=member.display_avatar.url)
+                try:
+                    await ch.send(embed=e)
+                except Exception:
+                    pass
+        await asyncio.sleep(300)  # проверяем каждые 5 минут
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  🎫 TICKET SYSTEM
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="ticket", description="Система тикетов [Premium]")
+@app_commands.describe(action="open / close / setup", reason="Причина обращения")
+async def ticket(interaction: discord.Interaction, action: str = "open", reason: str = "Обращение в поддержку"):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+
+    if action.lower() == "setup":
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
+        # Создаём категорию для тикетов
+        cat = await interaction.guild.create_category("🎫 Tickets")
+        await set_guild_setting(interaction.guild_id, "ticket_category", cat.id)
+        e = discord.Embed(title="✅ Тикеты настроены", color=0x00E5FF)
+        e.add_field(name="Категория", value=cat.name, inline=True)
+        e.add_field(name="Использование", value="Участники могут открывать тикеты: `/ticket`", inline=False)
+        return await interaction.response.send_message(embed=e)
+
+    if action.lower() == "close":
+        # Закрываем тикет (удаляем канал)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT id FROM tickets WHERE guild_id=? AND channel_id=? AND status='open'",
+                (interaction.guild_id, interaction.channel_id)
+            ) as c:
+                row = await c.fetchone()
+        if not row:
+            return await interaction.response.send_message("❌ Это не тикет-канал.", ephemeral=True)
+        await interaction.response.send_message("🔒 Тикет закрывается...")
+        await asyncio.sleep(3)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (interaction.channel_id,))
+            await db.commit()
+        await interaction.channel.delete()
+        return
+
+    # open — создаём новый тикет
+    settings = await get_guild_settings(interaction.guild_id)
+    cat_id = settings.get("ticket_category", 0)
+    category = interaction.guild.get_channel(cat_id) if cat_id else None
+
+    # Проверяем нет ли уже открытого тикета
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'",
+            (interaction.guild_id, interaction.user.id)
+        ) as c:
+            existing = await c.fetchone()
+
+    if existing:
+        ch = interaction.guild.get_channel(existing[0])
+        return await interaction.response.send_message(
+            f"❌ У тебя уже есть открытый тикет: {ch.mention if ch else 'канал удалён'}",
+            ephemeral=True
+        )
+
+    # Создаём канал тикета
+    overwrites = {
+        interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        interaction.guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+    }
+    # Даём доступ модераторам
+    for role in interaction.guild.roles:
+        if role.permissions.manage_messages:
+            overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+    ch_name = f"ticket-{interaction.user.name[:15].lower().replace(' ', '-')}"
+    try:
+        ticket_ch = await interaction.guild.create_text_channel(
+            ch_name, category=category, overwrites=overwrites
+        )
+    except Exception as ex:
+        return await interaction.response.send_message(f"❌ Не удалось создать канал: {ex}", ephemeral=True)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO tickets (guild_id,user_id,channel_id,status,created_at) VALUES (?,?,?,?,?)",
+            (interaction.guild_id, interaction.user.id, ticket_ch.id, "open", datetime.datetime.utcnow().isoformat())
+        )
+        await db.commit()
+
+    e = discord.Embed(title="🎫 Тикет открыт", color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+    e.add_field(name="Участник", value=interaction.user.mention, inline=True)
+    e.add_field(name="Причина", value=reason, inline=True)
+    e.add_field(name="Закрыть", value="`/ticket action:close`", inline=False)
+    e.set_footer(text="Модераторы скоро ответят")
+    await ticket_ch.send(embed=e)
+    await interaction.response.send_message(f"✅ Тикет создан: {ticket_ch.mention}", ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  💡 SUGGESTIONS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="suggestion", description="Система предложений")
+@app_commands.describe(action="submit / top / setchannel", text="Текст предложения")
+async def suggestion(interaction: discord.Interaction, action: str = "submit", text: str = ""):
+    if action.lower() == "setchannel":
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message("❌ Нужно Manage Server.", ephemeral=True)
+        await set_guild_setting(interaction.guild_id, "suggestion_channel", interaction.channel_id)
+        return await interaction.response.send_message(f"✅ Канал предложений → {interaction.channel.mention}")
+
+    if action.lower() == "top":
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT id, text, votes_up, votes_down, user_id FROM suggestions WHERE guild_id=? ORDER BY votes_up DESC LIMIT 5",
+                (interaction.guild_id,)
+            ) as c:
+                rows = await c.fetchall()
+        e = discord.Embed(title="💡 Топ предложений", color=0x00E5FF)
+        if not rows:
+            e.description = "Пока нет предложений. Добавь первое: `/suggestion text:...`"
+        for i, (sid, text_s, up, down, uid) in enumerate(rows):
+            user = interaction.guild.get_member(uid)
+            e.add_field(
+                name=f"#{sid} · 👍 {up} 👎 {down}",
+                value=f"{text_s[:200]}\n*— {user.display_name if user else 'неизвестно'}*",
+                inline=False
+            )
+        return await interaction.response.send_message(embed=e)
+
+    # submit
+    if not text:
+        return await interaction.response.send_message("❌ Укажи текст: `/suggestion text:Моя идея`", ephemeral=True)
+
+    settings = await get_guild_settings(interaction.guild_id)
+    ch_id = settings.get("suggestion_channel", 0)
+    ch = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
+
+    e = discord.Embed(title="💡 Предложение", description=text, color=0x7C3AED, timestamp=datetime.datetime.utcnow())
+    e.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    e.add_field(name="Статус", value="⏳ На рассмотрении", inline=True)
+    e.set_footer(text="👍 — за  |  👎 — против")
+
+    msg = await ch.send(embed=e)
+    await msg.add_reaction("👍")
+    await msg.add_reaction("👎")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO suggestions (guild_id,user_id,text,message_id,created_at) VALUES (?,?,?,?,?)",
+            (interaction.guild_id, interaction.user.id, text, msg.id, datetime.datetime.utcnow().isoformat())
+        )
+        await db.commit()
+
+    await interaction.response.send_message(f"✅ Предложение отправлено в {ch.mention}!", ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ⭐ STARBOARD
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="starboard", description="Настроить starboard [Premium]")
+@app_commands.describe(channel="Канал для starboard", threshold="Количество ⭐ для попадания (по умолч. 3)")
+async def starboard_setup(interaction: discord.Interaction, channel: discord.TextChannel, threshold: int = 3):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно Manage Server.", ephemeral=True)
+    await set_guild_setting(interaction.guild_id, "starboard_channel", channel.id)
+    await set_guild_setting(interaction.guild_id, "starboard_threshold", threshold)
+    await interaction.response.send_message(
+        f"⭐ Starboard настроен → {channel.mention} · порог: **{threshold}** звёзд"
+    )
+
+@bot.event
+async def on_reaction_add(reaction, user):
+    if user.bot or not reaction.message.guild: return
+    gid = reaction.message.guild.id
+
+    # Starboard logic
+    if str(reaction.emoji) == "⭐" and await get_tier(gid) >= TIER_PREMIUM:
+        settings = await get_guild_settings(gid)
+        sb_ch_id   = settings.get("starboard_channel", 0)
+        threshold  = settings.get("starboard_threshold", 3)
+        if sb_ch_id and reaction.count >= threshold:
+            sb_ch = reaction.message.guild.get_channel(sb_ch_id)
+            if not sb_ch: return
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT starboard_msg_id FROM starboard WHERE guild_id=? AND message_id=?",
+                    (gid, reaction.message.id)
+                ) as c:
+                    existing = await c.fetchone()
+            if existing: return  # уже добавлено
+            msg = reaction.message
+            e = discord.Embed(description=msg.content or "*(вложение)*", color=0xFFD700, timestamp=msg.created_at)
+            e.set_author(name=msg.author.display_name, icon_url=msg.author.display_avatar.url)
+            e.add_field(name="Источник", value=f"[Перейти]({msg.jump_url}) · {msg.channel.mention}", inline=False)
+            if msg.attachments:
+                e.set_image(url=msg.attachments[0].url)
+            sb_msg = await sb_ch.send(content=f"⭐ **{reaction.count}** · {msg.channel.mention}", embed=e)
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    "INSERT INTO starboard (guild_id, message_id, starboard_msg_id) VALUES (?,?,?)",
+                    (gid, msg.id, sb_msg.id)
+                )
+                await db.commit()
+
+    # Security reaction log (из существующего кода)
+    if not reaction.message.guild: return
+    ch = await sec_check(reaction.message.guild, "reactions")
+    if not ch: return
+    e = discord.Embed(title="😀 Реакция", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
+    e.add_field(name="Пользователь", value=user.mention, inline=True)
+    e.add_field(name="Реакция", value=str(reaction.emoji), inline=True)
+    e.add_field(name="Сообщение", value=f"[Перейти]({reaction.message.jump_url})", inline=True)
+    await ch.send(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  📊 SERVER STATS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_msg_activity: dict = {}  # {guild_id: {hour: count}}
+
+@bot.event
+async def on_message_for_stats(message):
+    """Отдельный счётчик активности по часам."""
+    if message.author.bot or not message.guild: return
+    gid = message.guild.id
+    hour = datetime.datetime.utcnow().hour
+    _msg_activity.setdefault(gid, {})
+    _msg_activity[gid][hour] = _msg_activity[gid].get(hour, 0) + 1
+
+@bot.tree.command(name="serverstats", description="Статистика активности сервера [Premium]")
+async def serverstats(interaction: discord.Interaction):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    await interaction.response.defer()
+    g = interaction.guild
+    gid = g.id
+
+    # Считаем онлайн
+    online = sum(1 for m in g.members if m.status != discord.Status.offline) if hasattr(g.members[0], 'status') else "N/A"
+    bots   = sum(1 for m in g.members if m.bot)
+    humans = g.member_count - bots
+
+    # XP топ
+    rows = await get_leaderboard(gid, 3)
+
+    # Активность по часам
+    activity = _msg_activity.get(gid, {})
+    if activity:
+        peak_hour = max(activity, key=activity.get)
+        peak_msgs = activity[peak_hour]
+        activity_str = f"Пик: **{peak_hour}:00 UTC** ({peak_msgs} сообщений)\n"
+        activity_str += " ".join(
+            f"`{h}:{'█' * min(activity.get(h,0)//5+1, 5)}`"
+            for h in range(0, 24, 4)
+        )
+    else:
+        activity_str = "Нет данных за текущую сессию"
+
+    e = discord.Embed(title=f"📊 Статистика: {g.name}", color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+    if g.icon: e.set_thumbnail(url=g.icon.url)
+    e.add_field(name="👥 Участников", value=f"**{g.member_count}**\n{humans} людей · {bots} ботов", inline=True)
+    e.add_field(name="📁 Каналов", value=f"**{len(g.channels)}**\n{len(g.text_channels)} текст · {len(g.voice_channels)} голос", inline=True)
+    e.add_field(name="🎭 Ролей", value=str(len(g.roles)), inline=True)
+    e.add_field(name="📅 Создан", value=g.created_at.strftime("%d.%m.%Y"), inline=True)
+    e.add_field(name="💎 Буст", value=f"Уровень {g.premium_tier} · {g.premium_subscription_count} бустов", inline=True)
+
+    if rows:
+        top_lines = []
+        for i, (uid, xp) in enumerate(rows):
+            u = g.get_member(uid)
+            top_lines.append(f"{['🥇','🥈','🥉'][i]} {u.display_name if u else uid} — {xp} XP")
+        e.add_field(name="🏆 Топ активных", value="\n".join(top_lines), inline=False)
+
+    e.add_field(name="📈 Активность (сегодня)", value=activity_str, inline=False)
+    await interaction.followup.send(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  🖼️ AI IMAGE GENERATION (Pollinations.ai — бесплатно)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="imagine", description="Генерация изображения по описанию [Premium]")
+@app_commands.describe(prompt="Описание изображения на английском", style="realistic / anime / pixel / oil-painting")
+@cooldown(15)
+async def imagine(interaction: discord.Interaction, prompt: str, style: str = "realistic"):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    await interaction.response.defer()
+
+    styles = {
+        "realistic": "photorealistic, high quality, 8k",
+        "anime": "anime style, manga, illustration",
+        "pixel": "pixel art, 16-bit, retro game",
+        "oil-painting": "oil painting, classical art, detailed brushwork"
+    }
+    style_prompt = styles.get(style.lower(), styles["realistic"])
+    full_prompt = f"{prompt}, {style_prompt}"
+    encoded = full_prompt.replace(" ", "%20").replace(",", "%2C")
+
+    # Pollinations.ai — полностью бесплатный API генерации изображений
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&nologo=true"
+
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=60)) as r:
+                if r.status != 200:
+                    return await interaction.followup.send(f"❌ Ошибка генерации (HTTP {r.status})")
+                img_data = await r.read()
+
+        file = discord.File(
+            fp=__import__("io").BytesIO(img_data),
+            filename="generated.png"
+        )
+        e = discord.Embed(title="🎨 Сгенерированное изображение", color=0x7C3AED)
+        e.add_field(name="Запрос", value=prompt[:200], inline=False)
+        e.add_field(name="Стиль", value=style, inline=True)
+        e.set_footer(text=f"Запросил: {interaction.user.display_name} · Pollinations.ai (free)")
+        e.set_image(url="attachment://generated.png")
+        await interaction.followup.send(embed=e, file=file)
+    except asyncio.TimeoutError:
+        await interaction.followup.send("❌ Таймаут генерации (>60 сек). Попробуй более простой запрос.")
+    except Exception as ex:
+        await interaction.followup.send(f"❌ Ошибка: {ex}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ⚔️ ALBION: CRAFT CALCULATOR
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Коэффициенты материалов для крафта (упрощённые, стандартные)
+CRAFT_MATERIALS = {
+    6: {"ore": 16, "wood": 16, "fiber": 16, "hide": 16, "rock": 16},
+    7: {"ore": 20, "wood": 20, "fiber": 20, "hide": 20, "rock": 20},
+    8: {"ore": 24, "wood": 24, "fiber": 24, "hide": 24, "rock": 24},
+}
+MATERIAL_ITEMS = {
+    6: {"ore": "T6_ORE", "wood": "T6_WOOD", "fiber": "T6_FIBER", "hide": "T6_HIDE", "rock": "T6_ROCK"},
+    7: {"ore": "T7_ORE", "wood": "T7_WOOD", "fiber": "T7_FIBER", "hide": "T7_HIDE", "rock": "T7_ROCK"},
+    8: {"ore": "T8_ORE", "wood": "T8_WOOD", "fiber": "T8_FIBER", "hide": "T8_HIDE", "rock": "T8_ROCK"},
+}
+ITEM_MATERIAL_TYPE = {
+    "sword": "ore", "claymore": "ore", "axe": "ore", "mace": "ore",
+    "hammer": "ore", "crossbow": "ore", "shield": "ore", "spear": "ore",
+    "bow": "wood", "quarterstaff": "wood", "naturestaff": "wood",
+    "firestaff": "wood", "holystaff": "wood", "torch": "wood",
+    "mercjacket": "ore", "mercboots": "ore", "merchood": "ore",
+    "assjacket": "hide", "assboots": "hide", "asshood": "hide",
+    "huntjacket": "fiber", "huntboots": "fiber", "hunthood": "fiber",
+    "bag": "fiber",
+}
+
+@bot.tree.command(name="craftcalc", description="Калькулятор крафта Albion [Pro]")
+@app_commands.describe(
+    item="Ключ предмета (напр. sword, bow, mercjacket)",
+    tier="Тир: 6, 7 или 8",
+    enchant="Зачаровка: 0-4",
+    server="Сервер: eu / us / asia"
+)
+@cooldown(10)
+async def craftcalc(interaction: discord.Interaction, item: str, tier: int = 8, enchant: int = 0, server: str = "eu"):
+    if await get_tier(interaction.guild_id) < TIER_PRO:
+        return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
+    await interaction.response.defer()
+
+    if tier not in (6, 7, 8) or not (0 <= enchant <= 4):
+        return await interaction.followup.send("❌ Тир: 6-8, зачаровка: 0-4")
+
+    item_data = BM_ITEMS.get(item.lower())
+    if not item_data:
+        return await interaction.followup.send(f"❌ Предмет `{item}` не найден. Используй ключи из `/blackmarket`")
+
+    display, template = list(item_data.items())[0]
+    item_id = build_item_id(template, tier, enchant)
+    mat_type = ITEM_MATERIAL_TYPE.get(item.lower(), "ore")
+    mat_id = MATERIAL_ITEMS[tier][mat_type]
+    mat_count = CRAFT_MATERIALS[tier][mat_type]
+    base_url = ALBION_SERVERS.get(server, ALBION_SERVERS["eu"])
+    locations = "Black%20Market,Caerleon,Bridgewatch,Fort%20Sterling,Lymhurst,Martlock,Thetford"
+
+    try:
+        async with aiohttp.ClientSession() as s:
+            # Цена готового предмета
+            async with s.get(f"{base_url}/stats/prices/{item_id}?locations={locations}",
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+                item_prices = await r.json() if r.status == 200 else []
+            # Цена материала
+            async with s.get(f"{base_url}/stats/prices/{mat_id}?locations={locations}",
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+                mat_prices = await r.json() if r.status == 200 else []
+    except Exception as ex:
+        return await interaction.followup.send(f"❌ Ошибка API: {ex}")
+
+    # Парсим цены
+    item_bm = item_sell_min = 0
+    mat_sell_min = 9_999_999_999
+    mat_best_city = None
+
+    for p in item_prices:
+        city = p.get("city", ""); sell = p.get("sell_price_min", 0) or 0
+        if city == "Black Market" and sell > 0: item_bm = max(item_bm, sell)
+        elif sell > 0 and city != "Black Market": item_sell_min = min(item_sell_min, sell) if item_sell_min > 0 else sell
+
+    for p in mat_prices:
+        city = p.get("city", ""); sell = p.get("sell_price_min", 0) or 0
+        if sell > 0 and city not in ("Black Market", "Brecilien"):
+            if sell < mat_sell_min:
+                mat_sell_min = sell
+                mat_best_city = city
+
+    if mat_sell_min == 9_999_999_999: mat_sell_min = 0
+
+    craft_cost = mat_sell_min * mat_count
+    profit_bm = item_bm - craft_cost if item_bm > 0 and craft_cost > 0 else 0
+    profit_sell = item_sell_min - craft_cost if item_sell_min > 0 and craft_cost > 0 else 0
+    margin_bm = round(profit_bm / craft_cost * 100, 1) if craft_cost > 0 else 0
+    margin_sell = round(profit_sell / craft_cost * 100, 1) if craft_cost > 0 else 0
+
+    city_ru = CITY_NAMES_RU.get(mat_best_city, mat_best_city or "неизвестно")
+    color = 0x00FF9D if profit_bm > 0 else 0xFF4444
+
+    e = discord.Embed(title=f"🔨 Крафт: {display} {tier}.{enchant}", color=color)
+    e.set_thumbnail(url=item_icon_url(item_id))
+    e.add_field(name="📦 Материал", value=f"`{mat_id}` × {mat_count}\nЛучшая цена: **{mat_sell_min:,}** ({city_ru})", inline=False)
+    e.add_field(name="💰 Себестоимость", value=f"**{craft_cost:,}** серебра", inline=True)
+    e.add_field(name="🏪 Цена на рынке", value=f"**{item_sell_min:,}**" if item_sell_min else "нет данных", inline=True)
+    e.add_field(name="🔴 Цена на ЧР", value=f"**{item_bm:,}**" if item_bm else "нет данных", inline=True)
+
+    if craft_cost > 0:
+        e.add_field(
+            name="📈 Профит",
+            value=(f"Продажа на рынке: **{profit_sell:,}** ({margin_sell}%)\n"
+                   f"Продажа на ЧР: **{profit_bm:,}** ({margin_bm}%)"),
+            inline=False
+        )
+        verdict = "✅ Крафт выгоден!" if profit_bm > 0 else "❌ Крафт убыточен — дешевле купить готовое"
+        e.add_field(name="Вывод", value=verdict, inline=False)
+    else:
+        e.add_field(name="⚠️", value="Недостаточно данных для расчёта", inline=False)
+
+    e.set_footer(text=f"albion-online-data.com · {ALBION_SERVER_NAMES.get(server,'EU')}")
+    await interaction.followup.send(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  💱 ALBION: CITY FLIPPER
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="flipper", description="Торговый арбитраж между городами Albion [Pro]")
+@app_commands.describe(
+    category="weapon / armor / bag",
+    tier="Тир: 6, 7 или 8",
+    server="Сервер: eu / us / asia"
+)
+@cooldown(30)
+async def flipper(interaction: discord.Interaction, category: str = "weapon", tier: int = 8, server: str = "eu"):
+    if await get_tier(interaction.guild_id) < TIER_PRO:
+        return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
+    await interaction.response.defer()
+
+    if tier not in (6, 7, 8):
+        return await interaction.followup.send("❌ Тир: 6, 7 или 8")
+
+    cat_lower = category.lower()
+    keys = BM_GROUPS.get(cat_lower, [cat_lower] if cat_lower in BM_ITEMS else None)
+    if not keys:
+        return await interaction.followup.send("❌ Категория: weapon / armor / bag")
+
+    await interaction.followup.send(f"⏳ Ищу арбитраж для **{category} T{tier}**...")
+
+    base_url = ALBION_SERVERS.get(server, ALBION_SERVERS["eu"])
+    locations = ",".join(CITY_LOCATIONS).replace(" ", "%20")
+    flips = []
+
+    async with aiohttp.ClientSession() as s:
+        for key in keys[:15]:  # лимит чтобы не долго
+            item_data = BM_ITEMS.get(key)
+            if not item_data: continue
+            display, template = list(item_data.items())[0]
+
+            for enchant in range(0, 3):  # только 0-2 для скорости
+                item_id = build_item_id(template, tier, enchant)
+                url = f"{base_url}/stats/prices/{item_id}?locations={locations}"
+                try:
+                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                        if r.status != 200: continue
+                        prices = await r.json()
+                except Exception:
+                    continue
+
+                city_prices = {}
+                for p in prices:
+                    city = p.get("city", "")
+                    sell = p.get("sell_price_min", 0) or 0
+                    buy  = p.get("buy_price_max", 0) or 0
+                    if city in CITY_LOCATIONS and sell > 0:
+                        city_prices[city] = {"sell": sell, "buy": buy}
+
+                if len(city_prices) < 2: continue
+
+                # Найти максимальную разницу между городами
+                cities = list(city_prices.keys())
+                best_flip = None
+                best_profit = 0
+                for i in range(len(cities)):
+                    for j in range(len(cities)):
+                        if i == j: continue
+                        buy_city = cities[i]
+                        sell_city = cities[j]
+                        buy_price  = city_prices[buy_city]["sell"]  # покупаем по рыночной цене
+                        sell_price = city_prices[sell_city]["buy"]  # продаём по ордеру покупателя
+                        if buy_price > 0 and sell_price > buy_price:
+                            profit = sell_price - buy_price
+                            pct = round(profit / buy_price * 100, 1)
+                            if profit > best_profit:
+                                best_profit = profit
+                                best_flip = {
+                                    "buy_city": buy_city, "buy_price": buy_price,
+                                    "sell_city": sell_city, "sell_price": sell_price,
+                                    "profit": profit, "pct": pct
+                                }
+                if best_flip and best_flip["pct"] > 5:
+                    flips.append({
+                        "name": f"{display} {tier}.{enchant}",
+                        "item_id": item_id,
+                        **best_flip
+                    })
+
+    if not flips:
+        return await interaction.channel.send("😔 Нет выгодных флипов прямо сейчас. Рынок выровнен.")
+
+    flips.sort(key=lambda x: x["pct"], reverse=True)
+    e = discord.Embed(
+        title=f"💱 Флиппер — {category.capitalize()} T{tier}",
+        description=f"Купи в одном городе, продай в другом · {ALBION_SERVER_NAMES.get(server,'EU')}",
+        color=0x00FF9D
+    )
+    for flip in flips[:8]:
+        buy_ru  = CITY_NAMES_RU.get(flip["buy_city"],  flip["buy_city"])
+        sell_ru = CITY_NAMES_RU.get(flip["sell_city"], flip["sell_city"])
+        e.add_field(
+            name=f"🗡️ {flip['name']} (+{flip['pct']}%)",
+            value=(f"Купить в **{buy_ru}**: `{flip['buy_price']:,}`\n"
+                   f"Продать в **{sell_ru}** (ордер): `{flip['sell_price']:,}`\n"
+                   f"Профит: **{flip['profit']:,}** серебра"),
+            inline=False
+        )
+    e.set_footer(text="Цены обновляются каждые ~15 мин · Учитывай налог 8%")
+    await interaction.channel.send(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  🏰 ALBION: GUILD WAR STATS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="guildwar", description="Топ гильдий по активности ZvZ [Pro]")
+@app_commands.describe(limit="Сколько гильдий показать (5-20)")
+@cooldown(20)
+async def guildwar(interaction: discord.Interaction, limit: int = 10):
+    if await get_tier(interaction.guild_id) < TIER_PRO:
+        return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
+    await interaction.response.defer()
+    limit = max(5, min(limit, 20))
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(f"{ALBION_BASE}/battles?sort=recent&limit=50",
+                             timeout=aiohttp.ClientTimeout(total=15)) as r:
+                battles = await r.json() if r.status == 200 else []
+
+        guild_stats = {}
+        for b in battles:
+            fame  = b.get("TotalFame", 0)
+            kills = b.get("TotalKills", 0)
+            for gname in b.get("Guilds", {}).keys():
+                if gname not in guild_stats:
+                    guild_stats[gname] = {"battles": 0, "fame": 0, "kills": 0}
+                guild_stats[gname]["battles"] += 1
+                guild_stats[gname]["fame"]    += fame
+                guild_stats[gname]["kills"]   += kills
+
+        if not guild_stats:
+            return await interaction.followup.send("❌ Нет данных о недавних битвах.")
+
+        top = sorted(guild_stats.items(), key=lambda x: x[1]["fame"], reverse=True)[:limit]
+
+        e = discord.Embed(title="⚔️ Топ гильдий по ZvZ активности", color=0xFF6B35,
+                          description=f"По данным последних 50 битв · {datetime.datetime.utcnow().strftime('%d.%m.%Y')}")
+        medals = ["🥇","🥈","🥉"] + [f"{i}." for i in range(4, limit+1)]
+        for i, (gname, stats) in enumerate(top):
+            e.add_field(
+                name=f"{medals[i]} {gname}",
+                value=(f"Битв: **{stats['battles']}** · Убийств: **{stats['kills']}**\n"
+                       f"Fame: **{stats['fame']:,}**"),
+                inline=True
+            )
+        await interaction.followup.send(embed=e)
+    except Exception as ex:
+        await interaction.followup.send(f"❌ Ошибка: {ex}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  📡 PRICE WATCH — подписка на изменение цены
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="pricewatch", description="Слежка за ценой предмета [Pro]")
+@app_commands.describe(
+    action="add / remove / list",
+    item_key="Ключ предмета (напр. sword, bow)",
+    tier="Тир: 6-8",
+    threshold="Порог изменения цены в % (по умолч. 5%)"
+)
+async def pricewatch(interaction: discord.Interaction, action: str = "list",
+                     item_key: str = "", tier: int = 8, threshold: float = 5.0):
+    if await get_tier(interaction.guild_id) < TIER_PRO:
+        return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
+
+    gid = interaction.guild_id
+
+    if action.lower() == "list":
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT id, item_id, threshold_pct, last_price FROM price_watch WHERE guild_id=?", (gid,)
+            ) as c:
+                rows = await c.fetchall()
+        e = discord.Embed(title="📡 Price Watch", color=0x00E5FF)
+        if not rows:
+            e.description = "Нет активных подписок. Добавь: `/pricewatch action:add item_key:sword`"
+        for wid, iid, thr, last_p in rows:
+            e.add_field(name=f"#{wid} · {iid}", value=f"Порог: {thr}% · Последняя цена: {last_p:,}", inline=False)
+        return await interaction.response.send_message(embed=e)
+
+    if action.lower() == "remove":
+        try:
+            watch_id = int(item_key)
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("DELETE FROM price_watch WHERE id=? AND guild_id=?", (watch_id, gid))
+                await db.commit()
+            return await interaction.response.send_message(f"✅ Подписка `#{watch_id}` удалена.")
+        except ValueError:
+            return await interaction.response.send_message("❌ Укажи ID подписки: `/pricewatch action:remove item_key:1`", ephemeral=True)
+
+    # add
+    if not item_key:
+        return await interaction.response.send_message("❌ Укажи `item_key`", ephemeral=True)
+    item_data = BM_ITEMS.get(item_key.lower())
+    if not item_data:
+        return await interaction.response.send_message(f"❌ Предмет `{item_key}` не найден.", ephemeral=True)
+    _, template = list(item_data.items())[0]
+    item_id = build_item_id(template, tier, 0)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Проверяем лимит (макс 5 подписок на сервер)
+        async with db.execute("SELECT COUNT(*) FROM price_watch WHERE guild_id=?", (gid,)) as c:
+            count = (await c.fetchone())[0]
+        if count >= 5:
+            return await interaction.response.send_message("❌ Максимум 5 подписок на сервер. Удали старые через `/pricewatch action:remove`", ephemeral=True)
+        await db.execute(
+            "INSERT INTO price_watch (guild_id,channel_id,item_id,threshold_pct,last_price,created_at) VALUES (?,?,?,?,0,?)",
+            (gid, interaction.channel_id, item_id, threshold, datetime.datetime.utcnow().isoformat())
+        )
+        await db.commit()
+
+    await interaction.response.send_message(
+        f"✅ Слежка добавлена: **{item_id}** · порог **{threshold}%** · уведомления в {interaction.channel.mention}"
+    )
+
+async def price_watch_loop():
+    """Фоновая задача — проверяет цены каждые 15 минут."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await asyncio.sleep(900)  # 15 минут
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("SELECT id, guild_id, channel_id, item_id, threshold_pct, last_price FROM price_watch") as c:
+                    watches = await c.fetchall()
+
+            for wid, gid, ch_id, item_id, thr, last_price in watches:
+                guild = bot.get_guild(gid)
+                ch    = guild.get_channel(ch_id) if guild else None
+                if not ch: continue
+
+                url = f"{ALBION_DATA}/stats/prices/{item_id}?locations=Black%20Market,Caerleon"
+                try:
+                    async with aiohttp.ClientSession() as s:
+                        async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                            prices = await r.json() if r.status == 200 else []
+                except Exception:
+                    continue
+
+                current_price = 0
+                for p in prices:
+                    if p.get("city") == "Black Market":
+                        current_price = p.get("sell_price_min", 0) or 0
+                        break
+                if not current_price: continue
+
+                if last_price > 0:
+                    change_pct = abs(current_price - last_price) / last_price * 100
+                    if change_pct >= thr:
+                        direction = "📈 вырос" if current_price > last_price else "📉 упал"
+                        e = discord.Embed(title=f"📡 Price Alert: {item_id}", color=0xFFD700)
+                        e.add_field(name="Цена на ЧР", value=f"**{direction}** на {change_pct:.1f}%", inline=False)
+                        e.add_field(name="Было", value=f"{last_price:,}", inline=True)
+                        e.add_field(name="Стало", value=f"{current_price:,}", inline=True)
+                        try:
+                            await ch.send(embed=e)
+                        except Exception:
+                            pass
+
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("UPDATE price_watch SET last_price=? WHERE id=?", (current_price, wid))
+                    await db.commit()
+        except Exception as ex:
+            print(f"[PriceWatch] Error: {ex}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  🤖 AI: ASK ALBION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="askalbion", description="AI ответит на вопрос об Albion Online [Premium]")
+@app_commands.describe(question="Вопрос об игре (билды, механики, советы)")
+@cooldown(10)
+async def askalbion(interaction: discord.Interaction, question: str):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    await interaction.response.defer()
+    try:
+        answer = await ask_ai(
+            question,
+            system=(
+                "You are an expert Albion Online player and guide. "
+                "Answer questions about builds, mechanics, economy, PvP, PvE, guilds, and all game systems. "
+                "Be specific and practical. Use silver values when relevant. "
+                "If asked in Russian, reply in Russian. Keep answers concise but complete."
+            )
+        )
+        e = discord.Embed(title="⚔️ Albion Expert", description=answer[:4000], color=0xC8A951)
+        e.set_footer(text=f"Вопрос: {question[:80]} · NexusBot AI")
+        await interaction.followup.send(embed=e)
+    except Exception as ex:
+        await interaction.followup.send(f"❌ Ошибка: {ex}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  START BACKGROUND TASKS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.event
+async def on_connect():
+    bot.loop.create_task(birthday_check_loop())
+    bot.loop.create_task(price_watch_loop())
+
+
 
 @bot.tree.command(name="bmtest", description="[DEBUG] Тест API Albion Data Project")
 @app_commands.describe(item_id="ID предмета (напр. T8_MAIN_SWORD)")
