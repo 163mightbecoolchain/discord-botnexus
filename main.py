@@ -291,35 +291,39 @@ def fmt_item(item_id):
     parts = item_id.replace("@"," ✦").split("_")
     return " ".join(p for p in parts if not (p.startswith("T") and p[1:].isdigit())).title() or item_id
 
+# ── Invite cache — инициализируем сразу на уровне бота ───────
+# Ключ: "guild_id:invite_code" → uses (int)
+# Это гарантирует что cache существует до on_ready
+_invite_cache: dict = {}
+
+async def refresh_invite_cache(guild) -> bool:
+    """Загружает инвайты гильдии в кэш. Возвращает True если успешно."""
+    try:
+        invites = await guild.fetch_invites()
+        for inv in invites:
+            _invite_cache[f"{guild.id}:{inv.code}"] = inv.uses or 0
+        print(f"✅ Invite cache loaded for {guild.name}: {len(invites)} invites")
+        return True
+    except discord.Forbidden:
+        print(f"⚠️ [{guild.name}] Нет прав MANAGE_GUILD — инвайт-трекинг отключён")
+        return False
+    except Exception as ex:
+        print(f"⚠️ [{guild.name}] Invite cache error: {ex}")
+        return False
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  EVENTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def refresh_invite_cache(guild):
-    """Refresh invite cache for a single guild. Call on_ready and after invite events."""
-    try:
-        invites = await guild.fetch_invites()
-        for inv in invites:
-            bot.invite_cache[f"{guild.id}:{inv.code}"] = inv.uses
-        return True
-    except discord.Forbidden:
-        print(f"⚠️ No MANAGE_GUILD permission in {guild.name} — invite tracking disabled")
-        return False
-    except Exception as ex:
-        print(f"⚠️ invite cache error in {guild.name}: {ex}")
-        return False
-
 @bot.event
 async def on_ready():
     await db_init()
-    bot.invite_cache = {}
-    bot.invite_cache_ready = set()  # guilds where cache loaded successfully
+    # Заполняем глобальный кэш инвайтов для всех серверов
+    _invite_cache.clear()
     for guild in bot.guilds:
-        ok = await refresh_invite_cache(guild)
-        if ok:
-            bot.invite_cache_ready.add(guild.id)
+        await refresh_invite_cache(guild)
     await bot.tree.sync()
-    print(f"✅ NexusBot v5 | {bot.user}")
+    print(f"✅ NexusBot v5 | {bot.user} | Invite cache: {len(_invite_cache)} entries")
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/help | nexusbot.gg"))
 
 @bot.event
@@ -375,57 +379,64 @@ async def on_member_join(member):
                 return
             except Exception: pass
 
-    # ── Invite tracking (runs for ALL servers, regardless of tier) ──
-    # Save snapshot of cache BEFORE Discord updates it
-    old_cache = {k: v for k, v in bot.invite_cache.items() if k.startswith(f"{gid}:")}
-    used_code = inviter_name = None
+    # ── Invite tracking ────────────────────────────────────────
+    # Снимок кэша ДО того как Discord обновит счётчики
+    old_snapshot = {k: v for k, v in _invite_cache.items() if k.startswith(f"{gid}:")}
+    print(f"[INVITE DEBUG] {member.name} joined {member.guild.name}. Cache snapshot: {old_snapshot}")
+
+    used_code = None
+    inviter_name = "неизвестно"
     inviter_id = 0
 
-    # Give Discord time to update invite counters
-    await asyncio.sleep(8)
+    # Ждём пока Discord обновит счётчик инвайта
+    await asyncio.sleep(3)
+
     try:
         fresh_invites = await member.guild.fetch_invites()
+        print(f"[INVITE DEBUG] Fresh invites: {[(inv.code, inv.uses) for inv in fresh_invites]}")
+
         for inv in fresh_invites:
             cache_key = f"{gid}:{inv.code}"
-            old_uses = old_cache.get(cache_key, 0)
+            old_uses = old_snapshot.get(cache_key, 0)
             new_uses = inv.uses or 0
+            print(f"[INVITE DEBUG] {inv.code}: old={old_uses} new={new_uses}")
             if new_uses > old_uses:
                 used_code = inv.code
                 if inv.inviter:
                     inviter_name = inv.inviter.name
                     inviter_id = inv.inviter.id
-                # Update cache immediately
-                bot.invite_cache[cache_key] = new_uses
+                _invite_cache[cache_key] = new_uses
+                print(f"[INVITE DEBUG] ✅ Found! code={used_code} inviter={inviter_name}")
                 break
-        # Sync full cache after scan
+
+        # Синхронизируем весь кэш
         for inv in fresh_invites:
-            bot.invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
+            _invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
 
     except discord.Forbidden:
-        # Bot missing MANAGE_GUILD — can't track invites
-        pass
+        print(f"[INVITE DEBUG] ❌ Forbidden — нет прав MANAGE_GUILD на {member.guild.name}")
     except Exception as ex:
-        print(f"⚠️ Invite tracking error in {member.guild.name}: {ex}")
+        print(f"[INVITE DEBUG] ❌ Error: {ex}")
 
-    # Check for vanishing invites (single-use invite was deleted after use)
+    # Разовые инвайты — исчезли из списка после использования
     if not used_code:
         try:
             fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.fetch_invites()}
-            for cache_key, uses in old_cache.items():
-                if cache_key not in fresh_codes and uses == 0:
-                    # This invite disappeared — it was a single-use invite
-                    code = cache_key.split(":", 1)[1]
-                    used_code = code
-                    # Can't get inviter from deleted invite, mark as unknown
+            for cache_key in list(old_snapshot.keys()):
+                if cache_key not in fresh_codes:
+                    used_code = cache_key.split(":", 1)[1]
                     inviter_name = "неизвестно (разовый инвайт)"
-                    bot.invite_cache.pop(cache_key, None)
+                    _invite_cache.pop(cache_key, None)
+                    print(f"[INVITE DEBUG] Single-use invite detected: {used_code}")
                     break
         except Exception:
             pass
 
-    # Log to DB regardless of tier (for /invcheck and /invuser commands)
-    if used_code:
-        await log_invite_use(gid, used_code, inviter_id, inviter_name or "?", member.id, member.name)
+    print(f"[INVITE DEBUG] Result: code={used_code}, inviter={inviter_name} ({inviter_id})")
+
+    # Пишем в БД всегда (для /invcheck и /invuser)
+    if used_code and inviter_id:
+        await log_invite_use(gid, used_code, inviter_id, inviter_name, member.id, member.name)
 
     age = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
     ch = await sec_check(member.guild, "joins")
@@ -531,8 +542,8 @@ async def on_message_edit(before, after):
 
 @bot.event
 async def on_invite_create(invite):
-    # Always update cache
-    bot.invite_cache[f"{invite.guild.id}:{invite.code}"] = invite.uses or 0
+    _invite_cache[f"{invite.guild.id}:{invite.code}"] = invite.uses or 0
+    print(f"[INVITE] Created: {invite.code} by {invite.inviter}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
     e = discord.Embed(title="🔗 Инвайт создан", color=discord.Color.teal(), timestamp=datetime.datetime.utcnow())
@@ -544,12 +555,19 @@ async def on_invite_create(invite):
 
 @bot.event
 async def on_invite_delete(invite):
-    bot.invite_cache.pop(f"{invite.guild.id}:{invite.code}", None)
+    _invite_cache.pop(f"{invite.guild.id}:{invite.code}", None)
+    print(f"[INVITE] Deleted: {invite.code}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
     e = discord.Embed(title="❌ Инвайт удалён", color=discord.Color.dark_gray(), timestamp=datetime.datetime.utcnow())
     e.add_field(name="Код", value=f"`{invite.code}`", inline=True)
     await ch.send(embed=e)
+
+@bot.event
+async def on_guild_join(guild):
+    """Когда бот добавляется на новый сервер — сразу загружаем инвайты"""
+    await refresh_invite_cache(guild)
+
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -1369,63 +1387,152 @@ BM_GROUPS = {
 def build_item_id(template, tier, enchant):
     return template.format(t=tier, e=f"@{enchant}" if enchant > 0 else "")
 
-async def fetch_bm_prices(category_keys: list, tier: int) -> list:
-    """Fetch BM prices for given item keys and tier. Returns sorted results list."""
+
+# ── Albion серверы ────────────────────────────────────────────
+ALBION_SERVERS = {
+    "eu":   "https://west.albion-online-data.com/api/v2",
+    "us":   "https://east.albion-online-data.com/api/v2",
+    "asia": "https://east.albion-online-data.com/api/v2",  # Asia uses east endpoint
+}
+ALBION_SERVER_NAMES = {"eu": "🇪🇺 Европа", "us": "🇺🇸 Америка", "asia": "🌏 Азия"}
+
+# Все города кроме ЧР и Бреккилена
+CITY_LOCATIONS = ["Caerleon", "Bridgewatch", "Fort Sterling", "Lymhurst", "Martlock", "Thetford"]
+CITY_NAMES_RU = {
+    "Caerleon": "Кэрлеон",
+    "Bridgewatch": "Бриджвотч",
+    "Fort Sterling": "Форт Стерлинг",
+    "Lymhurst": "Лимхёрст",
+    "Martlock": "Мартлок",
+    "Thetford": "Тетфорд",
+    "Brecilien": "Бреккилен",
+    "Black Market": "Чёрный рынок",
+}
+
+# Иконки предметов через Albion render API
+def item_icon_url(item_id: str) -> str:
+    return f"https://render.albiononline.com/v1/item/{item_id}.png?size=50"
+
+async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") -> list:
+    """
+    Возвращает список dict с детальными ценами по каждому городу.
+    server: eu / us / asia
+    """
+    base_url = ALBION_SERVERS.get(server, ALBION_SERVERS["eu"])
     results = []
+    all_locations = "Black+Market,Brecilien," + ",".join(CITY_LOCATIONS)
+
     async with aiohttp.ClientSession() as s:
         for key in category_keys:
             item_data = BM_ITEMS.get(key)
             if not item_data: continue
             display, template = list(item_data.items())[0]
+
             for enchant in range(0, 5):
                 item_id = build_item_id(template, tier, enchant)
                 tier_label = f"{tier}.{enchant}"
-                url = f"{ALBION_DATA}/stats/prices/{item_id}?locations=Black+Market,Brecilien,Caerleon,Bridgewatch,Fort+Sterling,Lymhurst,Martlock,Thetford"
+                url = f"{base_url}/stats/prices/{item_id}?locations={all_locations}"
+
                 try:
-                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
                         if r.status != 200: continue
                         prices = await r.json()
-                except Exception: continue
+                except Exception:
+                    continue
 
-                bm = brec = 0; city_min = 9_999_999_999
+                bm_price = 0
+                brec_sell = 0
+                brec_buy = 0   # buy_price_max = лучший ордер на покупку
+                city_data = {}  # city_name → {sell, buy}
+
                 for p in prices:
-                    city = p.get("city", ""); sell = p.get("sell_price_min", 0)
-                    if city == "Black Market" and sell > 0: bm = max(bm, sell)
-                    elif city == "Brecilien" and sell > 0: brec = sell
-                    elif sell > 0 and city not in ("Black Market", "Brecilien"): city_min = min(city_min, sell)
+                    city = p.get("city", "")
+                    sell = p.get("sell_price_min", 0)   # мин. цена продажи (рынок)
+                    buy  = p.get("buy_price_max", 0)    # макс. ордер на покупку
 
-                if bm == 0: continue
-                city_profit = bm - city_min if city_min < 9_999_999_999 else 0
-                city_pct = round(city_profit / city_min * 100, 1) if city_min < 9_999_999_999 and city_min > 0 else 0
-                brec_profit = bm - brec if brec > 0 else 0
-                brec_pct = round(brec_profit / brec * 100, 1) if brec > 0 else 0
+                    if city == "Black Market":
+                        if sell > 0: bm_price = max(bm_price, sell)
+                    elif city == "Brecilien":
+                        if sell > 0: brec_sell = sell
+                        if buy > 0:  brec_buy  = buy
+                    elif city in CITY_LOCATIONS:
+                        city_data[city] = {"sell": sell, "buy": buy}
+
+                if bm_price == 0:
+                    continue
+
+                # Найти лучший город для покупки (минимальная цена продажи)
+                best_city = None
+                best_city_sell = 9_999_999_999
+                best_city_buy  = 0
+
+                for city, prices_dict in city_data.items():
+                    sell = prices_dict["sell"]
+                    buy  = prices_dict["buy"]
+                    if sell > 0 and sell < best_city_sell:
+                        best_city_sell = sell
+                        best_city      = city
+                        best_city_buy  = buy
+
+                city_sell_profit = bm_price - best_city_sell if best_city else 0
+                city_sell_pct    = round(city_sell_profit / best_city_sell * 100, 1) if best_city and best_city_sell > 0 else 0
+
+                # Профит от Бреккилена
+                brec_price = brec_sell if brec_sell > 0 else brec_buy
+                brec_is_buy_order = brec_buy > 0 and brec_sell == 0
+                brec_profit = bm_price - brec_price if brec_price > 0 else 0
+                brec_pct    = round(brec_profit / brec_price * 100, 1) if brec_price > 0 else 0
+
                 results.append({
-                    "name": f"{display} {tier_label}",
-                    "item_id": item_id,
-                    "bm": bm,
-                    "city_min": city_min if city_min < 9_999_999_999 else 0,
-                    "city_profit": city_profit, "city_pct": city_pct,
-                    "brec": brec, "brec_profit": brec_profit, "brec_pct": brec_pct,
+                    "name":           f"{display} {tier_label}",
+                    "display":        display,
+                    "tier_label":     tier_label,
+                    "item_id":        item_id,
+                    "icon_url":       item_icon_url(item_id),
+                    "bm":             bm_price,
+                    # Лучший город
+                    "best_city":      best_city,
+                    "best_city_sell": best_city_sell if best_city else 0,
+                    "best_city_buy":  best_city_buy,
+                    "city_profit":    city_sell_profit,
+                    "city_pct":       city_sell_pct,
+                    # Все города
+                    "city_data":      city_data,
+                    # Бреккилен
+                    "brec_price":     brec_price,
+                    "brec_is_buy_order": brec_is_buy_order,
+                    "brec_profit":    brec_profit,
+                    "brec_pct":       brec_pct,
                 })
+
     results.sort(key=lambda x: x["city_pct"], reverse=True)
     return results
 
+
 @bot.tree.command(name="blackmarket", description="Albion: профит Чёрного рынка [Pro]")
 @app_commands.describe(
-    category="weapon / armor / bag / или конкретный ключ (sword, bow, axe...)",
+    category="weapon / armor / bag / конкретный ключ (sword, bow, axe...)",
     tier="Тир: 6, 7 или 8",
-    sheets="Экспортировать в Google Sheets? (yes/no)"
+    server="Сервер: eu / us / asia",
+    sheets="Экспорт в Google Sheets: yes / no",
 )
 @cooldown(30)
-async def blackmarket(interaction: discord.Interaction, category: str = "weapon", tier: int = 8, sheets: str = "no"):
+async def blackmarket(
+    interaction: discord.Interaction,
+    category: str = "weapon",
+    tier: int = 8,
+    server: str = "eu",
+    sheets: str = "no",
+):
     if await get_tier(interaction.guild_id) < TIER_PRO:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
     await interaction.response.defer()
 
     if tier not in (6, 7, 8):
         return await interaction.followup.send("❌ Тир: 6, 7 или 8")
+    if server not in ALBION_SERVERS:
+        return await interaction.followup.send("❌ Сервер: eu / us / asia")
 
-    # Resolve category → list of keys
     cat_lower = category.lower()
     if cat_lower in BM_GROUPS:
         keys = BM_GROUPS[cat_lower]
@@ -1434,86 +1541,183 @@ async def blackmarket(interaction: discord.Interaction, category: str = "weapon"
         keys = [cat_lower]
         cat_label = list(BM_ITEMS[cat_lower].keys())[0]
     else:
-        avail = ", ".join(f"`{k}`" for k in list(BM_GROUPS.keys()) + list(BM_ITEMS.keys())[:10]) + "..."
+        avail = ", ".join(f"`{k}`" for k in list(BM_GROUPS.keys()) + list(BM_ITEMS.keys())[:8]) + "..."
         return await interaction.followup.send(f"❌ Неизвестная категория. Примеры: {avail}")
 
-    await interaction.followup.send(f"⏳ Загружаю цены для **{cat_label} T{tier}**... (может занять ~20 сек)")
+    server_name = ALBION_SERVER_NAMES[server]
+    await interaction.followup.send(
+        f"⏳ Загружаю цены **{cat_label} T{tier}** · {server_name}... (~20 сек)"
+    )
 
-    results = await fetch_bm_prices(keys, tier)
+    results = await fetch_bm_prices(keys, tier, server)
 
     if not results:
         return await interaction.channel.send("❌ Нет данных о ценах. Попробуй позже.")
 
+    # ── Discord embeds (по 5 предметов на embed из-за лимита полей) ──
     top = results[:10]
+    chunks = [top[i:i+5] for i in range(0, len(top), 5)]
 
-    # ── Discord embed ──────────────────────────────────────────
-    e = discord.Embed(
-        title=f"💰 Чёрный рынок — {cat_label} T{tier}",
-        description="Топ по % профиту · `ЧР`=Чёрный рынок · `Брек`=Бреккилен",
-        color=0xFFD700
-    )
-    for item in top:
-        city_str = (f"Город: **{item['city_min']:,}** → ЧР: **{item['bm']:,}**\n"
-                    f"Профит: **{item['city_profit']:,}** (**{item['city_pct']}%**)")
-        brec_str = (f"Брек: **{item['brec']:,}** → ЧР: **{item['bm']:,}**\n"
-                    f"Профит: **{item['brec_profit']:,}** (**{item['brec_pct']}%**)"
-                    if item["brec"] > 0 else "Нет цены в Бреккилене")
-        e.add_field(name=item["name"], value=f"{city_str}\n{brec_str}", inline=False)
-    e.set_footer(text=f"albion-online-data.com · {len(results)} предметов проверено · NexusBot Pro")
-    await interaction.channel.send(embed=e)
+    for chunk_idx, chunk in enumerate(chunks):
+        title = (f"💰 Чёрный рынок — {cat_label} T{tier} · {server_name}"
+                 if chunk_idx == 0 else f"💰 (продолжение)")
+        desc = (f"Топ по % профиту (рыночная цена продажи)\n"
+                f"`ЧР`=Чёрный рынок · `Брек`=Бреккилен · сервер: {server_name}")
+
+        e = discord.Embed(title=title, description=desc, color=0xFFD700)
+
+        for item in chunk:
+            city_ru   = CITY_NAMES_RU.get(item["best_city"], item["best_city"]) if item["best_city"] else "—"
+            brec_ru   = CITY_NAMES_RU["Brecilien"]
+
+            # Строка для лучшего города
+            if item["best_city"]:
+                city_line = (
+                    f"🏙️ **{city_ru}** (рынок продажи): `{item['best_city_sell']:,}` → ЧР: `{item['bm']:,}`\n"
+                    f"   Профит: **{item['city_profit']:,}** (**{item['city_pct']}%**)"
+                )
+                if item["best_city_buy"] > 0:
+                    city_line += f"\n   *(ордер покупки в городе: `{item['best_city_buy']:,}`)*"
+            else:
+                city_line = "🏙️ Нет цены в городах"
+
+            # Строка для Бреккилена
+            if item["brec_price"] > 0:
+                price_type = "ордер покупки" if item["brec_is_buy_order"] else "рынок продажи"
+                brec_line = (
+                    f"🌿 **{brec_ru}** ({price_type}): `{item['brec_price']:,}` → ЧР: `{item['bm']:,}`\n"
+                    f"   Профит: **{item['brec_profit']:,}** (**{item['brec_pct']}%**)"
+                )
+            else:
+                brec_line = f"🌿 **{brec_ru}**: нет данных"
+
+            e.add_field(
+                name=f"🗡️ {item['name']}",
+                value=f"{city_line}\n{brec_line}",
+                inline=False
+            )
+            # Иконка предмета на первом элементе чанка
+            if chunk_idx == 0 and item == chunk[0]:
+                e.set_thumbnail(url=item["icon_url"])
+
+        e.set_footer(
+            text=f"albion-online-data.com · {len(results)} предметов · Только T{tier}.0–T{tier}.4"
+        )
+        await interaction.channel.send(embed=e)
 
     # ── Google Sheets export ───────────────────────────────────
-    if sheets.lower() in ("yes", "да", "y") and GOOGLE_CREDS and SHEET_ID:
+    if sheets.lower() in ("yes", "да", "y"):
+        if not GOOGLE_CREDS:
+            await interaction.channel.send(
+                "❌ Google Sheets: добавь `GOOGLE_CREDENTIALS` в .env\n"
+                "Как получить: console.cloud.google.com → Service Accounts → Create Key (JSON) → скопируй содержимое одной строкой"
+            )
+            return
+        if not SHEET_ID:
+            await interaction.channel.send(
+                "❌ Google Sheets: добавь `SHEET_ID` в .env\n"
+                "Это ID из URL таблицы: `docs.google.com/spreadsheets/d/**ВОТ_ЭТО**/edit`"
+            )
+            return
         try:
             import gspread
-            from google.oauth2.service_account import Credentials
+            from google.oauth2.service_account import Credentials as GCredentials
             import json as _json
 
-            creds_data = _json.loads(GOOGLE_CREDS)
-            creds = Credentials.from_service_account_info(
+            # GOOGLE_CREDENTIALS может быть строкой JSON или путём к файлу
+            raw = GOOGLE_CREDS.strip()
+            if raw.startswith("{"):
+                creds_data = _json.loads(raw)
+            else:
+                # Может быть base64 или путь — пробуем как путь
+                import base64
+                try:
+                    decoded = base64.b64decode(raw).decode("utf-8")
+                    creds_data = _json.loads(decoded)
+                except Exception:
+                    with open(raw) as f:
+                        creds_data = _json.load(f)
+
+            creds = GCredentials.from_service_account_info(
                 creds_data,
-                scopes=["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+                scopes=[
+                    "https://spreadsheets.google.com/feeds",
+                    "https://www.googleapis.com/auth/drive",
+                ]
             )
             gc = gspread.authorize(creds)
             sh = gc.open_by_key(SHEET_ID)
 
-            # Try to find or create sheet tab
-            tab_name = f"BM T{tier} {cat_label}"
+            tab_name = f"BM T{tier} {cat_label} {server.upper()}"
             try:
                 ws = sh.worksheet(tab_name)
                 ws.clear()
             except gspread.WorksheetNotFound:
-                ws = sh.add_worksheet(title=tab_name, rows=200, cols=10)
+                ws = sh.add_worksheet(title=tab_name, rows=300, cols=15)
 
-            # Write header
-            header = ["Предмет", "Тир.Зач", "ЧР цена", "Цена в городе", "Профит (город)", "% профит (город)",
-                      "Цена в Бреккилене", "Профит (Брек)", "% профит (Брек)", "Item ID"]
+            header = [
+                "Предмет", "Тир.Зач", "Item ID",
+                "ЧР цена (рынок)",
+                "Лучший город", "Цена в городе (рынок)", "Ордер покупки (город)",
+                "Профит (город)", "% профит (город)",
+                "Цена в Бреккилене", "Тип цены (Брек)",
+                "Профит (Брек)", "% профит (Брек)",
+                # Все города отдельно
+                "Кэрлеон (продажа)", "Бриджвотч (продажа)", "Форт Стерлинг (продажа)",
+                "Лимхёрст (продажа)", "Мартлок (продажа)", "Тетфорд (продажа)",
+            ]
             rows = [header]
+
             for item in results:
-                tier_str, ench_str = item["name"].rsplit(" ", 1) if " " in item["name"] else (item["name"], "")
-                rows.append([
-                    tier_str.strip(),
-                    ench_str.strip(),
+                city_data = item.get("city_data", {})
+                row = [
+                    item["display"],
+                    item["tier_label"],
+                    item["item_id"],
                     item["bm"],
-                    item["city_min"] or "—",
+                    CITY_NAMES_RU.get(item["best_city"], item["best_city"] or "—"),
+                    item["best_city_sell"] or "—",
+                    item["best_city_buy"] or "—",
                     item["city_profit"] or "—",
                     f"{item['city_pct']}%" if item["city_pct"] else "—",
-                    item["brec"] or "—",
+                    item["brec_price"] or "—",
+                    "ордер покупки" if item["brec_is_buy_order"] else "рынок продажи",
                     item["brec_profit"] or "—",
                     f"{item['brec_pct']}%" if item["brec_pct"] else "—",
-                    item["item_id"],
-                ])
-            ws.update("A1", rows)
+                    # По городам
+                    city_data.get("Caerleon", {}).get("sell", "—") or "—",
+                    city_data.get("Bridgewatch", {}).get("sell", "—") or "—",
+                    city_data.get("Fort Sterling", {}).get("sell", "—") or "—",
+                    city_data.get("Lymhurst", {}).get("sell", "—") or "—",
+                    city_data.get("Martlock", {}).get("sell", "—") or "—",
+                    city_data.get("Thetford", {}).get("sell", "—") or "—",
+                ]
+                rows.append(row)
 
-            # Bold header
-            ws.format("A1:J1", {"textFormat": {"bold": True}, "backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}})
+            ws.update("A1", rows)
+            ws.format("A1:S1", {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.15, "green": 0.15, "blue": 0.25},
+            })
 
             sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
-            await interaction.channel.send(f"📊 Экспортировано в Google Sheets: {sheet_url}\nВкладка: **{tab_name}** ({len(results)} строк)")
+            await interaction.channel.send(
+                f"📊 **Google Sheets обновлён!**\n"
+                f"{sheet_url}\n"
+                f"Вкладка: **{tab_name}** · {len(results)} строк · {server_name}"
+            )
+
         except ImportError:
             await interaction.channel.send("❌ Установи: `pip install gspread google-auth`")
+        except _json.JSONDecodeError as ex:
+            await interaction.channel.send(
+                f"❌ Google Sheets: не удалось разобрать JSON из `GOOGLE_CREDENTIALS`\n"
+                f"Убедись что значение — это содержимое JSON-файла одной строкой без переносов\n"
+                f"Ошибка: `{ex}`"
+            )
         except Exception as ex:
-            await interaction.channel.send(f"❌ Ошибка Google Sheets: {ex}")
+            await interaction.channel.send(f"❌ Ошибка Google Sheets: `{ex}`")
+
 
 @bot.tree.command(name="party", description="Albion: анализ пати для статика [Pro]")
 @app_commands.describe(p1="Игрок 1", p2="Игрок 2", p3="Игрок 3", p4="Игрок 4", p5="Игрок 5")
