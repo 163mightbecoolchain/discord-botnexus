@@ -50,7 +50,6 @@ from typing import Optional
 
 # ── Константы ────────────────────────────────────────────────
 PREFIX        = "-q"
-PERSPECTIVE_KEY = os.getenv("PERSPECTIVE_API_KEY", "")  # google Perspective API (free)
 DB_PATH       = os.getenv("DB_PATH", "nexusbot.db")
 HMAC_SECRET   = os.getenv("HMAC_SECRET", hashlib.sha256(os.urandom(32)).hexdigest())
 
@@ -434,76 +433,88 @@ async def analyze_image_metadata(image_url: str) -> dict:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def nlp_analyze(text: str, groq_key: str = "", gemini_key: str = "") -> dict:
-    """Анализирует текст через AI на токсичность, угрозы, спам"""
-    result = {"toxicity": 0.0, "threat": 0.0, "spam": 0.0, "summary": "", "raw": {}}
+    """Анализирует текст через AI на токсичность, угрозы, спам.
+    Groq (Llama 3.3 70B) → Gemini 2.0 Flash → Rule-based fallback
+    """
+    result = {"toxicity": 0.0, "threat": 0.0, "spam": 0.0, "summary": "", "source": ""}
 
-    # Попробуем Perspective API (Google, бесплатно)
-    if PERSPECTIVE_KEY:
+    prompt = (
+        "Analyze this text for toxicity, threats, and spam. "
+        "Respond ONLY with valid JSON, no markdown, no explanation:\n"
+        "{\"toxicity\": 0.0-1.0, \"threat\": 0.0-1.0, \"spam\": 0.0-1.0, \"summary\": \"brief reason in Russian\"}\n\n"
+        f"Text: {text[:500]}"
+    )
+
+    # 1. Groq — Llama 3.3 70B (бесплатно, быстро)
+    if groq_key:
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.post(
-                    f"https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key={PERSPECTIVE_KEY}",
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                     json={
-                        "comment": {"text": text[:3000]},
-                        "requestedAttributes": {
-                            "TOXICITY": {}, "THREAT": {}, "SPAM": {},
-                            "INSULT": {}, "IDENTITY_ATTACK": {}
-                        },
-                        "languages": ["ru", "en"]
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 150,
+                        "temperature": 0.1,
                     },
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    timeout=aiohttp.ClientTimeout(total=15)
                 ) as r:
                     if r.status == 200:
                         data = await r.json()
-                        scores = data.get("attributeScores", {})
-                        result["toxicity"] = scores.get("TOXICITY", {}).get("summaryScore", {}).get("value", 0)
-                        result["threat"]   = scores.get("THREAT",   {}).get("summaryScore", {}).get("value", 0)
-                        result["spam"]     = scores.get("SPAM",     {}).get("summaryScore", {}).get("value", 0)
-                        result["insult"]   = scores.get("INSULT",   {}).get("summaryScore", {}).get("value", 0)
-                        result["source"]   = "Perspective API"
-                        return result
-        except Exception:
-            pass
-
-    # Fallback — Groq/Gemini через prompt
-    ai_key = groq_key or gemini_key
-    if ai_key:
-        try:
-            prompt = (
-                f"Analyze this text for toxicity, threats, and spam. "
-                f"Respond ONLY with JSON: {{\"toxicity\": 0.0-1.0, \"threat\": 0.0-1.0, \"spam\": 0.0-1.0, \"summary\": \"brief reason\"}}\n\n"
-                f"Text: {text[:500]}"
-            )
-            if groq_key:
-                async with aiohttp.ClientSession() as s:
-                    async with s.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                        json={"model": "llama-3.3-70b-versatile",
-                              "messages": [{"role": "user", "content": prompt}],
-                              "max_tokens": 150},
-                        timeout=aiohttp.ClientTimeout(total=15)
-                    ) as r:
-                        data = await r.json()
-                        raw = data["choices"][0]["message"]["content"]
-                        parsed = json.loads(raw.strip().replace("```json", "").replace("```", ""))
+                        raw = data["choices"][0]["message"]["content"].strip()
+                        raw = raw.replace("```json", "").replace("```", "").strip()
+                        parsed = json.loads(raw)
                         result.update(parsed)
-                        result["source"] = "Groq"
+                        result["source"] = "Groq (Llama 3.3 70B)"
                         return result
-        except Exception:
-            pass
+        except Exception as ex:
+            print(f"[NLP] Groq error: {ex}")
 
-    # Базовый rule-based fallback если нет AI
+    # 2. Gemini — fallback (бесплатно, 1500 req/day)
+    if gemini_key:
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
+                    json={"contents": [{"parts": [{"text": prompt}]}]},
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        raw = raw.replace("```json", "").replace("```", "").strip()
+                        parsed = json.loads(raw)
+                        result.update(parsed)
+                        result["source"] = "Gemini 2.0 Flash"
+                        return result
+        except Exception as ex:
+            print(f"[NLP] Gemini error: {ex}")
+
+    # 3. Rule-based fallback — если нет AI ключей
     text_lower = text.lower()
-    toxic_words = ["убью", "умри", "сдохни", "kill", "die", "hate", "kys"]
-    spam_signals = len(re.findall(r'http[s]?://', text)) > 2 or len(text) > 500 and len(set(text)) < 20
-    threat_signals = any(w in text_lower for w in toxic_words)
+    toxic_words = [
+        "убью", "умри", "сдохни", "убить", "kill", "die", "kys", "hate",
+        "угрожаю", "расправлюсь", "уничтожу"
+    ]
+    scam_words = ["free nitro", "claim", "crypto", "bitcoin", "инвестиция", "заработок"]
+    spam_signals = (
+        len(re.findall(r"https?://", text)) > 2 or
+        (len(text) > 100 and len(set(text.lower())) < 15) or
+        text.count("@") > 5
+    )
+    threat_hit = any(w in text_lower for w in toxic_words)
+    scam_hit   = any(w in text_lower for w in scam_words)
 
-    result["toxicity"] = 0.8 if threat_signals else 0.1
-    result["threat"]   = 0.9 if threat_signals else 0.0
-    result["spam"]     = 0.8 if spam_signals else 0.1
-    result["source"]   = "rule-based"
-    result["summary"]  = "Rule-based analysis (no AI key)"
+    result["toxicity"] = 0.85 if threat_hit else 0.1
+    result["threat"]   = 0.90 if threat_hit else 0.0
+    result["spam"]     = 0.85 if (spam_signals or scam_hit) else 0.1
+    result["summary"]  = (
+        "Обнаружены угрозы/токсичность" if threat_hit else
+        "Обнаружен спам/скам" if spam_signals or scam_hit else
+        "Контент выглядит безопасным"
+    )
+    result["source"] = "Rule-based (добавь GROQ_API_KEY для AI анализа)"
     return result
 
 
@@ -1496,7 +1507,6 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         ai_status = []
         if self.groq_key: ai_status.append("✅ Groq")
         if self.gemini_key: ai_status.append("✅ Gemini")
-        if PERSPECTIVE_KEY: ai_status.append("✅ Perspective API")
         if not ai_status: ai_status.append("⚠️ Нет AI ключей — используется rule-based")
         e.add_field(name="🤖 NLP Backend", value=" · ".join(ai_status), inline=False)
         e.add_field(name="🔑 HMAC Secret", value="✅ Настроен" if HMAC_SECRET else "❌ Не настроен", inline=True)
