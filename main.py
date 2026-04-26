@@ -1752,14 +1752,18 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
                 brec_sell = 0
                 brec_buy = 0
                 city_data = {}
+                bm_updated = ""   # дата обновления цены ЧР
 
                 for p in prices:
                     city = p.get("city", "").strip()
                     sell = p.get("sell_price_min", 0) or 0
                     buy  = p.get("buy_price_max", 0) or 0
+                    upd  = p.get("sell_price_min_date", "") or ""
 
                     if city == "Black Market":
-                        if sell > 0: bm_price = max(bm_price, sell)
+                        if sell > 0:
+                            bm_price = max(bm_price, sell)
+                            bm_updated = upd  # сохраняем дату обновления
                     elif city == "Brecilien":
                         if sell > 0: brec_sell = sell
                         if buy > 0:  brec_buy  = buy
@@ -1771,6 +1775,17 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
                 if bm_price == 0:
                     print(f"[BM DEBUG] {item_id}: no Black Market price, skip")
                     continue
+
+                # Проверяем возраст данных
+                data_age_hours = None
+                data_stale = False
+                if bm_updated:
+                    try:
+                        upd_dt = datetime.datetime.fromisoformat(bm_updated.replace("Z", "+00:00").replace("+00:00", ""))
+                        data_age_hours = round((datetime.datetime.utcnow() - upd_dt).total_seconds() / 3600, 1)
+                        data_stale = data_age_hours > 3  # данные старше 3 часов — предупреждение
+                    except Exception:
+                        pass
 
                 # Лучший город — минимальная цена продажи
                 best_city = None
@@ -1803,7 +1818,7 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
                 brec_pct    = round(brec_profit / brec_price * 100, 1) if brec_price > 0 else 0
 
                 found += 1
-                print(f"[BM DEBUG] {item_id}: BM={bm_price} best_city={best_city}({best_city_sell if best_city_sell < 9_999_999_999 else 0}) profit={city_sell_profit}({city_sell_pct}%)")
+                print(f"[BM DEBUG] {item_id}: BM={bm_price} age={data_age_hours}h stale={data_stale} best_city={best_city}({best_city_sell if best_city_sell < 9_999_999_999 else 0}) profit={city_sell_profit}({city_sell_pct}%)")
 
                 results.append({
                     "name":              f"{display} {tier_label}",
@@ -1822,6 +1837,8 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
                     "brec_is_buy_order": brec_is_buy_order,
                     "brec_profit":       brec_profit,
                     "brec_pct":          brec_pct,
+                    "data_age_hours":    data_age_hours,
+                    "data_stale":        data_stale,
                 })
 
     print(f"[BM DEBUG] Done: fetched={fetched}, results={found}")
@@ -1881,14 +1898,25 @@ async def blackmarket(
     for chunk_idx, chunk in enumerate(chunks):
         title = (f"💰 Чёрный рынок — {cat_label} T{tier} · {server_name}"
                  if chunk_idx == 0 else f"💰 (продолжение)")
-        desc = (f"Топ по % профиту (рыночная цена продажи)\n"
-                f"`ЧР`=Чёрный рынок · `Брек`=Бреккилен · сервер: {server_name}")
+        desc = (
+            f"Топ по % профиту · `ЧР`=Чёрный рынок · `Брек`=Бреккилен · {server_name}\n"
+            f"⚠️ **Цены ЧР приблизительные** — NPC меняет цену каждые минуты.\n"
+            f"Данные собираются игроками и могут устаревать. Проверяй цену прямо в игре!"
+        )
 
         e = discord.Embed(title=title, description=desc, color=0xFFD700)
 
         for item in chunk:
             city_ru   = CITY_NAMES_RU.get(item["best_city"], item["best_city"]) if item["best_city"] else "—"
             brec_ru   = CITY_NAMES_RU["Brecilien"]
+
+            # Возраст данных
+            age_h = item.get("data_age_hours")
+            stale = item.get("data_stale", False)
+            if age_h is not None:
+                age_str = f"{'⚠️' if stale else '🕐'} данные: {age_h}ч назад"
+            else:
+                age_str = "🕐 возраст данных неизвестен"
 
             # Строка для лучшего города
             if item["best_city"]:
@@ -1911,17 +1939,24 @@ async def blackmarket(
             else:
                 brec_line = f"🌿 **{brec_ru}**: нет данных"
 
+            name_str = f"{'⚠️' if stale else '🗡️'} {item['name']}"
             e.add_field(
-                name=f"🗡️ {item['name']}",
-                value=f"{city_line}\n{brec_line}",
+                name=name_str,
+                value=f"{city_line}\n{brec_line}\n{age_str}",
                 inline=False
             )
             # Иконка предмета на первом элементе чанка
             if chunk_idx == 0 and item == chunk[0]:
                 e.set_thumbnail(url=item["icon_url"])
 
+        # Предупреждение если есть устаревшие данные
+        stale_count = sum(1 for item in top if item.get("data_stale"))
+        footer_warn = ""
+        if stale_count > 0:
+            footer_warn = f" · ⚠️ {stale_count} предметов с данными >3ч — цены могут быть неактуальны!"
+
         e.set_footer(
-            text=f"albion-online-data.com · {len(results)} предметов · Только T{tier}.0–T{tier}.4"
+            text=f"albion-online-data.com · {len(results)} предметов · T{tier}.0–T{tier}.4{footer_warn}"
         )
         await interaction.channel.send(embed=e)
 
