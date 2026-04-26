@@ -881,9 +881,9 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                     author: str = "", author_icon: str = "", thumbnail: str = "") -> discord.Embed:
         e = discord.Embed(description=description, color=color, timestamp=datetime.datetime.utcnow())
         if title:
-            e.set_author(name=title, icon_url=author_icon or discord.Embed.Empty)
+            e.set_author(name=title, icon_url=author_icon or None)
         elif author:
-            e.set_author(name=author, icon_url=author_icon or discord.Embed.Empty)
+            e.set_author(name=author, icon_url=author_icon or None)
         if thumbnail:
             e.set_thumbnail(url=thumbnail)
         ts = datetime.datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
@@ -917,11 +917,13 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
 
-        # Пропускаем команды — их обрабатывает main.py
-        if message.content.startswith(("-q", "-", "!")):
-            return
-
         gid, uid = message.guild.id, message.author.id
+
+        # Пропускаем команды — не анализируем как контент
+        # НО не делаем return — process_commands должен их получить
+        is_command = message.content.startswith(("-", "!"))
+        if is_command:
+            return  # просто не анализируем, process_commands в main.py сделает своё дело
 
         # Проверяем whitelist
         if _lists_cache[gid].get(uid) == "white": return
