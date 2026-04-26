@@ -912,8 +912,44 @@ async def setpremium(interaction: discord.Interaction, tier: int, days: int = 30
     await set_tier(interaction.guild_id, tier, days)
     await interaction.response.send_message(f"✅ **{TIER_NAMES.get(tier,'?')}** на {days} дней.", ephemeral=True)
 
-@bot.tree.command(name="subinfo", description="Статус подписки")
-async def subinfo(interaction: discord.Interaction):
+@bot.tree.command(name="sechelp", description="Advanced Security команды [-q prefix] — только для администраторов")
+async def sechelp(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            embed=make_embed("🔒 Нет доступа", "Только для администраторов.", C.DANGER),
+            ephemeral=True
+        )
+    e = make_embed(
+        title="🔐 Advanced Security — префикс `-q`",
+        description=(
+            "Расширенный модуль безопасности с AI анализом.\n"
+            "Все команды доступны **только администраторам**."
+        ),
+        color=0x5865F2,
+        footer="NexusBot Advanced Security"
+    )
+    commands_list = [
+        ("-q scan @user",      "Полное сканирование: threat intel + fingerprint + граф + подпись"),
+        ("-q threat @user",    "Threat Intelligence: возраст, паттерны, impersonation, unicode spoofing"),
+        ("-q graph @user",     "Граф социальных связей и кластерный анализ"),
+        ("-q fp @user",        "Поведенческий fingerprint: активность, стиль, risk score"),
+        ("-q nlp [текст]",     "NLP анализ токсичности, угроз и спама через AI"),
+        ("-q forensics [id]",  "Криминалистика сообщения: хеш, EXIF изображений, дубли"),
+        ("-q sig [id]",        "Проверить цифровую подпись модераторского действия"),
+        ("-q alert",           "Последние алерты безопасности"),
+        ("-q network",         "Статистика угроз и аномалий сервера"),
+        ("-q whitelist @user", "Добавить в whitelist (исключить из проверок)"),
+        ("-q blacklist @user", "Добавить в blacklist"),
+        ("-q report @user",    "Отправить в глобальную базу угроз (между серверами)"),
+        ("-q status",          "Статус всех систем: кэши, AI движок, HMAC"),
+        ("-q help",            "Этот список прямо в чате"),
+    ]
+    for cmd, desc in commands_list:
+        e.add_field(name=f"`{cmd}`", value=desc, inline=False)
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+
     tier = await get_tier(interaction.guild_id)
     e = discord.Embed(title="📋 Подписка", color=TIER_COLORS[tier])
     e.add_field(name="Тир", value=TIER_NAMES[tier], inline=True)
@@ -1112,6 +1148,18 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
                 ("Авто-защита", "`anti_raid` — кик при рейде\n`anti_spam` — таймаут при спаме\n`/lockdown` · `/slowmode`"),
                 ("Инвайты", "`/invcheck` `/invuser` `/invdel`"),
                 ("Модерация", "`/warn` `/warnings` `/clearwarn` `/purge` `/report`"),
+                ("🔐 Advanced Security (только администраторы)",
+                 "Префикс `-q` открывает расширенный модуль безопасности:\n"
+                 "`-q scan @user` — полное сканирование участника\n"
+                 "`-q threat @user` — threat intelligence проверка\n"
+                 "`-q graph @user` — граф социальных связей\n"
+                 "`-q fp @user` — поведенческий fingerprint\n"
+                 "`-q nlp [текст]` — NLP анализ токсичности\n"
+                 "`-q forensics [id]` — криминалистика сообщения\n"
+                 "`-q alert` — последние алерты\n"
+                 "`-q network` — статистика угроз сервера\n"
+                 "`-q status` — статус всех систем\n"
+                 "`-q help` — полный список команд"),
             ]
         },
         "pro": {
