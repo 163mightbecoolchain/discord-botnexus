@@ -761,6 +761,7 @@ async def refresh_invite_cache(guild) -> bool:
 async def on_ready():
     await db_init()
     print(f"🗄️  DB path: {DB_PATH}")
+    print(f"🔖 Witness build: 729b8616 | make_embed={True} | i18n={True}")
 
     # ── Загрузка Advanced Security Module ────────────────────
     try:
@@ -1577,7 +1578,7 @@ async def serverinfo(interaction: discord.Interaction):
         thumbnail=g.icon.url if g.icon else "",
         footer=f"ID: {g.id}"
     )
-    e.set_author(name=g.name, icon_url=g.icon.url if g.icon else discord.Embed.Empty)
+    e.set_author(name=g.name, icon_url=g.icon.url if g.icon else None)
     e.add_field(name="Участники",  value=f"**{humans}** люди · {bots} боты",                    inline=True)
     e.add_field(name="Каналы",     value=f"**{len(g.text_channels)}** текст · {len(g.voice_channels)} голос", inline=True)
     e.add_field(name="Роли",       value=f"**{len(g.roles)}**",                                  inline=True)
