@@ -877,10 +877,17 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
             return False
         return True
 
-    def _make_embed(self, title: str, description: str = "", color: int = SC.INFO) -> discord.Embed:
-        e = discord.Embed(title=title, description=description, color=color,
-                          timestamp=datetime.datetime.utcnow())
-        e.set_footer(text="Witness Security · -q help для списка команд")
+    def _make_embed(self, title: str = "", description: str = "", color: int = SC.INFO,
+                    author: str = "", author_icon: str = "", thumbnail: str = "") -> discord.Embed:
+        e = discord.Embed(description=description, color=color, timestamp=datetime.datetime.utcnow())
+        if title:
+            e.set_author(name=title, icon_url=author_icon or discord.Embed.Empty)
+        elif author:
+            e.set_author(name=author, icon_url=author_icon or discord.Embed.Empty)
+        if thumbnail:
+            e.set_thumbnail(url=thumbnail)
+        ts = datetime.datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
+        e.set_footer(text=f"Witness Security · {ts}")
         return e
 
     def _risk_color(self, score: float) -> int:
@@ -890,7 +897,19 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         return SC.LOW
 
     def _risk_emoji(self, level: str) -> str:
-        return {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(level.upper(), "⚪")
+        return {"CRITICAL": "●", "HIGH": "◆", "MEDIUM": "▲", "LOW": "✓"}.get(level.upper(), "○")
+
+    def _risk_label(self, score: float) -> str:
+        if score >= 70: return "CRITICAL"
+        if score >= 40: return "HIGH"
+        if score >= 20: return "MEDIUM"
+        return "LOW"
+
+    def _bar(self, value: float, max_val: float = 100, width: int = 10) -> str:
+        if max_val <= 0: return "░" * width
+        pct = min(value / max_val, 1.0)
+        n = round(pct * width)
+        return "█" * n + "░" * (width - n)
 
     # ── Слушатели событий ─────────────────────────────────────
 
