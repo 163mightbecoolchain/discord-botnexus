@@ -65,6 +65,8 @@ LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
 DB_PATH       = os.getenv("DB_PATH", "nexusbot.db")
+# Security module
+HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!
 ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
 ALBION_DATA   = "https://west.albion-online-data.com/api/v2"
 
@@ -447,7 +449,7 @@ async def get_user_invites(gid, inviter_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix=["-q ", "!"], intents=intents)
 OWNER_IDS = set()  # {YOUR_USER_ID}
 
 def upsell_embed(req):
@@ -530,6 +532,15 @@ async def refresh_invite_cache(guild) -> bool:
 async def on_ready():
     await db_init()
     print(f"🗄️  DB path: {DB_PATH}")
+
+    # ── Загрузка Advanced Security Module ────────────────────
+    try:
+        from security_module import setup as security_setup
+        await security_setup(bot)
+    except ImportError:
+        print("⚠️ security_module.py не найден — Advanced Security отключён")
+    except Exception as ex:
+        print(f"⚠️ Ошибка загрузки security модуля: {ex}")
 
     # Заполняем кэш инвайтов
     _invite_cache.clear()
