@@ -4,3 +4,4 @@ python-dotenv
 aiosqlite
 gspread
 google-auth
+Pillow
