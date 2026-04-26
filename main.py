@@ -54,30 +54,202 @@ from functools import wraps
 load_dotenv()
 
 TOKEN         = os.getenv("DISCORD_TOKEN")
-GROQ_KEY      = os.getenv("GROQ_API_KEY")        # FREE: console.groq.com
-GEMINI_KEY    = os.getenv("GEMINI_API_KEY")       # FREE: aistudio.google.com
-ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")    # paid fallback
+GROQ_KEY      = os.getenv("GROQ_API_KEY")
+GEMINI_KEY    = os.getenv("GEMINI_API_KEY")
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
 WEATHER_KEY   = os.getenv("WEATHER_API_KEY")
 HENRIK_KEY    = os.getenv("HENRIK_API_KEY")
 RIOT_KEY      = os.getenv("RIOT_API_KEY")
 STEAM_KEY     = os.getenv("STEAM_API_KEY")
 LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
-# Google Sheets (опционально, для /blackmarket sheets:yes)
-# GOOGLE_CREDENTIALS = весь JSON service account ключа одной строкой
-# SHEET_ID = ID таблицы из URL: docs.google.com/spreadsheets/d/ВОТ_ЭТО/edit
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
-
-# База данных — используем путь из переменной окружения если есть
-# На Railway: добавь Volume и укажи DB_PATH=/data/nexusbot.db в переменных
-# Без этого данные сбрасываются при каждом деплое!
-DB_PATH     = os.getenv("DB_PATH", "nexusbot.db")
-ALBION_BASE = "https://gameinfo.albiononline.com/api/gameinfo"
-ALBION_DATA = "https://west.albion-online-data.com/api/v2"
+DB_PATH       = os.getenv("DB_PATH", "nexusbot.db")
+ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
+ALBION_DATA   = "https://west.albion-online-data.com/api/v2"
 
 TIER_FREE, TIER_PREMIUM, TIER_PRO = 0, 1, 2
 TIER_NAMES  = {0: "Free", 1: "⭐ Premium", 2: "💎 Pro"}
 TIER_COLORS = {0: 0x6b7fa3, 1: 0x00E5FF, 2: 0xFFD700}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ДИЗАЙН-СИСТЕМА
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class C:
+    """Цветовая палитра NexusBot"""
+    PRIMARY   = 0x5865F2   # Discord blurple — основной цвет бота
+    SUCCESS   = 0x57F287   # Зелёный — успех, прибыль
+    DANGER    = 0xED4245   # Красный — ошибка, убыток
+    WARNING   = 0xFEE75C   # Жёлтый — предупреждение, устаревшие данные
+    INFO      = 0x00B0F4   # Голубой — информация, Albion
+    GOLD      = 0xF0B232   # Золотой — Pro, награды, топ
+    MUTED     = 0x36393F   # Тёмный — нейтральный
+    PREMIUM   = 0x00E5FF   # Циан — Premium
+    PRO       = 0xFFD700   # Золото — Pro tier
+    FREE      = 0x6b7fa3   # Серый — Free tier
+
+
+def bar(value: float, max_val: float = 100, width: int = 10, filled: str = "█", empty: str = "░") -> str:
+    """Прогресс-бар: bar(75) → ████████░░ 75%"""
+    if max_val <= 0: return empty * width
+    pct = min(value / max_val, 1.0)
+    filled_n = round(pct * width)
+    return filled * filled_n + empty * (width - filled_n)
+
+
+def profit_color(pct: float) -> int:
+    """Цвет по % профита"""
+    if pct >= 30:  return C.SUCCESS
+    if pct >= 10:  return C.GOLD
+    if pct >= 0:   return C.INFO
+    return C.DANGER
+
+
+def make_embed(title: str = "", description: str = "", color: int = C.PRIMARY,
+               footer: str = "", thumbnail: str = "") -> discord.Embed:
+    """Создаёт эмбед в едином стиле NexusBot"""
+    e = discord.Embed(title=title, description=description, color=color)
+    ts = datetime.datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
+    e.set_footer(text=f"NexusBot · {footer + ' · ' if footer else ''}{ts}")
+    if thumbnail:
+        e.set_thumbnail(url=thumbnail)
+    return e
+
+
+def tier_badge(tier: int) -> str:
+    return {0: "🔓 Free", 1: "⭐ Premium", 2: "💎 Pro"}.get(tier, "?")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  UI КОМПОНЕНТЫ
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class HelpView(discord.ui.View):
+    """Select Menu для /help — выбор раздела"""
+    PAGES = {
+        "general":  "📖 Основные",
+        "albion":   "⚔️ Albion",
+        "games":    "🎮 Игры",
+        "security": "🛡️ Безопасность",
+        "pro":      "💎 Pro",
+        "ai":       "🤖 AI",
+    }
+
+    def __init__(self, current_page: str, guild_tier: int):
+        super().__init__(timeout=120)
+        self.current_page = current_page
+        self.guild_tier = guild_tier
+
+        select = discord.ui.Select(
+            placeholder=f"Раздел: {self.PAGES.get(current_page, '?')}",
+            options=[
+                discord.SelectOption(
+                    label=label,
+                    value=key,
+                    default=(key == current_page),
+                    emoji=label.split()[0]
+                )
+                for key, label in self.PAGES.items()
+            ]
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+
+    async def on_select(self, interaction: discord.Interaction):
+        page = interaction.data["values"][0]
+        embed = build_help_embed(page, self.guild_tier)
+        await interaction.response.edit_message(embed=embed, view=HelpView(page, self.guild_tier))
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class PaginatedView(discord.ui.View):
+    """Кнопки пагинации для больших результатов"""
+
+    def __init__(self, pages: list[discord.Embed], current: int = 0):
+        super().__init__(timeout=180)
+        self.pages = pages
+        self.current = current
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_btn.disabled = self.current == 0
+        self.next_btn.disabled = self.current >= len(self.pages) - 1
+        self.counter.label = f"{self.current + 1} / {len(self.pages)}"
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current -= 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    @discord.ui.button(label="1 / 1", style=discord.ButtonStyle.secondary, disabled=True)
+    async def counter(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current += 1
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.pages[self.current], view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class BlackmarketCategoryView(discord.ui.View):
+    """Select Menu для выбора категории в /blackmarket"""
+
+    def __init__(self, tier: int, server: str, current_cat: str):
+        super().__init__(timeout=60)
+        self.tier = tier
+        self.server = server
+
+        options = [
+            discord.SelectOption(label="Оружие (все)", value="weapon", emoji="⚔️", default=current_cat=="weapon"),
+            discord.SelectOption(label="Offhand", value="offhand", emoji="🛡️", default=current_cat=="offhand"),
+            discord.SelectOption(label="Броня: Латы", value="armor_plate", emoji="🪖", default=current_cat=="armor_plate"),
+            discord.SelectOption(label="Броня: Кожа", value="armor_leather", emoji="🧥", default=current_cat=="armor_leather"),
+            discord.SelectOption(label="Броня: Ткань", value="armor_cloth", emoji="👘", default=current_cat=="armor_cloth"),
+            discord.SelectOption(label="Сумки", value="bag", emoji="🎒", default=current_cat=="bag"),
+        ]
+        select = discord.ui.Select(placeholder="Выбрать категорию...", options=options)
+        select.callback = self.on_select
+        self.add_item(select)
+
+    async def on_select(self, interaction: discord.Interaction):
+        cat = interaction.data["values"][0]
+        await interaction.response.send_message(
+            f"⏳ Загружаю **{cat}** T{self.tier} · {ALBION_SERVER_NAMES.get(self.server,'EU')}...",
+            ephemeral=True
+        )
+        # Запускаем полный запрос
+        await run_blackmarket(interaction, cat, self.tier, self.server, "no")
+
+
+class ConfirmView(discord.ui.View):
+    """Кнопки подтверждения Да/Нет"""
+
+    def __init__(self):
+        super().__init__(timeout=30)
+        self.confirmed = None
+
+    @discord.ui.button(label="✅ Да", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="❌ Нет", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.confirmed = False
+        self.stop()
+        await interaction.response.defer()
+
 
 _cooldowns: dict = {}
 _spam_tracker: dict = {}
@@ -97,6 +269,7 @@ def cooldown(seconds: int):
             return await func(interaction, *args, **kwargs)
         return wrapper
     return decorator
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  DATABASE — per-guild isolation
@@ -278,9 +451,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 OWNER_IDS = set()  # {YOUR_USER_ID}
 
 def upsell_embed(req):
-    return discord.Embed(title="🔒 Требуется апгрейд",
-        description=f"Нужен **{req}**\n\n⭐ Premium — €4.99/мес\n💎 Pro — €9.99/мес\nnexusbot.gg/premium",
-        color=0xFF4444)
+    e = make_embed(
+        title="🔒 Требуется апгрейд",
+        description=(
+            f"Эта функция требует **{req}**\n\n"
+            f"⭐ **Premium** — €4.99/мес\n"
+            f"💎 **Pro** — €9.99/мес\n\n"
+            f"nexusbot.gg/premium"
+        ),
+        color=C.DANGER
+    )
+    return e
 
 # ── AI: Groq (free) → Gemini (free) → Claude (paid) ──────────
 async def ask_ai(prompt, system="You are NexusBot, a helpful Discord assistant. Be concise."):
@@ -874,108 +1055,121 @@ async def purge(interaction: discord.Interaction, count: int):
 #  FREE COMMANDS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@bot.tree.command(name="help", description="Все команды бота")
-@app_commands.describe(page="Раздел: general / albion / games / security / pro / ai")
-async def help_cmd(interaction: discord.Interaction, page: str = "general"):
-    tier = await get_tier(interaction.guild_id)
-    tier_name = TIER_NAMES[tier]
-    color = TIER_COLORS[tier]
-    page = page.lower()
 
-    pages = {
+def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
+    """Строит эмбед для /help по выбранному разделу"""
+    PAGES = {
         "general": {
             "title": "📖 Основные команды",
+            "color": C.PRIMARY,
             "fields": [
-                ("🆓 Информация", "`/ping` — latency бота\n`/userinfo` — инфо о пользователе\n`/serverinfo` — инфо о сервере\n`/subinfo` — статус подписки"),
-                ("🆓 XP и экономика", "`/rank` — твой уровень и XP\n`/leaderboard` — топ 10 активных\n`/coins` — баланс монет"),
-                ("🆓 Утилиты", "`/poll` — создать опрос с реакциями\n`/remind` — напоминание в личку\n`/lfg` — Looking For Group пост\n`/weather` — погода в городе\n`/translate` — перевод текста"),
-                ("🆓 Комьюнити", "`/birthday` — зарегистрировать ДР\n`/suggestion` — предложение с голосованием\n`/ticket` — открыть тикет поддержки"),
-                ("⭐ Premium", "`/starboard` — настроить зал славы\n`/serverstats` — статистика активности\n`/giveaway` — розыгрыш\n`/roast` — AI роаст участника\n`/summarize` — AI резюме чата\n`/imagine` — генерация изображений"),
+                ("🆓 Информация", "`/ping` `/userinfo` `/serverinfo` `/subinfo`"),
+                ("🆓 XP и экономика", "`/rank` `/leaderboard` `/coins`"),
+                ("🆓 Утилиты", "`/poll` `/remind` `/lfg` `/weather` `/translate`"),
+                ("🆓 Комьюнити", "`/birthday` `/suggestion` `/ticket`"),
+                ("⭐ Premium", "`/starboard` `/serverstats` `/giveaway` `/roast` `/summarize` `/imagine`"),
             ]
         },
         "albion": {
             "title": "⚔️ Albion Online",
+            "color": C.INFO,
             "fields": [
-                ("🆓 Игроки", "`/stats [player]` — статистика игрока\n`/kills [player]` — последние убийства\n`/deaths [player]` — последние смерти\n`/history [player]` — активность за 7 дней\n`/compare [p1] [p2]` — сравнение двух игроков"),
-                ("🆓 Гильдии и битвы", "`/guild [name]` — инфо о гильдии + топ участников\n`/battle` — последние ZvZ битвы\n`/party [p1..p5]` — анализ состава группы"),
-                ("💎 Pro — Рынок", "`/blackmarket [category] [tier] [server]` — топ профитных предметов\n  категории: `weapon` `armor` `bag` или конкретный ключ (`sword`, `bow`...)\n  сервера: `eu` `us` `asia`\n`/craftcalc [tier] [server]` — таблица крафта → Google Sheets\n`/flipper [category] [tier]` — арбитраж между городами"),
-                ("💎 Pro — Экспертиза", "`/guildwar` — топ гильдий по ZvZ активности\n`/pricewatch` — слежка за ценой предмета\n`/askalbion` — AI эксперт по игре"),
+                ("🆓 Игроки", "`/stats` `/kills` `/deaths` `/history` `/compare`"),
+                ("🆓 Гильдии", "`/guild` `/battle` `/party`"),
+                ("💎 Pro — Рынок", "`/blackmarket` — топ профитных предметов\n`/craftcalc` — таблица крафта → Google Sheets\n`/flipper` — арбитраж между городами"),
+                ("💎 Pro — Прочее", "`/guildwar` `/pricewatch` `/askalbion`"),
             ]
         },
         "games": {
             "title": "🎮 Другие игры",
+            "color": C.SUCCESS,
             "fields": [
-                ("🆓 Minecraft", "`/mc [address]` — статус сервера (онлайн, версия, MOTD)"),
-                ("🆓 Old School RuneScape", "`/rs [username]` — навыки и уровни игрока"),
-                ("⭐ Premium — Valorant", "`/val [Name#TAG]` — ранг, RR, пиковый ранг"),
-                ("⭐ Premium — CS2", "`/cs2 [steam_id]` — K/D, убийства, победы, HS%"),
-                ("⭐ Premium — League of Legends", "`/lol [summoner] [region]` — ранг, LP, винрейт"),
-                ("⭐ Premium — Lost Ark", "`/lostark [character]` — персонажи и item level"),
+                ("🆓 Minecraft", "`/mc [address]` — статус сервера"),
+                ("🆓 Old School RuneScape", "`/rs [username]` — навыки игрока"),
+                ("⭐ Valorant", "`/val [Name#TAG]` — ранг и RR"),
+                ("⭐ CS2", "`/cs2 [steam_id]` — статистика"),
+                ("⭐ League of Legends", "`/lol [summoner]` — ранг и WR"),
+                ("⭐ Lost Ark", "`/lostark [character]` — item level"),
             ]
         },
         "security": {
-            "title": "🛡️ Безопасность (Premium)",
+            "title": "🛡️ Безопасность",
+            "color": C.WARNING,
             "fields": [
-                ("Настройка", "`/security status` — статус всех модулей\n`/security toggle [module]` — вкл/выкл модуль\n`/security setlog [#channel]` — канал для логов"),
-                ("Модули логирования", "`joins` `leaves` `bans` `timeouts` `msg_delete` `msg_edit`\n`invites` `suspicious` `nick_change` `role_change` `avatar_change`\n`voice` `channels` `roles` `server_edit` `reactions` `threads`"),
-                ("Авто-защита", "`anti_raid` — авто-кик при 8+ входах за 10 сек\n`anti_spam` — авто-таймаут при 6+ сообщениях за 5 сек\n`/lockdown [on/off]` — запрет входа новым аккаунтам\n`/slowmode [sec]` — замедление канала"),
-                ("Инвайты", "`/invcheck [code]` — кто использовал инвайт\n`/invuser [member]` — кого пригласил пользователь\n`/invdel [code]` — удалить инвайт"),
-                ("Модерация", "`/warn [member] [reason]` — выдать варн\n`/warnings [member]` — список варнов\n`/clearwarn [id]` — снять варн\n`/purge [count]` — удалить сообщения\n`/report [msg_id] [reason]` — пожаловаться на сообщение"),
+                ("Настройка", "`/security status` · `toggle` · `setlog`"),
+                ("Логирование", "`joins` `leaves` `bans` `timeouts`\n`msg_delete` `msg_edit` `invites` `suspicious`\n`nick_change` `role_change` `voice` и ещё 8 модулей"),
+                ("Авто-защита", "`anti_raid` — кик при рейде\n`anti_spam` — таймаут при спаме\n`/lockdown` · `/slowmode`"),
+                ("Инвайты", "`/invcheck` `/invuser` `/invdel`"),
+                ("Модерация", "`/warn` `/warnings` `/clearwarn` `/purge` `/report`"),
             ]
         },
         "pro": {
-            "title": "💎 Pro команды (€9.99/мес)",
+            "title": "💎 Pro — €9.99/мес",
+            "color": C.GOLD,
             "fields": [
-                ("Albion: Чёрный рынок", "`/blackmarket category:weapon tier:8 server:eu`\nКатегории: `weapon` `offhand` `armor_plate` `armor_leather` `armor_cloth` `bag`\nКонкретный предмет: `broadsword` `holystaff` `knightarmor` и др."),
-                ("Albion: Крафт", "`/craftcalc tier:8 server:eu [tax:8]`\nЭкспортирует таблицу крафта всех предметов в Google Sheets."),
-                ("Albion: Торговля", "`/flipper category:weapon tier:8` — арбитраж между городами\n`/pricewatch action:add item_key:sword tier:8` — слежка за ценой\n`/pricewatch action:list` — список подписок\n`/pricewatch action:remove item_key:1` — удалить"),
-                ("Турниры и статистика", "`/tournament [name] [participants]` — сетка турнира\n`/guildwar [limit]` — топ гильдий по ZvZ\n`/party [p1] [p2] [p3]` — анализ состава статика"),
+                ("Чёрный рынок", "`/blackmarket category:weapon tier:8`\nКатегории: `weapon` `offhand` `armor_plate` `armor_leather` `armor_cloth` `bag`\nⓘ Нажми кнопку Select в ответе бота для выбора категории"),
+                ("Крафт-калькулятор", "`/craftcalc tier:8 server:eu tax:8`\nЭкспорт всех предметов T6–T8 в Google Sheets"),
+                ("Торговля", "`/flipper` — арбитраж между городами\n`/pricewatch` — алерты на изменение цены"),
+                ("Статистика", "`/guildwar` · `/party` · `/tournament`"),
             ]
         },
         "ai": {
             "title": "🤖 AI команды",
+            "color": C.PREMIUM,
             "fields": [
-                ("Бесплатные AI", "Бот использует современные языковые модели для ответов на вопросы."),
-                ("⭐ Premium — Текст", "`/ai [question]` — спросить AI что угодно\n`/summarize [count]` — AI резюме последних N сообщений\n`/askalbion [question]` — AI эксперт по Albion Online"),
-                ("⭐ Premium — Развлечения", "`/roast [member]` — AI роаст участника сервера\n`/imagine [prompt] [style]` — генерация изображения\n  стили: `realistic` `anime` `pixel` `oil-painting`\n  Бесплатно через Pollinations.ai — ключ не нужен!"),
-                ("💎 Pro — Albion AI", "`/party` — AI вердикт на состав группы\n`/askalbion` — советы по крафту, PvP, экономике"),
+                ("ⓘ AI движок", "Бот использует **Groq** (Llama 3.3 70B) и **Gemini** — бесплатно."),
+                ("⭐ Текст", "`/ai` `/summarize` `/askalbion`"),
+                ("⭐ Развлечения", "`/roast` — роаст участника\n`/imagine` — генерация изображений (Pollinations.ai)"),
+                ("💎 Pro + AI", "`/party` — AI вердикт на состав группы"),
             ]
         },
     }
 
-    if page not in pages:
+    if page not in PAGES:
         page = "general"
 
-    data = pages[page]
-    e = discord.Embed(title=data["title"], color=color)
+    data = PAGES[page]
+    tier_name = TIER_NAMES.get(guild_tier, "Free")
+    tier_bar = bar(guild_tier, 2, 5)
+
+    e = make_embed(
+        title=data["title"],
+        color=data["color"],
+        footer=f"Тир: {tier_badge(guild_tier)} · nexusbot.gg"
+    )
 
     for name, val in data["fields"]:
         e.add_field(name=name, value=val, inline=False)
 
-    # Навигация
-    nav_pages = {
-        "general": "📖 Основные",
-        "albion": "⚔️ Albion",
-        "games": "🎮 Игры",
-        "security": "🛡️ Безопасность",
-        "pro": "💎 Pro",
-        "ai": "🤖 AI",
-    }
-    nav = " · ".join(
-        f"**[{v}]**" if k == page else f"`/help page:{k}`"
-        for k, v in nav_pages.items()
+    e.add_field(
+        name="Подписка",
+        value=f"{tier_badge(guild_tier)} `{tier_bar}` · nexusbot.gg/premium",
+        inline=False
     )
-    e.add_field(name="Навигация", value=nav, inline=False)
-    e.set_footer(text=f"Текущий тир: {tier_name} · nexusbot.gg · 56 команд")
+    return e
 
-    await interaction.response.send_message(embed=e)
+
+@bot.tree.command(name="help", description="Все команды бота")
+@app_commands.describe(page="Раздел: general / albion / games / security / pro / ai")
+async def help_cmd(interaction: discord.Interaction, page: str = "general"):
+    tier = await get_tier(interaction.guild_id)
+    embed = build_help_embed(page.lower(), tier)
+    view = HelpView(page.lower(), tier)
+    await interaction.response.send_message(embed=embed, view=view)
+
+
 
 
 @bot.tree.command(name="ping")
 async def ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
-    color = 0x00FF9D if ms<100 else 0xFFA500 if ms<200 else 0xFF4444
-    await interaction.response.send_message(embed=discord.Embed(title="🏓 Pong!", description=f"**{ms}ms**", color=color))
+    color = C.SUCCESS if ms<100 else C.WARNING if ms<200 else C.DANGER
+    quality = "Отлично" if ms<100 else "Нормально" if ms<200 else "Плохо"
+    e = make_embed(title="🏓 Pong!", color=color)
+    e.add_field(name="Latency", value=f"`{ms}ms`", inline=True)
+    e.add_field(name="Качество", value=quality, inline=True)
+    e.add_field(name="Статус", value=f"`{bar(max(0,200-ms), 200, 8)}` {100-min(ms//2,100)}%", inline=True)
+    await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="userinfo")
 @app_commands.describe(member="Пользователь")
@@ -995,22 +1189,40 @@ async def userinfo(interaction: discord.Interaction, member: discord.Member = No
 
 @bot.tree.command(name="serverinfo")
 async def serverinfo(interaction: discord.Interaction):
-    g = interaction.guild; tier = await get_tier(g.id)
-    e = discord.Embed(title=f"🏠 {g.name}", color=TIER_COLORS[tier])
-    if g.icon: e.set_thumbnail(url=g.icon.url)
-    e.add_field(name="Участники", value=g.member_count, inline=True)
-    e.add_field(name="Каналы", value=len(g.channels), inline=True)
-    e.add_field(name="NexusBot", value=TIER_NAMES[tier], inline=True)
+    g = interaction.guild
+    tier = await get_tier(g.id)
+    bots = sum(1 for m in g.members if m.bot)
+    humans = g.member_count - bots
+    e = make_embed(
+        title=f"🏠 {g.name}",
+        color=TIER_COLORS[tier],
+        thumbnail=g.icon.url if g.icon else "",
+        footer=f"ID: {g.id}"
+    )
+    e.add_field(name="👥 Участники", value=f"**{humans}** людей · {bots} ботов", inline=True)
+    e.add_field(name="📁 Каналы", value=f"**{len(g.text_channels)}** текст · {len(g.voice_channels)} голос", inline=True)
+    e.add_field(name="🎭 Роли", value=f"**{len(g.roles)}**", inline=True)
+    e.add_field(name="💎 Буст", value=f"Уровень **{g.premium_tier}** · {g.premium_subscription_count} бустов", inline=True)
+    e.add_field(name="📅 Создан", value=g.created_at.strftime("%d.%m.%Y"), inline=True)
+    e.add_field(name="NexusBot", value=tier_badge(tier), inline=True)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="rank")
 async def rank(interaction: discord.Interaction):
     xp = await get_xp(interaction.guild_id, interaction.user.id)
-    p = xp % 100; bar = "█"*(p//10)+"░"*(10-p//10)
-    e = discord.Embed(title=f"⚡ {interaction.user.display_name}", color=0x7C3AED)
-    e.add_field(name="Уровень", value=f"**{xp//100}**", inline=True)
-    e.add_field(name="XP", value=f"**{xp}**", inline=True)
-    e.add_field(name="Прогресс", value=f"`{bar}` {p}/100", inline=False)
+    lvl = xp // 100
+    progress = xp % 100
+    progress_bar = bar(progress, 100, 12)
+    coins = await get_coins(interaction.guild_id, interaction.user.id)
+    e = make_embed(
+        title=f"⚡ {interaction.user.display_name}",
+        color=C.PRIMARY,
+        thumbnail=interaction.user.display_avatar.url
+    )
+    e.add_field(name="🏆 Уровень", value=f"**{lvl}**", inline=True)
+    e.add_field(name="✨ XP", value=f"**{xp:,}**", inline=True)
+    e.add_field(name="🪙 Монеты", value=f"**{coins:,}**", inline=True)
+    e.add_field(name=f"Прогресс до ур. {lvl+1}", value=f"`{progress_bar}` **{progress}/100 XP**", inline=False)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="leaderboard")
@@ -1024,7 +1236,13 @@ async def leaderboard(interaction: discord.Interaction):
 @bot.tree.command(name="coins")
 async def coins_cmd(interaction: discord.Interaction):
     c = await get_coins(interaction.guild_id, interaction.user.id)
-    await interaction.response.send_message(embed=discord.Embed(title="💰 Баланс", description=f"**{interaction.user.display_name}** — **{c} монет** 🪙", color=0xFFD700))
+    xp = await get_xp(interaction.guild_id, interaction.user.id)
+    e = make_embed(title="💰 Баланс", color=C.GOLD)
+    e.add_field(name="🪙 Монеты", value=f"**{c:,}**", inline=True)
+    e.add_field(name="⚡ XP", value=f"**{xp:,}**", inline=True)
+    e.add_field(name="🏆 Уровень", value=f"**{xp//100}**", inline=True)
+    e.set_footer(text=f"NexusBot · +1 монета за каждое сообщение")
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="poll")
 @app_commands.describe(question="Вопрос", option1="Вариант 1", option2="Вариант 2", option3="Вариант 3", option4="Вариант 4")
@@ -1891,74 +2109,64 @@ async def blackmarket(
     if not results:
         return await interaction.channel.send("❌ Нет данных о ценах. Попробуй позже.")
 
-    # ── Discord embeds (по 5 предметов на embed из-за лимита полей) ──
-    top = results[:10]
-    chunks = [top[i:i+5] for i in range(0, len(top), 5)]
+    # ── Строим страницы с пагинацией (5 предметов на страницу) ──
+    top = results[:20]
+    stale_count = sum(1 for item in top if item.get("data_stale"))
 
-    for chunk_idx, chunk in enumerate(chunks):
-        title = (f"💰 Чёрный рынок — {cat_label} T{tier} · {server_name}"
-                 if chunk_idx == 0 else f"💰 (продолжение)")
-        desc = (
-            f"Топ по % профиту · `ЧР`=Чёрный рынок · `Брек`=Бреккилен · {server_name}\n"
-            f"⚠️ **Цены ЧР приблизительные** — NPC меняет цену каждые минуты.\n"
-            f"Данные собираются игроками и могут устаревать. Проверяй цену прямо в игре!"
+    def build_bm_page(items_chunk: list, page_num: int, total_pages: int) -> discord.Embed:
+        color = profit_color(items_chunk[0]["city_pct"] if items_chunk else 0)
+        desc_lines = f"{server_name} · Топ по % профиту\n⚠️ Цены ЧР приблизительные — проверяй в игре перед продажей!"
+        if stale_count:
+            desc_lines += f"\n⚠️ **{stale_count} предметов** с устаревшими данными (>3ч)"
+        e = make_embed(
+            title=f"💰 Чёрный рынок — {cat_label} T{tier}",
+            description=desc_lines,
+            color=color,
+            footer=f"albion-online-data.com · {len(results)} предметов · стр. {page_num}/{total_pages}"
         )
-
-        e = discord.Embed(title=title, description=desc, color=0xFFD700)
-
-        for item in chunk:
-            city_ru   = CITY_NAMES_RU.get(item["best_city"], item["best_city"]) if item["best_city"] else "—"
-            brec_ru   = CITY_NAMES_RU["Brecilien"]
-
-            # Возраст данных
+        for item in items_chunk:
+            city_ru = CITY_NAMES_RU.get(item["best_city"], item["best_city"]) if item["best_city"] else "—"
             age_h = item.get("data_age_hours")
             stale = item.get("data_stale", False)
-            if age_h is not None:
-                age_str = f"{'⚠️' if stale else '🕐'} данные: {age_h}ч назад"
-            else:
-                age_str = "🕐 возраст данных неизвестен"
+            age_str = f"{'⚠️' if stale else '🕐'} {age_h}ч" if age_h is not None else "🕐 ?"
 
-            # Строка для лучшего города
             if item["best_city"]:
                 city_line = (
-                    f"🏙️ **{city_ru}** (рынок продажи): `{item['best_city_sell']:,}` → ЧР: `{item['bm']:,}`\n"
-                    f"   Профит: **{item['city_profit']:,}** (**{item['city_pct']}%**)"
+                    f"🏙️ **{city_ru}**: `{item['best_city_sell']:,}` → `{item['bm']:,}` "
+                    f"(**+{item['city_pct']}%** / {item['city_profit']:,})"
                 )
-                if item["best_city_buy"] > 0:
-                    city_line += f"\n   *(ордер покупки в городе: `{item['best_city_buy']:,}`)*"
             else:
                 city_line = "🏙️ Нет цены в городах"
 
-            # Строка для Бреккилена
             if item["brec_price"] > 0:
-                price_type = "ордер покупки" if item["brec_is_buy_order"] else "рынок продажи"
+                brec_type = "ord" if item["brec_is_buy_order"] else "mkt"
                 brec_line = (
-                    f"🌿 **{brec_ru}** ({price_type}): `{item['brec_price']:,}` → ЧР: `{item['bm']:,}`\n"
-                    f"   Профит: **{item['brec_profit']:,}** (**{item['brec_pct']}%**)"
+                    f"🌿 Брек [{brec_type}]: `{item['brec_price']:,}` → `{item['bm']:,}` "
+                    f"(**+{item['brec_pct']}%**)"
                 )
             else:
-                brec_line = f"🌿 **{brec_ru}**: нет данных"
+                brec_line = "🌿 Брек: нет данных"
 
-            name_str = f"{'⚠️' if stale else '🗡️'} {item['name']}"
+            icon = "⚠️" if stale else ("🟢" if item["city_pct"] >= 20 else "🟡" if item["city_pct"] >= 5 else "🔴")
             e.add_field(
-                name=name_str,
-                value=f"{city_line}\n{brec_line}\n{age_str}",
+                name=f"{icon} {item['name']} {age_str}",
+                value=f"{city_line}\n{brec_line}",
                 inline=False
             )
-            # Иконка предмета на первом элементе чанка
-            if chunk_idx == 0 and item == chunk[0]:
-                e.set_thumbnail(url=item["icon_url"])
+        if top:
+            e.set_thumbnail(url=top[0]["icon_url"])
+        return e
 
-        # Предупреждение если есть устаревшие данные
-        stale_count = sum(1 for item in top if item.get("data_stale"))
-        footer_warn = ""
-        if stale_count > 0:
-            footer_warn = f" · ⚠️ {stale_count} предметов с данными >3ч — цены могут быть неактуальны!"
+    chunks = [top[i:i+5] for i in range(0, len(top), 5)]
+    pages = [build_bm_page(chunk, i+1, len(chunks)) for i, chunk in enumerate(chunks)]
 
-        e.set_footer(
-            text=f"albion-online-data.com · {len(results)} предметов · T{tier}.0–T{tier}.4{footer_warn}"
-        )
-        await interaction.channel.send(embed=e)
+    view = PaginatedView(pages)
+    # Добавляем Select Menu для смены категории
+    cat_view = BlackmarketCategoryView(tier, server, cat_lower)
+    for item in cat_view.children:
+        view.add_item(item)
+
+    await interaction.channel.send(embed=pages[0], view=view)
 
     # ── Google Sheets export ───────────────────────────────────
     if sheets.lower() in ("yes", "да", "y"):
