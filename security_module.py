@@ -1,5 +1,5 @@
 """
-NexusBot — Advanced Security Module
+Witness — Advanced Security Module
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Префиксные команды: -q <command>
 Доступ: только администраторы (administrator permission)
@@ -50,7 +50,7 @@ from typing import Optional
 
 # ── Константы ────────────────────────────────────────────────
 PREFIX        = "-q"
-DB_PATH       = os.getenv("DB_PATH", "nexusbot.db")
+DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 HMAC_SECRET   = os.getenv("HMAC_SECRET", hashlib.sha256(os.urandom(32)).hexdigest())
 
 # Цвета для эмбедов модуля безопасности
@@ -880,7 +880,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
     def _make_embed(self, title: str, description: str = "", color: int = SC.INFO) -> discord.Embed:
         e = discord.Embed(title=title, description=description, color=color,
                           timestamp=datetime.datetime.utcnow())
-        e.set_footer(text="NexusBot Security · -q help для списка команд")
+        e.set_footer(text="Witness Security · -q help для списка команд")
         return e
 
     def _risk_color(self, score: float) -> int:
@@ -1014,7 +1014,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
     # ── -q help ───────────────────────────────────────────────
     async def _cmd_help(self, ctx, *args):
-        e = self._make_embed("🔐 NexusBot Advanced Security", color=SC.INFO)
+        e = self._make_embed("🔐 Witness Advanced Security", color=SC.INFO)
         cmds = [
             ("`-q scan @user`",      "Полный анализ участника (все проверки)"),
             ("`-q threat @user`",    "Threat Intelligence проверка"),
@@ -1032,7 +1032,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         ]
         for cmd, desc in cmds:
             e.add_field(name=cmd, value=desc, inline=False)
-        e.set_footer(text="Только для администраторов · NexusBot Security")
+        e.set_footer(text="Только для администраторов · Witness Security")
         await ctx.send(embed=e)
 
     # ── -q scan @user ─────────────────────────────────────────
@@ -1104,7 +1104,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
         # Подписываем действие
         action_id = await log_signed_action(ctx.guild.id, ctx.author.id, "SCAN", member.id, "Полное сканирование")
-        e.set_footer(text=f"Action ID: #{action_id} · NexusBot Security")
+        e.set_footer(text=f"Action ID: #{action_id} · Witness Security")
 
         await ctx.send(embed=e)
 
@@ -1490,7 +1490,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         e = self._make_embed("📋 Добавлено в глобальную базу угроз", color=SC.WARNING)
         e.add_field(name="Участник", value=f"{member.mention} (`{member.name}`)", inline=True)
         e.add_field(name="Причина", value=reason, inline=True)
-        e.description = "Этот участник будет отмечен при входе на другие серверы с NexusBot."
+        e.description = "Этот участник будет отмечен при входе на другие серверы с Witness."
         await ctx.send(embed=e)
 
     # ── -q status ─────────────────────────────────────────────
