@@ -907,10 +907,10 @@ async def help_cmd(interaction: discord.Interaction, page: str = "general"):
             "fields": [
                 ("🆓 Minecraft", "`/mc [address]` — статус сервера (онлайн, версия, MOTD)"),
                 ("🆓 Old School RuneScape", "`/rs [username]` — навыки и уровни игрока"),
-                ("⭐ Premium — Valorant", "`/val [Name#TAG]` — ранг, RR, пиковый ранг\nТребует: `HENRIK_API_KEY`"),
-                ("⭐ Premium — CS2", "`/cs2 [steam_id]` — K/D, убийства, победы, HS%\nТребует: `STEAM_API_KEY`"),
-                ("⭐ Premium — League of Legends", "`/lol [summoner] [region]` — ранг, LP, винрейт\nТребует: `RIOT_API_KEY`"),
-                ("⭐ Premium — Lost Ark", "`/lostark [character]` — персонажи и item level\nТребует: `LOSTARK_API_KEY`"),
+                ("⭐ Premium — Valorant", "`/val [Name#TAG]` — ранг, RR, пиковый ранг"),
+                ("⭐ Premium — CS2", "`/cs2 [steam_id]` — K/D, убийства, победы, HS%"),
+                ("⭐ Premium — League of Legends", "`/lol [summoner] [region]` — ранг, LP, винрейт"),
+                ("⭐ Premium — Lost Ark", "`/lostark [character]` — персонажи и item level"),
             ]
         },
         "security": {
@@ -926,8 +926,8 @@ async def help_cmd(interaction: discord.Interaction, page: str = "general"):
         "pro": {
             "title": "💎 Pro команды (€9.99/мес)",
             "fields": [
-                ("Albion: Чёрный рынок", "`/blackmarket category:weapon tier:8 server:eu`\n`/blackmarket category:sword tier:7`\nКатегории оружия: `sword` `claymore` `axe` `bow` `spear` `firestaff` и др.\nБроня: `mercjacket` `assjacket` `huntjacket` и др."),
-                ("Albion: Крафт", "`/craftcalc tier:8 server:eu`\nЭкспортирует таблицу крафта всех предметов в Google Sheets.\nТребует: `GOOGLE_CREDENTIALS` + `SHEET_ID` в переменных Railway"),
+                ("Albion: Чёрный рынок", "`/blackmarket category:weapon tier:8 server:eu`\nКатегории: `weapon` `offhand` `armor_plate` `armor_leather` `armor_cloth` `bag`\nКонкретный предмет: `broadsword` `holystaff` `knightarmor` и др."),
+                ("Albion: Крафт", "`/craftcalc tier:8 server:eu [tax:8]`\nЭкспортирует таблицу крафта всех предметов в Google Sheets."),
                 ("Albion: Торговля", "`/flipper category:weapon tier:8` — арбитраж между городами\n`/pricewatch action:add item_key:sword tier:8` — слежка за ценой\n`/pricewatch action:list` — список подписок\n`/pricewatch action:remove item_key:1` — удалить"),
                 ("Турниры и статистика", "`/tournament [name] [participants]` — сетка турнира\n`/guildwar [limit]` — топ гильдий по ZvZ\n`/party [p1] [p2] [p3]` — анализ состава статика"),
             ]
@@ -935,7 +935,7 @@ async def help_cmd(interaction: discord.Interaction, page: str = "general"):
         "ai": {
             "title": "🤖 AI команды",
             "fields": [
-                ("Бесплатные AI", "Бот использует **Groq** (Llama 3.3 70B) или **Gemini** — оба бесплатные.\nДобавь `GROQ_API_KEY` или `GEMINI_API_KEY` в Railway Variables."),
+                ("Бесплатные AI", "Бот использует современные языковые модели для ответов на вопросы."),
                 ("⭐ Premium — Текст", "`/ai [question]` — спросить AI что угодно\n`/summarize [count]` — AI резюме последних N сообщений\n`/askalbion [question]` — AI эксперт по Albion Online"),
                 ("⭐ Premium — Развлечения", "`/roast [member]` — AI роаст участника сервера\n`/imagine [prompt] [style]` — генерация изображения\n  стили: `realistic` `anime` `pixel` `oil-painting`\n  Бесплатно через Pollinations.ai — ключ не нужен!"),
                 ("💎 Pro — Albion AI", "`/party` — AI вердикт на состав группы\n`/askalbion` — советы по крафту, PvP, экономике"),
@@ -1067,7 +1067,7 @@ async def lfg(interaction: discord.Interaction, game: str, slots: int = 1, note:
 @cooldown(10)
 async def weather(interaction: discord.Interaction, city: str):
     await interaction.response.defer()
-    if not WEATHER_KEY: return await interaction.followup.send("❌ Добавь WEATHER_API_KEY в .env")
+    if not WEATHER_KEY: return await interaction.followup.send("❌ Функция временно недоступна.")
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_KEY}&units=metric") as r:
@@ -1371,7 +1371,7 @@ async def val(interaction: discord.Interaction, username: str):
 async def cs2(interaction: discord.Interaction, steam_id: str):
     if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
     await interaction.response.defer()
-    if not STEAM_KEY: return await interaction.followup.send("❌ Добавь STEAM_API_KEY в .env")
+    if not STEAM_KEY: return await interaction.followup.send("❌ Функция временно недоступна.")
     if not steam_id.isdigit():
         async with aiohttp.ClientSession() as s:
             async with s.get(f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={STEAM_KEY}&vanityurl={steam_id}") as r:
@@ -1394,7 +1394,7 @@ async def cs2(interaction: discord.Interaction, steam_id: str):
 async def lol(interaction: discord.Interaction, summoner: str, region: str = "euw1"):
     if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
     await interaction.response.defer()
-    if not RIOT_KEY: return await interaction.followup.send("❌ Добавь RIOT_API_KEY в .env")
+    if not RIOT_KEY: return await interaction.followup.send("❌ Функция временно недоступна.")
     headers={"X-Riot-Token":RIOT_KEY}
     try:
         async with aiohttp.ClientSession() as s:
@@ -1417,7 +1417,7 @@ async def lol(interaction: discord.Interaction, summoner: str, region: str = "eu
 async def lostark(interaction: discord.Interaction, character: str):
     if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
     await interaction.response.defer()
-    if not LOSTARK_KEY: return await interaction.followup.send("❌ Добавь LOSTARK_API_KEY в .env")
+    if not LOSTARK_KEY: return await interaction.followup.send("❌ Функция временно недоступна.")
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(f"https://developer-lostark.game.onstove.com/characters/{character}/siblings", headers={"Authorization":f"bearer {LOSTARK_KEY}"}) as r:
@@ -1433,84 +1433,244 @@ async def lostark(interaction: discord.Interaction, character: str):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 BM_ITEMS = {
-    # ── МЕЧИ / КЛИНКИ ─────────────────────────────────────────
-    "sword":        {"Меч":                  "T{t}_MAIN_SWORD{e}"},
-    "broadsword":   {"Палаш":                "T{t}_MAIN_BROADSWORD{e}"},
-    "claymore":     {"Клеймор":              "T{t}_2H_CLAYMORE{e}"},
-    "dualsword":    {"Парные мечи":          "T{t}_2H_DUALSWORD{e}"},
-    "dagger":       {"Кинжал":              "T{t}_MAIN_DAGGER{e}"},
-    "daggerpair":   {"Парные кинжалы":       "T{t}_2H_DAGGERPAIR{e}"},
-    "claws":        {"Когти":               "T{t}_2H_CLAWS{e}"},
-    # ── ТОПОРЫ ────────────────────────────────────────────────
-    "axe":          {"Боевой топор":         "T{t}_MAIN_AXE{e}"},
-    "greataxe":     {"Большой топор":        "T{t}_2H_GREATAXE{e}"},
-    "halberd":      {"Алебарда":             "T{t}_2H_HALBERD{e}"},
-    # ── БУЛАВЫ / МОЛОТЫ ───────────────────────────────────────
-    "mace":         {"Булава":              "T{t}_MAIN_MACE{e}"},
-    "heavymace":    {"Большая булава":       "T{t}_2H_HEAVYMACE{e}"},
-    "morningstar":  {"Моргенштерн":          "T{t}_MAIN_MORNINGSTAR{e}"},
-    "hammer":       {"Молот":               "T{t}_2H_HAMMER{e}"},
-    "polehammer":   {"Чекан / Большой молот":"T{t}_2H_POLEHAMMER{e}"},
-    # ── ДУБИНЫ / КУЛАКИ ───────────────────────────────────────
-    "knuckles":     {"Перчатки крушителя":   "T{t}_2H_KNUCKLES{e}"},
-    "gauntlet":     {"Боевые наручи":        "T{t}_MAIN_GAUNTLET{e}"},
-    "spikedgauntlet":{"Шипастые рукавицы":  "T{t}_MAIN_SPIKEDGAUNTLET{e}"},
-    # ── КОПЬЯ ─────────────────────────────────────────────────
-    "spear":        {"Копьё":               "T{t}_MAIN_SPEAR{e}"},
-    "pike":         {"Пика":                "T{t}_2H_PIKE{e}"},
-    "glaive":       {"Глефа":               "T{t}_2H_GLAIVE{e}"},
-    # ── ПОСОХИ ────────────────────────────────────────────────
-    "quarterstaff": {"Боевой шест":          "T{t}_2H_QUARTERSTAFF{e}"},
-    "ironclad":     {"Железный шест":        "T{t}_2H_IRONCLADSTAFF{e}"},
-    "sharpstaff":   {"Острый шест":          "T{t}_2H_SHARPSTAFF{e}"},
-    "naturestaff":  {"Древесный посох":      "T{t}_MAIN_NATURESTAFF{e}"},
-    "greatnature":  {"Большой древесный":    "T{t}_2H_NATURESTAFFGREAT{e}"},
-    "wildstaff":    {"Дикий посох":          "T{t}_2H_WILDSTAFF{e}"},
-    "torch":        {"Факел":               "T{t}_MAIN_TORCH{e}"},
-    "firestaff":    {"Огненный посох":       "T{t}_MAIN_FIRESTAFF{e}"},
-    "greatfire":    {"Большой огненный":     "T{t}_2H_FIRESTAFF{e}"},
-    "infernostaff": {"Адский посох":         "T{t}_2H_INFERNOSTAFF{e}"},
-    "holystaff":    {"Священный посох":      "T{t}_MAIN_HOLYSTAFF{e}"},
-    "greatholly":   {"Большой священный":    "T{t}_2H_HOLYSTAFF{e}"},
-    "divinestaff":  {"Божественный посох":   "T{t}_2H_DIVINESTAFF{e}"},
-    # ── ЛУКИ ──────────────────────────────────────────────────
-    "bow":          {"Лук":                 "T{t}_2H_BOW{e}"},
-    "warbow":       {"Боевой лук":           "T{t}_2H_WARBOW{e}"},
-    "longbow":      {"Длинный лук":          "T{t}_2H_LONGBOW{e}"},
-    # ── АРБАЛЕТЫ ──────────────────────────────────────────────
-    "crossbow":     {"Арбалет":             "T{t}_2H_CROSSBOW{e}"},
-    "heavycrossbow":{"Тяжелый арбалет":      "T{t}_2H_HEAVYCROSSBOW{e}"},
-    "lightcrossbow":{"Лёгкий арбалет":       "T{t}_MAIN_LIGHTCROSSBOW{e}"},
-    # ── ЩИТЫ ──────────────────────────────────────────────────
-    "shield":       {"Щит":                 "T{t}_OFFHAND_SHIELD{e}"},
-    # ── БРОНЯ НАЁМНИКА ────────────────────────────────────────
-    "mercboots":    {"Ботинки наёмника":     "T{t}_SHOES_PLATE_SET1{e}"},
-    "mercjacket":   {"Куртка наёмника":      "T{t}_ARMOR_PLATE_SET1{e}"},
-    "merchood":     {"Капюшон наёмника":     "T{t}_HEAD_PLATE_SET1{e}"},
-    # ── БРОНЯ УБИЙЦЫ ──────────────────────────────────────────
-    "assboots":     {"Ботинки убийцы":       "T{t}_SHOES_LEATHER_SET1{e}"},
-    "assjacket":    {"Куртка убийцы":        "T{t}_ARMOR_LEATHER_SET1{e}"},
-    "asshood":      {"Капюшон убийцы":       "T{t}_HEAD_LEATHER_SET1{e}"},
-    # ── БРОНЯ ОХОТНИКА ────────────────────────────────────────
-    "huntboots":    {"Ботинки охотника":     "T{t}_SHOES_CLOTH_SET1{e}"},
-    "huntjacket":   {"Куртка охотника":      "T{t}_ARMOR_CLOTH_SET1{e}"},
-    "hunthood":     {"Капюшон охотника":     "T{t}_HEAD_CLOTH_SET1{e}"},
-    # ── СТАРЫЕ КАТЕГОРИИ (совместимость) ──────────────────────
-    "bag":          {"Сумка":               "T{t}_BAG{e}"},
+    # ══ AXES ══════════════════════════════════════════════════
+    "battleaxe":      {"Battleaxe":           "T{t}_MAIN_AXE{e}"},
+    "greataxe":       {"Greataxe":            "T{t}_2H_GREATAXE{e}"},
+    "halberd":        {"Halberd":             "T{t}_2H_HALBERD{e}"},
+    "bearpaws":       {"Bear Paws":           "T{t}_2H_DUALAXE_KEEPER{e}"},
+    "infernalscythe": {"Infernal Scythe":     "T{t}_2H_SCYTHE_HELL{e}"},
+    "carrioncaller":  {"Carrioncaller":       "T{t}_2H_HALBERD_MORGANA{e}"},
+    "realmbreaker":   {"Realmbreaker":        "T{t}_2H_REALMBREAKER{e}"},
+    # ══ SWORDS ════════════════════════════════════════════════
+    "broadsword":     {"Broadsword":          "T{t}_MAIN_SWORD{e}"},
+    "claymore":       {"Claymore":            "T{t}_2H_CLAYMORE{e}"},
+    "clarentblade":   {"Clarent Blade":       "T{t}_MAIN_BROADSWORD{e}"},
+    "dualswords":     {"Dual Swords":         "T{t}_2H_DUALSWORD{e}"},
+    "carvingsword":   {"Carving Sword":       "T{t}_2H_CLEAVER_HELL{e}"},
+    "galatinepair":   {"Galatine Pair":       "T{t}_2H_DUALSCIMITAR_UNDEAD{e}"},
+    # ══ MACES ═════════════════════════════════════════════════
+    "mace":           {"Mace":               "T{t}_MAIN_MACE{e}"},
+    "heavymace":      {"Heavy Mace":         "T{t}_2H_HEAVYMACE{e}"},
+    "morningstar":    {"Morning Star":       "T{t}_MAIN_MORNINGSTAR{e}"},
+    "bedrockmace":    {"Bedrock Mace":       "T{t}_MAIN_ROCKMACE_KEEPER{e}"},
+    "incubusmace":    {"Incubus Mace":       "T{t}_MAIN_INCUBUS{e}"},
+    "camlannmace":    {"Camlann Mace":       "T{t}_MAIN_MACE_HELL{e}"},
+    # ══ HAMMERS ═══════════════════════════════════════════════
+    "hammer":         {"Hammer":             "T{t}_2H_HAMMER{e}"},
+    "polehammer":     {"Polehammer":         "T{t}_2H_POLEHAMMER{e}"},
+    "greathammer":    {"Great Hammer":       "T{t}_2H_HAMMER_UNDEAD{e}"},
+    "forgehammers":   {"Forge Hammers":      "T{t}_2H_DUALHAMMER_HELL{e}"},
+    "tombhammer":     {"Tombhammer":         "T{t}_2H_TOMBHAMMER{e}"},
+    "grovekeeper":    {"Grovekeeper":        "T{t}_2H_GROVEKEEPER{e}"},
+    # ══ WAR GLOVES ════════════════════════════════════════════
+    "brawlergloves":  {"Brawler Gloves":     "T{t}_2H_KNUCKLES{e}"},
+    "battlebracers":  {"Battle Bracers":     "T{t}_MAIN_GAUNTLET{e}"},
+    "spikedgauntlet": {"Spiked Gauntlet":    "T{t}_MAIN_SPIKEDGAUNTLET{e}"},
+    "ursinemaulers":  {"Ursine Maulers":     "T{t}_2H_URSINEHANDSCLAW{e}"},
+    "hellfires":      {"Hellfire Hands":     "T{t}_2H_KNUCKLES_HELL{e}"},
+    "ravenstrike":    {"Ravenstrike Cestus": "T{t}_MAIN_RAPIER_MORGANA{e}"},
+    "fistsofavalon":  {"Fists of Avalon":    "T{t}_2H_FISTOFAVALON{e}"},
+    # ══ CROSSBOWS ═════════════════════════════════════════════
+    "crossbow":       {"Crossbow":           "T{t}_2H_CROSSBOW{e}"},
+    "heavycrossbow":  {"Heavy Crossbow":     "T{t}_2H_HEAVYCROSSBOW{e}"},
+    "boltcasters":    {"Boltcasters":        "T{t}_2H_DUALCROSSBOW_HELL{e}"},
+    "lightcrossbow":  {"Light Crossbow":     "T{t}_MAIN_LIGHTCROSSBOW{e}"},
+    "weepingrepeater":{"Weeping Repeater":   "T{t}_2H_WEEPINGREPEAT{e}"},
+    "siegebow":       {"Siegebow":           "T{t}_2H_CROSSBOWLARGE_MORGANA{e}"},
+    # ══ BOWS ══════════════════════════════════════════════════
+    "bow":            {"Bow":               "T{t}_2H_BOW{e}"},
+    "warbow":         {"Warbow":            "T{t}_2H_WARBOW{e}"},
+    "longbow":        {"Longbow":           "T{t}_2H_LONGBOW{e}"},
+    "whisperingbow":  {"Whispering Bow":    "T{t}_2H_WHISPERING_BOW{e}"},
+    "bowofbadon":     {"Bow of Badon":      "T{t}_2H_BOW_KEEPER{e}"},
+    "wailingbow":     {"Wailing Bow":       "T{t}_2H_BOW_HELL{e}"},
+    "mistpiercer":    {"Mistpiercer":       "T{t}_2H_MISTCALLER{e}"},
+    # ══ DAGGERS ═══════════════════════════════════════════════
+    "dagger":         {"Dagger":            "T{t}_MAIN_DAGGER{e}"},
+    "daggerpair":     {"Dagger Pair":       "T{t}_2H_DAGGERPAIR{e}"},
+    "claws":          {"Claws":             "T{t}_2H_CLAWS{e}"},
+    "bloodletter":    {"Bloodletter":       "T{t}_MAIN_BLOODLETTER{e}"},
+    "demonfang":      {"Demonfang":         "T{t}_MAIN_DEMONFANG{e}"},
+    "deathgivers":    {"Deathgivers":       "T{t}_2H_DUALSICKLE_UNDEAD{e}"},
+    "bridledfury":    {"Bridled Fury":      "T{t}_2H_BRIDLEDFURY{e}"},
+    # ══ SPEARS ════════════════════════════════════════════════
+    "spear":          {"Spear":             "T{t}_MAIN_SPEAR{e}"},
+    "pike":           {"Pike":              "T{t}_2H_PIKE{e}"},
+    "glaive":         {"Glaive":            "T{t}_2H_GLAIVE{e}"},
+    "heronspear":     {"Heron Spear":       "T{t}_MAIN_SPEAR_KEEPER{e}"},
+    "spirithunter":   {"Spirit Hunter":     "T{t}_2H_HARPOON_HELL{e}"},
+    "trinityspear":   {"Trinity Spear":     "T{t}_2H_TRIDENT_UNDEAD{e}"},
+    "daybreaker":     {"Daybreaker":        "T{t}_2H_DAYBREAKER{e}"},
+    # ══ QUARTERSTAFFS ═════════════════════════════════════════
+    "quarterstaff":   {"Quarterstaff":      "T{t}_2H_QUARTERSTAFF{e}"},
+    "ironcladstaff":  {"Iron-Clad Staff":   "T{t}_2H_IRONCLADSTAFF{e}"},
+    "doublebladed":   {"Double Bladed Staff":"T{t}_2H_DOUBLEBLADEDSTAFF{e}"},
+    "soulscythe":     {"Soulscythe":        "T{t}_2H_TWINSCYTHE_HELL{e}"},
+    "grailseeker":    {"Grailseeker":       "T{t}_2H_GRAILSEEKER{e}"},
+    "sweepingstaff":  {"Sweeping Staff":    "T{t}_2H_SWEEINGSTAFF{e}"},
+    # ══ NATURE STAFF ══════════════════════════════════════════
+    "naturestaff":    {"Nature Staff":      "T{t}_MAIN_NATURESTAFF{e}"},
+    "wildstaff":      {"Wild Staff":        "T{t}_2H_WILDSTAFF{e}"},
+    "greatnature":    {"Great Nature Staff":"T{t}_2H_NATURESTAFFGREAT{e}"},
+    "druidicstaff":   {"Druidic Staff":     "T{t}_MAIN_NATURESTAFF_KEEPER{e}"},
+    "blightstaff":    {"Blight Staff":      "T{t}_2H_BLIGHTSTAFF{e}"},
+    "ironrootstaff":  {"Ironroot Staff":    "T{t}_2H_IRONROOTSTAFF{e}"},
+    # ══ FIRE STAFF ════════════════════════════════════════════
+    "firestaff":      {"Fire Staff":        "T{t}_MAIN_FIRESTAFF{e}"},
+    "greatfire":      {"Great Fire Staff":  "T{t}_2H_FIRESTAFF{e}"},
+    "infernalstaff":  {"Infernal Staff":    "T{t}_2H_INFERNOSTAFF{e}"},
+    "wildfirestaff":  {"Wildfire Staff":    "T{t}_MAIN_FIRESTAFF_KEEPER{e}"},
+    "brimstonestaff": {"Brimstone Staff":   "T{t}_2H_FIRESTAFF_HELL{e}"},
+    "blazingstaff":   {"Blazing Staff":     "T{t}_2H_BLAZINGSTAFF{e}"},
+    # ══ HOLY STAFF ════════════════════════════════════════════
+    "holystaff":      {"Holy Staff":        "T{t}_MAIN_HOLYSTAFF{e}"},
+    "greatholly":     {"Great Holy Staff":  "T{t}_2H_HOLYSTAFF{e}"},
+    "divinestaff":    {"Divine Staff":      "T{t}_2H_DIVINESTAFF{e}"},
+    "lifetouchstaff": {"Lifetouch Staff":   "T{t}_MAIN_LIFETOUCH{e}"},
+    "fallenstaff":    {"Fallen Staff":      "T{t}_2H_HOLYSTAFF_HELL{e}"},
+    "redemptionstaff":{"Redemption Staff":  "T{t}_2H_REDEMPTIONSTAFF{e}"},
+    # ══ ARCANE STAFF ══════════════════════════════════════════
+    "arcanestaff":    {"Arcane Staff":      "T{t}_MAIN_ARCANESTAFF{e}"},
+    "greatarcane":    {"Great Arcane Staff":"T{t}_2H_ARCANESTAFF{e}"},
+    "enigmaticstaff": {"Enigmatic Staff":   "T{t}_2H_ENIGMATICSTAFF{e}"},
+    "witchworkstaff": {"Witchwork Staff":   "T{t}_MAIN_ARCANESTAFF_UNDEAD{e}"},
+    "evensong":       {"Evensong":          "T{t}_2H_EVENSONG{e}"},
+    "occultstaff":    {"Occult Staff":      "T{t}_2H_ARCANESTAFF_HELL{e}"},
+    # ══ FROST STAFF ═══════════════════════════════════════════
+    "froststaff":     {"Frost Staff":       "T{t}_MAIN_FROSTSTAFF{e}"},
+    "greatfrost":     {"Great Frost Staff": "T{t}_2H_FROSTSTAFF{e}"},
+    "glacialstaff":   {"Glacial Staff":     "T{t}_2H_GLACIALSTAFF{e}"},
+    "hoarfroststaff": {"Hoarfrost Staff":   "T{t}_MAIN_FROSTSTAFF_KEEPER{e}"},
+    "iciclestaff":    {"Icicle Staff":      "T{t}_2H_ICESTAFFFIRE{e}"},
+    "permafrost":     {"Permafrost Staff":  "T{t}_2H_PERMAFROSTSTAFF{e}"},
+    # ══ CURSED STAFF ══════════════════════════════════════════
+    "cursedstaff":    {"Cursed Staff":      "T{t}_MAIN_CURSEDSTAFF{e}"},
+    "greatcursed":    {"Great Cursed Staff":"T{t}_2H_CURSEDSTAFF{e}"},
+    "demonicstaff":   {"Demonic Staff":     "T{t}_2H_DEMONICSTAFF{e}"},
+    "cursedskull":    {"Cursed Skull":      "T{t}_MAIN_CURSEDSTAFF_UNDEAD{e}"},
+    "lifecursestaff": {"Lifecurse Staff":   "T{t}_MAIN_LIFECURSESTAFF{e}"},
+    "damnationstaff": {"Damnation Staff":   "T{t}_2H_CURSEDSTAFF_MORGANA{e}"},
+    # ══ OFF-HAND ══════════════════════════════════════════════
+    "shield":         {"Shield":            "T{t}_OFFHAND_SHIELD{e}"},
+    "sarcophagus":    {"Sarcophagus":       "T{t}_OFFHAND_SHIELD_UNDEAD{e}"},
+    "caitiffshield":  {"Caitiff Shield":    "T{t}_OFFHAND_SHIELD_HELL{e}"},
+    "facebreaker":    {"Facebreaker":       "T{t}_OFFHAND_FACEBREAKER{e}"},
+    "torch":          {"Torch":             "T{t}_OFFHAND_TORCH{e}"},
+    "mistcaller":     {"Mistcaller":        "T{t}_OFFHAND_MISTCALLER{e}"},
+    "leeringcane":    {"Leering Cane":      "T{t}_OFFHAND_LEERINGCANE{e}"},
+    "taproot":        {"Taproot":           "T{t}_OFFHAND_TAPROOT{e}"},
+    "muisak":         {"Muisak":            "T{t}_OFFHAND_MUISAK{e}"},
+    "cryptcandle":    {"Cryptcandle":       "T{t}_OFFHAND_CRYPTCANDLE{e}"},
+    "tomeofspells":   {"Tome of Spells":    "T{t}_OFFHAND_BOOK{e}"},
+    # ══ PLATE ARMOR ═══════════════════════════════════════════
+    "soldierhelm":    {"Soldier Helmet":    "T{t}_HEAD_PLATE_SET1{e}"},
+    "soldierarmor":   {"Soldier Armor":     "T{t}_ARMOR_PLATE_SET1{e}"},
+    "soldierboots":   {"Soldier Boots":     "T{t}_SHOES_PLATE_SET1{e}"},
+    "knighthelm":     {"Knight Helmet":     "T{t}_HEAD_PLATE_SET2{e}"},
+    "knightarmor":    {"Knight Armor":      "T{t}_ARMOR_PLATE_SET2{e}"},
+    "knightboots":    {"Knight Boots":      "T{t}_SHOES_PLATE_SET2{e}"},
+    "guardianhelm":   {"Guardian Helmet":   "T{t}_HEAD_PLATE_SET3{e}"},
+    "guardianarmor":  {"Guardian Armor":    "T{t}_ARMOR_PLATE_SET3{e}"},
+    "guardianboots":  {"Guardian Boots":    "T{t}_SHOES_PLATE_SET3{e}"},
+    "graveguardhelm": {"Graveguard Helmet": "T{t}_HEAD_PLATE_UNDEAD{e}"},
+    "graveguardarmor":{"Graveguard Armor":  "T{t}_ARMOR_PLATE_UNDEAD{e}"},
+    "graveguardboots":{"Graveguard Boots":  "T{t}_SHOES_PLATE_UNDEAD{e}"},
+    "judicatorhelm":  {"Judicator Helmet":  "T{t}_HEAD_PLATE_HELL{e}"},
+    "judicatorarmor": {"Judicator Armor":   "T{t}_ARMOR_PLATE_HELL{e}"},
+    "judicatorboots": {"Judicator Boots":   "T{t}_SHOES_PLATE_HELL{e}"},
+    "demonhelm":      {"Demon Helmet":      "T{t}_HEAD_PLATE_MORGANA{e}"},
+    "demonarmor":     {"Demon Armor":       "T{t}_ARMOR_PLATE_MORGANA{e}"},
+    "demonboots":     {"Demon Boots":       "T{t}_SHOES_PLATE_MORGANA{e}"},
+    # ══ LEATHER ARMOR ═════════════════════════════════════════
+    "hunterhelm":     {"Hunter Hood":       "T{t}_HEAD_LEATHER_SET1{e}"},
+    "hunterjacket":   {"Hunter Jacket":     "T{t}_ARMOR_LEATHER_SET1{e}"},
+    "huntershoes":    {"Hunter Shoes":      "T{t}_SHOES_LEATHER_SET1{e}"},
+    "assassinhelm":   {"Assassin Hood":     "T{t}_HEAD_LEATHER_SET2{e}"},
+    "assassinjacket": {"Assassin Jacket":   "T{t}_ARMOR_LEATHER_SET2{e}"},
+    "assassinshoes":  {"Assassin Shoes":    "T{t}_SHOES_LEATHER_SET2{e}"},
+    "mercenaryhelm":  {"Mercenary Hood":    "T{t}_HEAD_LEATHER_SET3{e}"},
+    "mercenaryarmor": {"Mercenary Jacket":  "T{t}_ARMOR_LEATHER_SET3{e}"},
+    "mercenaryboots": {"Mercenary Shoes":   "T{t}_SHOES_LEATHER_SET3{e}"},
+    "hellionhelm":    {"Hellion Hood":      "T{t}_HEAD_LEATHER_UNDEAD{e}"},
+    "hellionjacket":  {"Hellion Jacket":    "T{t}_ARMOR_LEATHER_UNDEAD{e}"},
+    "hellionshoes":   {"Hellion Shoes":     "T{t}_SHOES_LEATHER_UNDEAD{e}"},
+    "specterhelm":    {"Specter Hood":      "T{t}_HEAD_LEATHER_HELL{e}"},
+    "specterjacket":  {"Specter Jacket":    "T{t}_ARMOR_LEATHER_HELL{e}"},
+    "spectershoes":   {"Specter Shoes":     "T{t}_SHOES_LEATHER_HELL{e}"},
+    "mistwalkerhelm": {"Mistwalker Hood":   "T{t}_HEAD_LEATHER_MORGANA{e}"},
+    "mistwalkerjacket":{"Mistwalker Jacket":"T{t}_ARMOR_LEATHER_MORGANA{e}"},
+    "mistwalkershoes":{"Mistwalker Shoes":  "T{t}_SHOES_LEATHER_MORGANA{e}"},
+    # ══ CLOTH ARMOR ═══════════════════════════════════════════
+    "scholarcowl":    {"Scholar Cowl":      "T{t}_HEAD_CLOTH_SET1{e}"},
+    "scholarrobe":    {"Scholar Robe":      "T{t}_ARMOR_CLOTH_SET1{e}"},
+    "scholarsandals": {"Scholar Sandals":   "T{t}_SHOES_CLOTH_SET1{e}"},
+    "clericcowl":     {"Cleric Cowl":       "T{t}_HEAD_CLOTH_SET2{e}"},
+    "clericrobe":     {"Cleric Robe":       "T{t}_ARMOR_CLOTH_SET2{e}"},
+    "clericsandals":  {"Cleric Sandals":    "T{t}_SHOES_CLOTH_SET2{e}"},
+    "magecowl":       {"Mage Cowl":         "T{t}_HEAD_CLOTH_SET3{e}"},
+    "magerobe":       {"Mage Robe":         "T{t}_ARMOR_CLOTH_SET3{e}"},
+    "magesandals":    {"Mage Sandals":      "T{t}_SHOES_CLOTH_SET3{e}"},
+    "cultistcowl":    {"Cultist Cowl":      "T{t}_HEAD_CLOTH_UNDEAD{e}"},
+    "cultistrobe":    {"Cultist Robe":      "T{t}_ARMOR_CLOTH_UNDEAD{e}"},
+    "cultistsandals": {"Cultist Sandals":   "T{t}_SHOES_CLOTH_UNDEAD{e}"},
+    "feyscalehat":    {"Feyscale Hat":      "T{t}_HEAD_CLOTH_HELL{e}"},
+    "feyscalerobe":   {"Feyscale Robe":     "T{t}_ARMOR_CLOTH_HELL{e}"},
+    "feyscalesandals":{"Feyscale Sandals":  "T{t}_SHOES_CLOTH_HELL{e}"},
+    # ══ BAGS ══════════════════════════════════════════════════
+    "bag":            {"Bag":               "T{t}_BAG{e}"},
+    "bagofinsight":   {"Bag of Insight":    "T{t}_BAG_INSIGHT{e}"},
 }
 
-# Группы для удобного выбора
+# Группы для /blackmarket
 BM_GROUPS = {
-    "weapon":  ["sword","broadsword","claymore","dualsword","dagger","daggerpair","claws",
-                "axe","greataxe","halberd","mace","heavymace","morningstar","hammer","polehammer",
-                "knuckles","gauntlet","spikedgauntlet","spear","pike","glaive",
-                "quarterstaff","ironclad","sharpstaff","naturestaff","greatnature","wildstaff",
-                "torch","firestaff","greatfire","infernostaff","holystaff","greatholly","divinestaff",
-                "bow","warbow","longbow","crossbow","heavycrossbow","lightcrossbow","shield"],
-    "armor":   ["mercboots","mercjacket","merchood","assboots","assjacket","asshood",
-                "huntboots","huntjacket","hunthood"],
-    "bag":     ["bag"],
+    "weapon": [
+        "battleaxe","greataxe","halberd","bearpaws","infernalscythe","carrioncaller","realmbreaker",
+        "broadsword","claymore","clarentblade","dualswords","carvingsword","galatinepair",
+        "mace","heavymace","morningstar","bedrockmace","incubusmace","camlannmace",
+        "hammer","polehammer","greathammer","forgehammers","tombhammer","grovekeeper",
+        "brawlergloves","battlebracers","spikedgauntlet","ursinemaulers","hellfires","ravenstrike","fistsofavalon",
+        "crossbow","heavycrossbow","boltcasters","lightcrossbow","weepingrepeater","siegebow",
+        "bow","warbow","longbow","whisperingbow","bowofbadon","wailingbow","mistpiercer",
+        "dagger","daggerpair","claws","bloodletter","demonfang","deathgivers","bridledfury",
+        "spear","pike","glaive","heronspear","spirithunter","trinityspear","daybreaker",
+        "quarterstaff","ironcladstaff","doublebladed","soulscythe","grailseeker","sweepingstaff",
+        "naturestaff","wildstaff","greatnature","druidicstaff","blightstaff","ironrootstaff",
+        "firestaff","greatfire","infernalstaff","wildfirestaff","brimstonestaff","blazingstaff",
+        "holystaff","greatholly","divinestaff","lifetouchstaff","fallenstaff","redemptionstaff",
+        "arcanestaff","greatarcane","enigmaticstaff","witchworkstaff","evensong","occultstaff",
+        "froststaff","greatfrost","glacialstaff","hoarfroststaff","iciclestaff","permafrost",
+        "cursedstaff","greatcursed","demonicstaff","cursedskull","lifecursestaff","damnationstaff",
+    ],
+    "offhand": [
+        "shield","sarcophagus","caitiffshield","facebreaker",
+        "torch","mistcaller","leeringcane","taproot","muisak","cryptcandle","tomeofspells",
+    ],
+    "armor_plate": [
+        "soldierhelm","soldierarmor","soldierboots",
+        "knighthelm","knightarmor","knightboots",
+        "guardianhelm","guardianarmor","guardianboots",
+        "graveguardhelm","graveguardarmor","graveguardboots",
+        "judicatorhelm","judicatorarmor","judicatorboots",
+        "demonhelm","demonarmor","demonboots",
+    ],
+    "armor_leather": [
+        "hunterhelm","hunterjacket","huntershoes",
+        "assassinhelm","assassinjacket","assassinshoes",
+        "mercenaryhelm","mercenaryarmor","mercenaryboots",
+        "hellionhelm","hellionjacket","hellionshoes",
+        "specterhelm","specterjacket","spectershoes",
+        "mistwalkerhelm","mistwalkerjacket","mistwalkershoes",
+    ],
+    "armor_cloth": [
+        "scholarcowl","scholarrobe","scholarsandals",
+        "clericcowl","clericrobe","clericsandals",
+        "magecowl","magerobe","magesandals",
+        "cultistcowl","cultistrobe","cultistsandals",
+        "feyscalehat","feyscalerobe","feyscalesandals",
+    ],
+    "bag": ["bag","bagofinsight"],
 }
+
 
 def build_item_id(template, tier, enchant):
     return template.format(t=tier, e=f"@{enchant}" if enchant > 0 else "")
@@ -1525,7 +1685,7 @@ ALBION_SERVERS = {
 ALBION_SERVER_NAMES = {"eu": "🇪🇺 Европа", "us": "🇺🇸 Америка", "asia": "🌏 Азия"}
 
 # Все города кроме ЧР и Бреккилена
-CITY_LOCATIONS = ["Caerleon", "Bridgewatch", "Fort Sterling", "Lymhurst", "Martlock", "Thetford"]
+CITY_LOCATIONS = ["Bridgewatch", "Fort Sterling", "Lymhurst", "Martlock", "Thetford"]  # Caerleon исключён
 CITY_NAMES_RU = {
     "Caerleon": "Кэрлеон",
     "Bridgewatch": "Бриджвотч",
@@ -1553,7 +1713,7 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
     # Albion Data API чувствителен к этому
     all_locations = ",".join([
         "Black Market", "Brecilien",
-        "Caerleon", "Bridgewatch", "Fort Sterling",
+        "Bridgewatch", "Fort Sterling",
         "Lymhurst", "Martlock", "Thetford"
     ])
     # URL-encode пробелы
@@ -1671,7 +1831,7 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
 
 @bot.tree.command(name="blackmarket", description="Albion: профит Чёрного рынка [Pro]")
 @app_commands.describe(
-    category="weapon / armor / bag / конкретный ключ (sword, bow, axe...)",
+    category="weapon/offhand/armor_plate/armor_leather/armor_cloth/bag или ключ предмета",
     tier="Тир: 6, 7 или 8",
     server="Сервер: eu / us / asia",
     sheets="Экспорт в Google Sheets: yes / no",
@@ -2484,31 +2644,63 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
     tax_rate = tax / 100
     server_name = ALBION_SERVER_NAMES.get(server, "EU")
     base_url = ALBION_SERVERS.get(server, ALBION_SERVERS["eu"])
-    locations = "Black%20Market,Caerleon,Bridgewatch,Fort%20Sterling,Lymhurst,Martlock,Thetford,Brecilien"
+    locations = "Black%20Market,Bridgewatch,Fort%20Sterling,Lymhurst,Martlock,Thetford,Brecilien"
 
-    ALL_CALC_ITEMS = [
-        ("Меч", "sword", "ore"), ("Палаш", "broadsword", "ore"),
-        ("Клеймор", "claymore", "ore"), ("Парные мечи", "dualsword", "ore"),
-        ("Боевой топор", "axe", "ore"), ("Большой топор", "greataxe", "ore"),
-        ("Алебарда", "halberd", "ore"), ("Булава", "mace", "ore"),
-        ("Большая булава", "heavymace", "ore"), ("Моргенштерн", "morningstar", "ore"),
-        ("Молот", "hammer", "ore"), ("Большой молот", "polehammer", "ore"),
-        ("Перч. крушителя", "knuckles", "ore"), ("Боевые наручи", "gauntlet", "ore"),
-        ("Шипастые рукав.", "spikedgauntlet", "ore"),
-        ("Копьё", "spear", "ore"), ("Пика", "pike", "ore"), ("Глефа", "glaive", "ore"),
-        ("Кинжал", "dagger", "ore"), ("Парные кинжалы", "daggerpair", "ore"), ("Когти", "claws", "ore"),
-        ("Лук", "bow", "wood"), ("Боевой лук", "warbow", "wood"), ("Длинный лук", "longbow", "wood"),
-        ("Арбалет", "crossbow", "ore"), ("Тяж. арбалет", "heavycrossbow", "ore"), ("Лёгкий арбалет", "lightcrossbow", "ore"),
-        ("Боевой шест", "quarterstaff", "wood"), ("Железный шест", "ironclad", "wood"), ("Острый шест", "sharpstaff", "wood"),
-        ("Огненный посох", "firestaff", "wood"), ("Бол. огненный", "greatfire", "wood"), ("Адский посох", "infernostaff", "wood"),
-        ("Священный посох", "holystaff", "wood"), ("Бол. священный", "greatholly", "wood"), ("Божественный", "divinestaff", "wood"),
-        ("Древесный посох", "naturestaff", "wood"), ("Бол. древесный", "greatnature", "wood"), ("Дикий посох", "wildstaff", "wood"),
-        ("Факел", "torch", "wood"), ("Щит", "shield", "ore"),
-        ("Шлем (латы)", "merchood", "ore"), ("Нагрудник (латы)", "mercjacket", "ore"), ("Сапоги (латы)", "mercboots", "ore"),
-        ("Шапка (кожа)", "asshood", "hide"), ("Куртка (кожа)", "assjacket", "hide"), ("Ботинки (кожа)", "assboots", "hide"),
-        ("Капюшон (ткань)", "hunthood", "fiber"), ("Мантия (ткань)", "huntjacket", "fiber"), ("Сандалии (ткань)", "huntboots", "fiber"),
-        ("Сумка", "bag", "fiber"),
-    ]
+    # Генерируем список из BM_ITEMS автоматически — материал определяем по типу предмета
+    MAT_BY_TYPE = {
+        "MAIN_SWORD":"ore","2H_CLAYMORE":"ore","2H_DUALSWORD":"ore","MAIN_BROADSWORD":"ore",
+        "2H_ENERGYSHAPER":"ore","MAIN_DAGGER":"ore","2H_DAGGERPAIR":"ore","2H_CLAWS":"ore",
+        "2H_DEATHGIGGLES":"ore","MAIN_AXE":"ore","2H_GREATAXE":"ore","2H_HALBERD":"ore",
+        "2H_CARRIONCALLER":"ore","2H_DUALSCYTHE":"ore","MAIN_MACE":"ore","2H_HEAVYMACE":"ore",
+        "MAIN_MORNINGSTAR":"ore","MAIN_INCUBUS":"ore","2H_ONEMACELAIR":"ore","2H_HAMMER":"ore",
+        "2H_POLEHAMMER":"ore","2H_GRAILSEEKER":"ore","2H_KNUCKLES":"ore","MAIN_GAUNTLET":"ore",
+        "MAIN_SPIKEDGAUNTLET":"ore","2H_URSINEHANDSCLAW":"ore","MAIN_SPEAR":"ore","2H_PIKE":"ore",
+        "2H_GLAIVE":"ore","2H_SPIRITHUNTER":"ore","2H_TRINITYSPEAR":"ore","2H_CROSSBOW":"ore",
+        "2H_HEAVYCROSSBOW":"ore","MAIN_LIGHTCROSSBOW":"ore","2H_BOLTCASTERS":"ore","2H_SIEGEBOW":"ore",
+        "OFFHAND_SHIELD":"ore","OFFHAND_TOWERSHIELD":"ore",
+        "HEAD_PLATE_SET1":"ore","ARMOR_PLATE_SET1":"ore","SHOES_PLATE_SET1":"ore",
+        "HEAD_PLATE_SET2":"ore","ARMOR_PLATE_SET2":"ore","SHOES_PLATE_SET2":"ore",
+        "HEAD_PLATE_SET3":"ore","ARMOR_PLATE_SET3":"ore","SHOES_PLATE_SET3":"ore",
+        "HEAD_PLATE_UNDEAD":"ore","ARMOR_PLATE_UNDEAD":"ore","SHOES_PLATE_UNDEAD":"ore",
+        "HEAD_PLATE_HELL":"ore","ARMOR_PLATE_HELL":"ore","SHOES_PLATE_HELL":"ore",
+        "HEAD_PLATE_MORGANA":"ore","ARMOR_PLATE_MORGANA":"ore","SHOES_PLATE_MORGANA":"ore",
+        "2H_QUARTERSTAFF":"wood","2H_IRONCLADSTAFF":"wood","2H_SHARPSTAFF":"wood",
+        "2H_DOUBLEBLADEDSTAFF":"wood","MAIN_NATURESTAFF":"wood","2H_NATURESTAFFGREAT":"wood",
+        "2H_WILDSTAFF":"wood","MAIN_LUSHFOLIAGE":"wood","MAIN_TORCH":"wood",
+        "MAIN_FIRESTAFF":"wood","2H_FIRESTAFF":"wood","2H_INFERNOSTAFF":"wood",
+        "2H_BLAZINGSERPENT":"wood","MAIN_HOLYSTAFF":"wood","2H_HOLYSTAFF":"wood",
+        "2H_DIVINESTAFF":"wood","MAIN_LIFETOUCH":"wood","MAIN_ARCANESTAFF":"wood",
+        "2H_ARCANESTAFF":"wood","2H_ENIGMATICSTAFF":"wood","MAIN_OCCULTSTAFF":"wood",
+        "MAIN_CURSEDSTAFF":"wood","2H_CURSEDSTAFF":"wood","2H_DEMONICSTAFF":"wood",
+        "MAIN_SHADOWCALLER":"wood","2H_BOW":"wood","2H_WARBOW":"wood","2H_LONGBOW":"wood",
+        "2H_MISTCALLER":"wood","2H_WEEPINGREPEAT":"wood",
+        "OFFHAND_TORCH":"wood","OFFHAND_SOULSCYTHE":"wood",
+        "HEAD_LEATHER_SET1":"hide","ARMOR_LEATHER_SET1":"hide","SHOES_LEATHER_SET1":"hide",
+        "HEAD_LEATHER_SET2":"hide","ARMOR_LEATHER_SET2":"hide","SHOES_LEATHER_SET2":"hide",
+        "HEAD_LEATHER_SET3":"hide","ARMOR_LEATHER_SET3":"hide","SHOES_LEATHER_SET3":"hide",
+        "HEAD_LEATHER_UNDEAD":"hide","ARMOR_LEATHER_UNDEAD":"hide","SHOES_LEATHER_UNDEAD":"hide",
+        "HEAD_LEATHER_HELL":"hide","ARMOR_LEATHER_HELL":"hide","SHOES_LEATHER_HELL":"hide",
+        "HEAD_LEATHER_MORGANA":"hide","ARMOR_LEATHER_MORGANA":"hide","SHOES_LEATHER_MORGANA":"hide",
+        "OFFHAND_MISTCOVERDAGGER":"hide","OFFHAND_LEATHERBOOK":"hide",
+        "HEAD_CLOTH_SET1":"fiber","ARMOR_CLOTH_SET1":"fiber","SHOES_CLOTH_SET1":"fiber",
+        "HEAD_CLOTH_SET2":"fiber","ARMOR_CLOTH_SET2":"fiber","SHOES_CLOTH_SET2":"fiber",
+        "HEAD_CLOTH_SET3":"fiber","ARMOR_CLOTH_SET3":"fiber","SHOES_CLOTH_SET3":"fiber",
+        "HEAD_CLOTH_UNDEAD":"fiber","ARMOR_CLOTH_UNDEAD":"fiber","SHOES_CLOTH_UNDEAD":"fiber",
+        "HEAD_CLOTH_HELL":"fiber","ARMOR_CLOTH_HELL":"fiber","SHOES_CLOTH_HELL":"fiber",
+        "OFFHAND_SKULLORB":"fiber","OFFHAND_CODEXA":"fiber","OFFHAND_LANTERN":"fiber",
+        "OFFHAND_MUISNT":"fiber","BAG":"fiber","BAG_INSIGHT":"fiber",
+    }
+    def get_mat(template_str):
+        for part, mat in MAT_BY_TYPE.items():
+            if part in template_str: return mat
+        return "ore"
+
+    ALL_CALC_ITEMS = []
+    for key, item_dict in BM_ITEMS.items():
+        display, template = list(item_dict.items())[0]
+        mat = get_mat(template)
+        ALL_CALC_ITEMS.append((display, key, mat))
+
 
     mat_names_ru = {"ore": "Руда", "wood": "Дерево", "fiber": "Волокно", "hide": "Кожа"}
     mat_item_ids = {
@@ -2700,7 +2892,7 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
 
 @bot.tree.command(name="flipper", description="Торговый арбитраж между городами Albion [Pro]")
 @app_commands.describe(
-    category="weapon / armor / bag",
+    category="weapon / offhand / armor_plate / armor_leather / armor_cloth / bag",
     tier="Тир: 6, 7 или 8",
     server="Сервер: eu / us / asia"
 )
@@ -2716,7 +2908,7 @@ async def flipper(interaction: discord.Interaction, category: str = "weapon", ti
     cat_lower = category.lower()
     keys = BM_GROUPS.get(cat_lower, [cat_lower] if cat_lower in BM_ITEMS else None)
     if not keys:
-        return await interaction.followup.send("❌ Категория: weapon / armor / bag")
+        return await interaction.followup.send("❌ Категория: weapon / offhand / armor_plate / armor_leather / armor_cloth / bag")
 
     await interaction.followup.send(f"⏳ Ищу арбитраж для **{category} T{tier}**...")
 
