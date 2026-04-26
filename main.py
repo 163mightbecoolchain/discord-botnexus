@@ -1053,10 +1053,14 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
     await add_warning(interaction.guild_id, member.id, interaction.user.id, reason)
     warns = await get_warnings(interaction.guild_id, member.id)
-    e = discord.Embed(title="⚠️ Предупреждение", color=0xFFA500)
-    e.add_field(name="Участник", value=member.mention, inline=True)
-    e.add_field(name="Причина", value=reason, inline=True)
-    e.add_field(name="Всего варнов", value=str(len(warns)), inline=True)
+    warn_bar = bar(len(warns), 5, 8)
+    color = C.WARNING if len(warns) < 3 else C.DANGER
+    e = make_embed(color=color)
+    e.set_author(name=f"Предупреждение выдано · {member.display_name}", icon_url=member.display_avatar.url)
+    e.add_field(name="Участник",    value=member.mention,    inline=True)
+    e.add_field(name="Модератор",   value=interaction.user.mention, inline=True)
+    e.add_field(name="Причина",     value=reason,            inline=False)
+    e.add_field(name="Варнов всего", value=f"**{len(warns)}/5** `{warn_bar}`", inline=True)
     await interaction.response.send_message(embed=e)
     if len(warns) >= 3:
         try:
@@ -1070,11 +1074,21 @@ async def warnings(interaction: discord.Interaction, member: discord.Member):
     if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
     rows = await get_warnings(interaction.guild_id, member.id)
-    e = discord.Embed(title=f"⚠️ Варны: {member.display_name}", color=0xFFA500)
-    if not rows: e.description = "Нет варнов."
-    for wid, mod_id, reason, created in rows:
-        mod = interaction.guild.get_member(mod_id)
-        e.add_field(name=f"#{wid} · {created[:10]}", value=f"Модератор: {mod.mention if mod else mod_id}\nПричина: {reason}", inline=False)
+    color = C.DANGER if len(rows) >= 3 else C.WARNING if rows else C.SUCCESS
+    e = make_embed(color=color, thumbnail=member.display_avatar.url)
+    e.set_author(name=f"Варны: {member.display_name}", icon_url=member.display_avatar.url)
+    if not rows:
+        e.description = "Варнов нет."
+    else:
+        warn_bar = bar(len(rows), 5, 8)
+        e.add_field(name="Всего", value=f"**{len(rows)}/5** `{warn_bar}`", inline=False)
+        for wid, mod_id, reason, created in rows:
+            mod = interaction.guild.get_member(mod_id)
+            e.add_field(
+                name=f"#{wid} · {created[:10]}",
+                value=f"Модератор: {mod.mention if mod else mod_id}\nПричина: {reason}",
+                inline=False
+            )
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="clearwarn", description="Снять варн [Premium]")
@@ -1222,12 +1236,13 @@ async def help_cmd(interaction: discord.Interaction, page: str = "general"):
 @bot.tree.command(name="ping")
 async def ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
-    color = C.SUCCESS if ms<100 else C.WARNING if ms<200 else C.DANGER
-    quality = "Отлично" if ms<100 else "Нормально" if ms<200 else "Плохо"
-    e = make_embed(title="🏓 Pong!", color=color)
-    e.add_field(name="Latency", value=f"`{ms}ms`", inline=True)
+    color = C.SUCCESS if ms < 100 else C.WARNING if ms < 200 else C.DANGER
+    quality = "Отлично" if ms < 100 else "Нормально" if ms < 200 else "Плохо"
+    bar_str = bar(max(0, 200 - ms), 200, 10)
+    e = make_embed(title="Witness · Pong!", color=color)
+    e.add_field(name="Latency", value=f"**{ms}ms**", inline=True)
     e.add_field(name="Качество", value=quality, inline=True)
-    e.add_field(name="Статус", value=f"`{bar(max(0,200-ms), 200, 8)}` {100-min(ms//2,100)}%", inline=True)
+    e.add_field(name="Статус", value=f"`{bar_str}`", inline=True)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="userinfo")
@@ -1248,48 +1263,59 @@ async def userinfo(interaction: discord.Interaction, member: discord.Member = No
 
 @bot.tree.command(name="serverinfo")
 async def serverinfo(interaction: discord.Interaction):
-    g = interaction.guild
-    tier = await get_tier(g.id)
-    bots = sum(1 for m in g.members if m.bot)
+    g     = interaction.guild
+    tier  = await get_tier(g.id)
+    bots  = sum(1 for m in g.members if m.bot)
     humans = g.member_count - bots
+    age   = (datetime.datetime.utcnow() - g.created_at.replace(tzinfo=None)).days
     e = make_embed(
-        title=f"🏠 {g.name}",
         color=TIER_COLORS[tier],
         thumbnail=g.icon.url if g.icon else "",
         footer=f"ID: {g.id}"
     )
-    e.add_field(name="👥 Участники", value=f"**{humans}** людей · {bots} ботов", inline=True)
-    e.add_field(name="📁 Каналы", value=f"**{len(g.text_channels)}** текст · {len(g.voice_channels)} голос", inline=True)
-    e.add_field(name="🎭 Роли", value=f"**{len(g.roles)}**", inline=True)
-    e.add_field(name="💎 Буст", value=f"Уровень **{g.premium_tier}** · {g.premium_subscription_count} бустов", inline=True)
-    e.add_field(name="📅 Создан", value=g.created_at.strftime("%d.%m.%Y"), inline=True)
-    e.add_field(name="Witness", value=tier_badge(tier), inline=True)
+    e.set_author(name=g.name, icon_url=g.icon.url if g.icon else discord.Embed.Empty)
+    e.add_field(name="Участники",  value=f"**{humans}** люди · {bots} боты",                    inline=True)
+    e.add_field(name="Каналы",     value=f"**{len(g.text_channels)}** текст · {len(g.voice_channels)} голос", inline=True)
+    e.add_field(name="Роли",       value=f"**{len(g.roles)}**",                                  inline=True)
+    e.add_field(name="Буст",       value=f"Уровень **{g.premium_tier}** · {g.premium_subscription_count}×", inline=True)
+    e.add_field(name="Возраст",    value=f"**{age}** дней",                                      inline=True)
+    e.add_field(name="Witness",    value=tier_badge(tier),                                        inline=True)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="rank")
 async def rank(interaction: discord.Interaction):
-    xp = await get_xp(interaction.guild_id, interaction.user.id)
-    lvl = xp // 100
-    progress = xp % 100
-    progress_bar = bar(progress, 100, 12)
-    coins = await get_coins(interaction.guild_id, interaction.user.id)
-    e = make_embed(
-        title=f"⚡ {interaction.user.display_name}",
-        color=C.PRIMARY,
-        thumbnail=interaction.user.display_avatar.url
+    xp     = await get_xp(interaction.guild_id, interaction.user.id)
+    coins  = await get_coins(interaction.guild_id, interaction.user.id)
+    lvl    = xp // 100
+    prog   = xp % 100
+    bar_s  = bar(prog, 100, 12)
+    e = make_embed(color=C.PRIMARY, thumbnail=interaction.user.display_avatar.url)
+    e.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    e.add_field(name="Уровень",  value=f"**{lvl}**",    inline=True)
+    e.add_field(name="XP",       value=f"**{xp:,}**",   inline=True)
+    e.add_field(name="Монеты",   value=f"**{coins:,}**", inline=True)
+    e.add_field(
+        name=f"До уровня {lvl+1} — {prog}/100 XP",
+        value=f"`{bar_s}` **{prog}%**",
+        inline=False
     )
-    e.add_field(name="🏆 Уровень", value=f"**{lvl}**", inline=True)
-    e.add_field(name="✨ XP", value=f"**{xp:,}**", inline=True)
-    e.add_field(name="🪙 Монеты", value=f"**{coins:,}**", inline=True)
-    e.add_field(name=f"Прогресс до ур. {lvl+1}", value=f"`{progress_bar}` **{progress}/100 XP**", inline=False)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     rows = await get_leaderboard(interaction.guild_id)
-    medals = ["🥇","🥈","🥉","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"]
-    lines = [f"{medals[i]} **{interaction.guild.get_member(uid).display_name if interaction.guild.get_member(uid) else uid}** — {xp} XP · Ур.{xp//100}" for i,(uid,xp) in enumerate(rows)]
-    e = discord.Embed(title="🏆 Лидерборд", description="\n".join(lines) if lines else "Нет данных.", color=0xFFD700)
+    medals = ["🥇","🥈","🥉","4.","5.","6.","7.","8.","9.","10."]
+    e = make_embed(title="Топ активных участников", color=C.GOLD)
+    if not rows:
+        e.description = "Нет данных."
+    else:
+        lines = []
+        for i, (uid, xp) in enumerate(rows):
+            m = interaction.guild.get_member(uid)
+            name = m.display_name if m else str(uid)
+            b = bar(xp % 100, 100, 6)
+            lines.append(f"{medals[i]} **{name}** — {xp:,} XP · ур. {xp//100} `{b}`")
+        e.description = "\n".join(lines)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="coins")
@@ -1350,10 +1376,17 @@ async def weather(interaction: discord.Interaction, city: str):
             async with s.get(f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_KEY}&units=metric") as r:
                 if r.status!=200: return await interaction.followup.send(f"❌ Город **{city}** не найден.")
                 d = await r.json()
-        e = discord.Embed(title=f"🌤️ {d['name']}, {d['sys']['country']}", color=0x00E5FF)
-        e.add_field(name="🌡️", value=f"{d['main']['temp']:.1f}°C (ощущается {d['main']['feels_like']:.1f}°C)", inline=True)
-        e.add_field(name="☁️", value=d["weather"][0]["description"].capitalize(), inline=True)
-        e.add_field(name="💧", value=f"{d['main']['humidity']}%", inline=True)
+        desc = d["weather"][0]["description"].capitalize()
+        temp = d["main"]["temp"]
+        feels = d["main"]["feels_like"]
+        humidity = d["main"]["humidity"]
+        wind = d["wind"]["speed"]
+        e = make_embed(color=C.INFO)
+        e.set_author(name=f"{d['name']}, {d['sys']['country']}")
+        e.add_field(name="Температура", value=f"**{temp:.1f}°C** (ощущается {feels:.1f}°C)", inline=True)
+        e.add_field(name="Описание",    value=desc,                                          inline=True)
+        e.add_field(name="Влажность",   value=f"**{humidity}%**",                            inline=True)
+        e.add_field(name="Ветер",       value=f"**{wind} м/с**",                             inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1384,12 +1417,19 @@ async def stats(interaction: discord.Interaction, player: str):
             pid, pname = await albion_find_player(s, player)
             if not pid: return await interaction.followup.send(f"❌ **{player}** не найден.")
             async with s.get(f"{ALBION_BASE}/players/{pid}") as r: p = await r.json()
-        kf,df = p.get("KillFame",0), p.get("DeathFame",0)
-        e = discord.Embed(title=f"🗡️ {pname}", color=0x00E5FF)
-        e.add_field(name="Гильдия", value=p.get("GuildName") or "—", inline=True)
-        e.add_field(name="K/D", value=str(round(kf/df,2) if df else "∞"), inline=True)
-        e.add_field(name="Kill Fame", value=f"{kf:,}", inline=True)
-        e.add_field(name="Death Fame", value=f"{df:,}", inline=True)
+        kf  = p.get("KillFame", 0)
+        df  = p.get("DeathFame", 0)
+        pve = p.get("LifetimeStatistics", {}).get("PvE", {}).get("Total", 0)
+        kd  = round(kf / df, 2) if df else "∞"
+        kd_bar = bar(min(kf / max(df, 1), 5), 5, 8) if df else "████████"
+        e = make_embed(color=C.INFO, footer=f"EU · Albion Online")
+        e.set_author(name=pname, icon_url=f"https://render.albiononline.com/v1/player/{pname}/avatar?size=40")
+        e.add_field(name="Гильдия",    value=p.get("GuildName") or "—",  inline=True)
+        e.add_field(name="Альянс",     value=p.get("AllianceName") or "—", inline=True)
+        e.add_field(name="K/D",        value=f"**{kd}** `{kd_bar}`",      inline=True)
+        e.add_field(name="Kill Fame",  value=f"**{kf:,}**",               inline=True)
+        e.add_field(name="Death Fame", value=f"**{df:,}**",               inline=True)
+        e.add_field(name="PvE Fame",   value=f"**{pve:,}**",              inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1403,11 +1443,21 @@ async def kills(interaction: discord.Interaction, player: str):
             pid, pname = await albion_find_player(s, player)
             if not pid: return await interaction.followup.send(f"❌ **{player}** не найден.")
             async with s.get(f"{ALBION_BASE}/players/{pid}/kills?limit=5") as r: evs = await r.json()
-        if not evs: return await interaction.followup.send(f"📭 У **{pname}** нет недавних убийств.")
-        e = discord.Embed(title=f"⚔️ {pname} — Последние убийства", color=0xFF4444)
+        if not evs: return await interaction.followup.send(f"Нет недавних убийств у **{pname}**.")
+        e = make_embed(color=C.DANGER, footer=f"EU · Albion Online")
+        e.set_author(name=f"{pname} — последние убийства")
+        total_fame = sum(ev.get("TotalVictimKillFame", 0) for ev in evs[:5])
+        e.description = f"За последние 5 убийств заработано **{total_fame:,}** fame"
         for ev in evs[:5]:
-            v = ev.get("Victim",{}); weapon = fmt_item(v.get("Equipment",{}).get("MainHand",{}).get("Type","") if v.get("Equipment") else "")
-            e.add_field(name=f"🔪 {v.get('Name','?')}", value=f"Fame: **{ev.get('TotalVictimKillFame',0):,}** · {weapon}\n📅 {ev.get('TimeStamp','')[:10]}", inline=False)
+            v      = ev.get("Victim", {})
+            weapon = fmt_item(v.get("Equipment", {}).get("MainHand", {}).get("Type", "") if v.get("Equipment") else "")
+            fame   = ev.get("TotalVictimKillFame", 0)
+            date   = ev.get("TimeStamp", "")[:10]
+            e.add_field(
+                name=f"{v.get('Name', '?')} · {date}",
+                value=f"Fame: **{fame:,}** · {weapon}",
+                inline=True
+            )
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1421,11 +1471,20 @@ async def deaths(interaction: discord.Interaction, player: str):
             pid, pname = await albion_find_player(s, player)
             if not pid: return await interaction.followup.send(f"❌ **{player}** не найден.")
             async with s.get(f"{ALBION_BASE}/players/{pid}/deaths?limit=5") as r: evs = await r.json()
-        if not evs: return await interaction.followup.send(f"📭 У **{pname}** нет недавних смертей.")
-        e = discord.Embed(title=f"💀 {pname} — Последние смерти", color=0x888888)
+        if not evs: return await interaction.followup.send(f"Нет недавних смертей у **{pname}**.")
+        e = make_embed(color=C.MUTED, footer="EU · Albion Online")
+        e.set_author(name=f"{pname} — последние смерти")
+        total = sum(ev.get("TotalVictimKillFame", 0) for ev in evs[:5])
+        e.description = f"Потеряно **{total:,}** fame в 5 последних смертях"
         for ev in evs[:5]:
-            k = ev.get("Killer",{})
-            e.add_field(name=f"☠️ {k.get('Name','?')}", value=f"Fame: **{ev.get('TotalVictimKillFame',0):,}**\n📅 {ev.get('TimeStamp','')[:10]}", inline=False)
+            k    = ev.get("Killer", {})
+            fame = ev.get("TotalVictimKillFame", 0)
+            date = ev.get("TimeStamp", "")[:10]
+            e.add_field(
+                name=f"Убит: {k.get('Name', '?')} · {date}",
+                value=f"Потеряно fame: **{fame:,}**",
+                inline=True
+            )
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1456,11 +1515,22 @@ async def battle(interaction: discord.Interaction):
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(f"{ALBION_BASE}/battles?sort=recent&limit=5") as r: battles = await r.json()
-        e = discord.Embed(title="⚔️ Последние битвы Albion", color=0xFF6B35)
+        e = make_embed(
+            title="Последние ZvZ битвы",
+            description=f"Данные по {len(battles[:5])} последним сражениям",
+            color=C.DANGER, footer="EU · Albion Online"
+        )
         for b in battles[:5]:
-            guilds = list(b.get("Guilds",{}).keys())[:3]
-            e.add_field(name=f"⚔️ {' vs '.join(guilds) or 'Open world'}",
-                        value=f"Убийств: **{b.get('TotalKills',0)}** · Fame: **{b.get('TotalFame',0):,}**\n📅 {b.get('StartTime','')[:10]}", inline=False)
+            guilds = list(b.get("Guilds", {}).keys())[:3]
+            name_str = " vs ".join(guilds) if guilds else "Open World"
+            kills = b.get("TotalKills", 0)
+            fame  = b.get("TotalFame", 0)
+            date  = b.get("StartTime", "")[:10]
+            e.add_field(
+                name=f"{name_str} · {date}",
+                value=f"Убийств: **{kills}** · Fame: **{fame:,}**",
+                inline=False
+            )
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1509,16 +1579,23 @@ async def history(interaction: discord.Interaction, player: str):
             return out
         wk,wd = recent(ak),recent(ad)
         fame = sum(e.get("TotalVictimKillFame",0) for e in wk)
-        e = discord.Embed(title=f"📅 {pname} — 7 дней", color=0x00FF9D)
-        e.add_field(name="⚔️ Убийств", value=f"**{len(wk)}**", inline=True)
-        e.add_field(name="💀 Смертей", value=f"**{len(wd)}**", inline=True)
-        e.add_field(name="K/D", value=f"**{round(len(wk)/len(wd),2) if wd else '∞'}**", inline=True)
-        e.add_field(name="Fame", value=f"**{fame:,}**", inline=True)
+        kd_week = round(len(wk) / len(wd), 2) if wd else "∞"
+        activity = "Очень активен" if len(wk) > 20 else "Активен" if len(wk) > 5 else "Тихая неделя"
+        act_bar  = bar(min(len(wk), 30), 30, 10)
+        e = make_embed(color=C.SUCCESS, footer="EU · Albion Online · 7 дней")
+        e.set_author(name=f"{pname} — активность за 7 дней")
+        e.add_field(name="Убийств",  value=f"**{len(wk)}**",   inline=True)
+        e.add_field(name="Смертей",  value=f"**{len(wd)}**",   inline=True)
+        e.add_field(name="K/D",      value=f"**{kd_week}**",   inline=True)
+        e.add_field(name="Fame",     value=f"**{fame:,}**",    inline=True)
+        e.add_field(name="Активность", value=f"{activity} `{act_bar}`", inline=True)
         if wk:
-            victims={}
-            for ev in wk: victims[ev.get("Victim",{}).get("Name","?")] = victims.get(ev.get("Victim",{}).get("Name","?"),0)+1
-            top=max(victims,key=victims.get); e.add_field(name="Жертва 🎯", value=f"**{top}** ({victims[top]}x)", inline=True)
-        e.add_field(name="Активность", value="🔥 Очень активен" if len(wk)>20 else "⚡ Активен" if len(wk)>5 else "😴 Тихая неделя", inline=True)
+            victims = {}
+            for ev in wk:
+                n = ev.get("Victim", {}).get("Name", "?")
+                victims[n] = victims.get(n, 0) + 1
+            top = max(victims, key=victims.get)
+            e.add_field(name="Любимая жертва", value=f"**{top}** × {victims[top]}", inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1574,8 +1651,9 @@ async def ai_cmd(interaction: discord.Interaction, question: str):
     await interaction.response.defer()
     try:
         answer = await ask_ai(question)
-        e = discord.Embed(title="🤖 Witness AI", description=answer[:4000], color=0x00E5FF)
-        e.set_footer(text=f"Спросил: {interaction.user.display_name}")
+        e = make_embed(description=answer[:4000], color=C.PREMIUM)
+        e.set_author(name="Witness AI", icon_url=interaction.user.display_avatar.url)
+        e.add_field(name="Запрос", value=f"`{question[:100]}`", inline=False)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1636,9 +1714,15 @@ async def val(interaction: discord.Interaction, username: str):
             async with s.get(f"https://api.henrikdev.xyz/valorant/v2/mmr/eu/{name}/{tag}", headers={"Authorization":HENRIK_KEY} if HENRIK_KEY else {}) as r: d = await r.json()
         if d.get("status")!=200: return await interaction.followup.send(f"❌ **{username}** не найден.")
         data = d["data"]
-        e = discord.Embed(title=f"🔫 Valorant — {username}", color=0xFF4655)
-        e.add_field(name="Ранг", value=data.get("currenttierpatched","Unranked"), inline=True)
-        e.add_field(name="RR", value=str(data.get("ranking_in_tier",0)), inline=True)
+        rank_name = data.get("currenttierpatched", "Unranked")
+        rr        = data.get("ranking_in_tier", 0)
+        peak      = data.get("highest_rank", {}).get("patched_tier", "?")
+        rr_bar    = bar(rr, 100, 10)
+        e = make_embed(color=0xFF4655, footer="Valorant · EU")
+        e.set_author(name=username)
+        e.add_field(name="Ранг",       value=f"**{rank_name}**",         inline=True)
+        e.add_field(name="RR",         value=f"**{rr}/100** `{rr_bar}`", inline=True)
+        e.add_field(name="Пик",        value=f"**{peak}**",              inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1658,10 +1742,15 @@ async def cs2(interaction: discord.Interaction, steam_id: str):
             async with s.get(f"https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?appid=730&key={STEAM_KEY}&steamid={steam_id}") as r:
                 sd = {s["name"]:s["value"] for s in (await r.json()).get("playerstats",{}).get("stats",[])}
         kills,deaths,wins,hs = sd.get("total_kills",0),sd.get("total_deaths",0),sd.get("total_wins",0),sd.get("total_kills_headshot",0)
-        e = discord.Embed(title=f"🎯 CS2 — {steam_id}", color=0xF0A500)
-        e.add_field(name="K/D", value=str(round(kills/deaths,2) if deaths else "∞"), inline=True)
-        e.add_field(name="Убийств", value=f"{kills:,}", inline=True)
-        e.add_field(name="HS%", value=f"{round(hs/kills*100,1) if kills else 0}%", inline=True)
+        kd     = round(kills / deaths, 2) if deaths else "∞"
+        hs_pct = round(hs / kills * 100, 1) if kills else 0
+        hs_bar = bar(hs_pct, 100, 8)
+        e = make_embed(color=0xF0A500, footer="CS2 · Steam")
+        e.set_author(name=f"CS2 — {steam_id}")
+        e.add_field(name="K/D",      value=f"**{kd}**",                        inline=True)
+        e.add_field(name="Убийств",  value=f"**{kills:,}**",                   inline=True)
+        e.add_field(name="Побед",    value=f"**{wins:,}**",                    inline=True)
+        e.add_field(name="HS%",      value=f"**{hs_pct}%** `{hs_bar}`",        inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1680,11 +1769,22 @@ async def lol(interaction: discord.Interaction, summoner: str, region: str = "eu
                 sid = (await r.json())["id"]
             async with s.get(f"https://{region}.api.riotgames.com/lol/league/v4/entries/by-summoner/{sid}",headers=headers) as r:
                 entries = await r.json()
-        e = discord.Embed(title=f"🏆 LoL — {summoner}", color=0xC89B3C)
-        if not entries: e.description="Unranked."
+        e = make_embed(color=0xC89B3C, footer=f"League of Legends · {region.upper()}")
+        e.set_author(name=summoner)
+        if not entries:
+            e.description = "Unranked this season."
         for en in entries:
-            w,l = en["wins"],en["losses"]
-            e.add_field(name=en["queueType"].replace("_"," ").title(), value=f"**{en['tier']} {en['rank']}** · {en['leaguePoints']} LP\n{w}W/{l}L · {round(w/(w+l)*100,1) if (w+l) else 0}% WR", inline=True)
+            w, l = en["wins"], en["losses"]
+            wr   = round(w / (w + l) * 100, 1) if (w + l) else 0
+            wr_b = bar(wr, 100, 8)
+            e.add_field(
+                name=en["queueType"].replace("_", " ").title(),
+                value=(
+                    f"**{en['tier']} {en['rank']}** · {en['leaguePoints']} LP\n"
+                    f"{w}W / {l}L · **{wr}%** WR `{wr_b}`"
+                ),
+                inline=True
+            )
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -2360,7 +2460,8 @@ async def party(interaction: discord.Interaction, p1: str, p2: str, p3: str, p4:
     if await get_tier(interaction.guild_id)<TIER_PRO: return await interaction.response.send_message(embed=upsell_embed("Pro"),ephemeral=True)
     await interaction.response.defer()
     players=[p for p in [p1,p2,p3,p4,p5] if p]
-    e = discord.Embed(title=f"⚔️ Анализ пати ({len(players)} игроков)", color=0x00FF9D)
+    e = make_embed(color=C.SUCCESS, footer="EU · Albion Online")
+    e.set_author(name=f"Анализ группы — {len(players)} игроков")
     total_kf=total_df=found=0; lines=[]
     async with aiohttp.ClientSession() as s:
         for name in players:
@@ -3329,14 +3430,19 @@ async def guildwar(interaction: discord.Interaction, limit: int = 10):
 
         top = sorted(guild_stats.items(), key=lambda x: x[1]["fame"], reverse=True)[:limit]
 
-        e = discord.Embed(title="⚔️ Топ гильдий по ZvZ активности", color=0xFF6B35,
-                          description=f"По данным последних 50 битв · {datetime.datetime.utcnow().strftime('%d.%m.%Y')}")
-        medals = ["🥇","🥈","🥉"] + [f"{i}." for i in range(4, limit+1)]
+        e = make_embed(
+            title="Топ гильдий по ZvZ",
+            description=f"По данным последних 50 битв · {datetime.datetime.utcnow().strftime('%d.%m.%Y')}",
+            color=C.DANGER, footer="EU · Albion Online"
+        )
         for i, (gname, stats) in enumerate(top):
+            fame_bar = bar(stats["fame"], top[0][1]["fame"] if top else 1, 6)
             e.add_field(
-                name=f"{medals[i]} {gname}",
-                value=(f"Битв: **{stats['battles']}** · Убийств: **{stats['kills']}**\n"
-                       f"Fame: **{stats['fame']:,}**"),
+                name=f"{i+1}. {gname}",
+                value=(
+                    f"Битв: **{stats['battles']}** · Убийств: **{stats['kills']}**\n"
+                    f"Fame: **{stats['fame']:,}** `{fame_bar}`"
+                ),
                 inline=True
             )
         await interaction.followup.send(embed=e)
