@@ -897,6 +897,11 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
+
+        # Пропускаем команды — их обрабатывает main.py
+        if message.content.startswith(("-q", "-", "!")):
+            return
+
         gid, uid = message.guild.id, message.author.id
 
         # Проверяем whitelist
