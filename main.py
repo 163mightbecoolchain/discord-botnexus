@@ -273,6 +273,234 @@ def cooldown(seconds: int):
     return decorator
 
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  LOCALIZATION — поддержка RU / EN
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_guild_lang: dict = {}  # {guild_id: "ru" | "en"}
+
+def get_lang(guild_id: int) -> str:
+    """Синхронная версия — из кэша (быстро, для частых вызовов)"""
+    return _guild_lang.get(guild_id, "ru")
+
+async def load_lang(guild_id: int) -> str:
+    """Загружает язык из БД в кэш"""
+    if guild_id in _guild_lang:
+        return _guild_lang[guild_id]
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT lang FROM guild_settings WHERE guild_id=?", (guild_id,)
+        ) as c:
+            row = await c.fetchone()
+    lang = row[0] if row and row[0] else "ru"
+    _guild_lang[guild_id] = lang
+    return lang
+
+STRINGS = {
+    "ru": {
+        # General
+        "level":           "Уровень",
+        "xp":              "XP",
+        "coins":           "Монеты",
+        "members":         "Участники",
+        "channels":        "Каналы",
+        "roles":           "Роли",
+        "boost":           "Буст",
+        "created":         "Создан",
+        "age":             "Аккаунт",
+        "on_server":       "На сервере",
+        "progress":        "До уровня {next}",
+        "top_active":      "Топ активных",
+        "source":          "Источник",
+        "request":         "Запрос",
+        # Albion
+        "guild":           "Гильдия",
+        "alliance":        "Альянс",
+        "kill_fame":       "Kill Fame",
+        "death_fame":      "Death Fame",
+        "pve_fame":        "PvE Fame",
+        "kd":              "K/D",
+        "kills":           "Убийств",
+        "deaths":          "Смертей",
+        "activity":        "Активность",
+        "fav_target":      "Любимая жертва",
+        "last_kills":      "Последние убийства",
+        "last_deaths":     "Последние смерти",
+        "not_found":       "❌ **{name}** не найден.",
+        "no_kills":        "Нет недавних убийств у **{name}**.",
+        "no_deaths":       "Нет недавних смертей у **{name}**.",
+        "advantage":       "Преимущество",
+        # Games
+        "rank":            "Ранг",
+        "peak":            "Пик",
+        "wr":              "Винрейт",
+        "headshots":       "HS%",
+        "wins":            "Побед",
+        "temp":            "Температура",
+        "feels":           "Ощущается",
+        "humidity":        "Влажность",
+        "wind":            "Ветер",
+        "description":     "Описание",
+        "original":        "Оригинал",
+        "translation":     "Перевод",
+        # Security logs
+        "joined":          "Вход",
+        "left":            "Выход",
+        "banned":          "Бан",
+        "unbanned":        "Разбан",
+        "muted":           "Мьют",
+        "unmuted":         "Мьют снят",
+        "nick_changed":    "Смена ника",
+        "roles_changed":   "Смена ролей",
+        "msg_deleted":     "Удалено сообщение",
+        "msg_edited":      "Редактирование",
+        "invite_created":  "Инвайт создан",
+        "invite_deleted":  "Инвайт удалён",
+        "voice_update":    "Голос",
+        "channel_created": "Канал создан",
+        "channel_deleted": "Канал удалён",
+        "role_created":    "Роль создана",
+        "role_deleted":    "Роль удалена",
+        "server_edited":   "Сервер изменён",
+        "was":             "Было",
+        "now":             "Стало",
+        "member":          "Участник",
+        "moderator":       "Модератор",
+        "reason":          "Причина",
+        "channel":         "Канал",
+        "text":            "Текст",
+        "added":           "Добавлены",
+        "removed":         "Убраны",
+        "until":           "До",
+        "code":            "Код",
+        "expires":         "Истекает",
+        "uses":            "Использований",
+        "invited_by":      "Пригласил",
+        "invite":          "Инвайт",
+        "action":          "Действие",
+        "timeout_auto":    "Таймаут 30 сек",
+        "antispam_title":  "Анти-спам",
+        "raid_title":      "РЕЙД ЗАБЛОКИРОВАН",
+        "raid_reason":     "8+ входов за 10 сек",
+        "suspicious":      "Подозрительный аккаунт",
+        "account_age":     "Возраст",
+        "never":           "никогда",
+        "unknown":         "неизвестно",
+        "enter_action":    "вошёл в",
+        "left_action":     "вышел из",
+        "moved":           "→",
+        "no_data":         "Нет данных.",
+        "days":            "дней",
+    },
+    "en": {
+        # General
+        "level":           "Level",
+        "xp":              "XP",
+        "coins":           "Coins",
+        "members":         "Members",
+        "channels":        "Channels",
+        "roles":           "Roles",
+        "boost":           "Boost",
+        "created":         "Created",
+        "age":             "Account age",
+        "on_server":       "On server",
+        "progress":        "Progress to level {next}",
+        "top_active":      "Most active",
+        "source":          "Source",
+        "request":         "Request",
+        # Albion
+        "guild":           "Guild",
+        "alliance":        "Alliance",
+        "kill_fame":       "Kill Fame",
+        "death_fame":      "Death Fame",
+        "pve_fame":        "PvE Fame",
+        "kd":              "K/D",
+        "kills":           "Kills",
+        "deaths":          "Deaths",
+        "activity":        "Activity",
+        "fav_target":      "Favourite target",
+        "last_kills":      "Recent kills",
+        "last_deaths":     "Recent deaths",
+        "not_found":       "❌ **{name}** not found.",
+        "no_kills":        "No recent kills for **{name}**.",
+        "no_deaths":       "No recent deaths for **{name}**.",
+        "advantage":       "Advantage",
+        # Games
+        "rank":            "Rank",
+        "peak":            "Peak",
+        "wr":              "Win rate",
+        "headshots":       "HS%",
+        "wins":            "Wins",
+        "temp":            "Temperature",
+        "feels":           "Feels like",
+        "humidity":        "Humidity",
+        "wind":            "Wind",
+        "description":     "Description",
+        "original":        "Original",
+        "translation":     "Translation",
+        # Security logs
+        "joined":          "Joined",
+        "left":            "Left",
+        "banned":          "Banned",
+        "unbanned":        "Unbanned",
+        "muted":           "Muted",
+        "unmuted":         "Unmuted",
+        "nick_changed":    "Nickname changed",
+        "roles_changed":   "Roles changed",
+        "msg_deleted":     "Message deleted",
+        "msg_edited":      "Message edited",
+        "invite_created":  "Invite created",
+        "invite_deleted":  "Invite deleted",
+        "voice_update":    "Voice",
+        "channel_created": "Channel created",
+        "channel_deleted": "Channel deleted",
+        "role_created":    "Role created",
+        "role_deleted":    "Role deleted",
+        "server_edited":   "Server updated",
+        "was":             "Before",
+        "now":             "After",
+        "member":          "Member",
+        "moderator":       "Moderator",
+        "reason":          "Reason",
+        "channel":         "Channel",
+        "text":            "Content",
+        "added":           "Added",
+        "removed":         "Removed",
+        "until":           "Until",
+        "code":            "Code",
+        "expires":         "Expires",
+        "uses":            "Uses",
+        "invited_by":      "Invited by",
+        "invite":          "Invite",
+        "action":          "Action",
+        "timeout_auto":    "Timeout 30s",
+        "antispam_title":  "Anti-spam",
+        "raid_title":      "RAID BLOCKED",
+        "raid_reason":     "8+ joins in 10s",
+        "suspicious":      "Suspicious account",
+        "account_age":     "Age",
+        "never":           "never",
+        "unknown":         "unknown",
+        "enter_action":    "joined",
+        "left_action":     "left",
+        "moved":           "→",
+        "no_data":         "No data.",
+        "days":            "days",
+    }
+}
+
+def t(guild_id: int, key: str, **kwargs) -> str:
+    """Translate key for guild language"""
+    lang = get_lang(guild_id)
+    text = STRINGS.get(lang, STRINGS["ru"]).get(key, STRINGS["ru"].get(key, key))
+    if kwargs:
+        try:
+            text = text.format(**kwargs)
+        except Exception:
+            pass
+    return text
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  DATABASE — per-guild isolation
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -319,7 +547,8 @@ async def db_init():
                 ticket_category INTEGER DEFAULT 0,
                 birthday_channel INTEGER DEFAULT 0,
                 lockdown INTEGER DEFAULT 0,
-                price_watch TEXT DEFAULT '{}');
+                price_watch TEXT DEFAULT '{}',
+                lang TEXT DEFAULT 'ru');
             CREATE TABLE IF NOT EXISTS price_watch (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 channel_id INTEGER NOT NULL, item_id TEXT, threshold_pct REAL DEFAULT 5.0,
@@ -565,6 +794,18 @@ async def on_ready():
         bot.loop.create_task(price_watch_loop())
         print("✅ Фоновые задачи запущены")
 
+    # ── Загружаем языки серверов из БД ───────────────────────
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT guild_id, lang FROM guild_settings WHERE lang IS NOT NULL") as c:
+                lang_rows = await c.fetchall()
+        for gid, lang in lang_rows:
+            if lang in ("ru", "en"):
+                _guild_lang[gid] = lang
+        print(f"✅ Языки загружены: {len(_guild_lang)} серверов")
+    except Exception as ex:
+        print(f"⚠️ Ошибка загрузки языков: {ex}")
+
     print(f"✅ Witness v5 | {bot.user} | {len(bot.guilds)} серверов | {len(_invite_cache)} инвайтов в кэше")
     await bot.change_presence(activity=discord.Activity(
         type=discord.ActivityType.watching, name="/help | witnessbot.gg"))
@@ -596,9 +837,10 @@ async def on_message(message):
                 await message.author.timeout(timedelta(seconds=30), reason="Anti-spam")
                 ch = await get_log_ch(message.guild)
                 if ch:
-                    e = discord.Embed(title="🚫 Анти-спам", color=0xFF4444, timestamp=datetime.datetime.utcnow())
-                    e.add_field(name="Участник", value=message.author.mention)
-                    e.add_field(name="Действие", value="Таймаут 30 сек")
+                    e = make_embed(color=C.DANGER)
+                    e.set_author(name=t(gid, "antispam_title"))
+                    e.add_field(name=t(gid, "member"), value=message.author.mention)
+                    e.add_field(name=t(gid, "action"), value=t(gid, "timeout_auto"))
                     await ch.send(embed=e)
             except Exception: pass
     await bot.process_commands(message)
@@ -616,9 +858,10 @@ async def on_member_join(member):
                 await member.kick(reason="Anti-raid")
                 ch = await get_log_ch(member.guild)
                 if ch:
-                    e = discord.Embed(title="🚨 РЕЙД ЗАБЛОКИРОВАН", color=0xFF0000, timestamp=datetime.datetime.utcnow())
-                    e.add_field(name="Кикнут", value=f"{member.mention}", inline=False)
-                    e.add_field(name="Причина", value="8+ входов за 10 сек", inline=False)
+                    e = make_embed(color=C.DANGER)
+                    e.set_author(name=t(gid, "raid_title"))
+                    e.add_field(name=t(gid, "member"), value=member.mention, inline=False)
+                    e.add_field(name=t(gid, "reason"), value=t(gid, "raid_reason"), inline=False)
                     await ch.send(embed=e)
                 return
             except Exception: pass
@@ -708,26 +951,31 @@ async def on_member_remove(member):
     ch = await sec_check(member.guild, "leaves")
     if not ch: return
     roles = [r.mention for r in member.roles if r.name != "@everyone"]
-    e = discord.Embed(title="📤 Выход", color=discord.Color.red(), timestamp=datetime.datetime.utcnow())
-    e.set_thumbnail(url=member.display_avatar.url)
-    e.add_field(name="Участник", value=f"{member.mention} (`{member.name}`)", inline=False)
-    e.add_field(name="Роли", value=", ".join(roles) if roles else "нет", inline=False)
+    gid2 = member.guild.id
+    e = make_embed(color=C.DANGER, thumbnail=member.display_avatar.url)
+    e.set_author(name=t(gid2, "left"))
+    e.add_field(name=t(gid2, "member"), value=f"{member.mention} · `{member.name}`", inline=False)
+    e.add_field(name=t(gid2, "roles"),  value=", ".join(roles) if roles else "—",    inline=False)
     await ch.send(embed=e)
 
 @bot.event
 async def on_member_ban(guild, user):
     ch = await sec_check(guild, "bans")
     if not ch: return
-    e = discord.Embed(title="🔨 Бан", color=discord.Color.dark_red(), timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Участник", value=f"{user.mention} (`{user.name}`)", inline=False)
+    gid3 = guild.id
+    e = make_embed(color=C.DANGER)
+    e.set_author(name=t(gid3, "banned"))
+    e.add_field(name=t(gid3, "member"), value=f"{user.mention} · `{user.name}`", inline=False)
     await ch.send(embed=e)
 
 @bot.event
 async def on_member_unban(guild, user):
     ch = await sec_check(guild, "bans")
     if not ch: return
-    e = discord.Embed(title="✅ Разбан", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Участник", value=f"{user.mention}", inline=False)
+    gid4 = guild.id
+    e = make_embed(color=C.SUCCESS)
+    e.set_author(name=t(gid4, "unbanned"))
+    e.add_field(name=t(gid4, "member"), value=user.mention, inline=False)
     await ch.send(embed=e)
 
 @bot.event
@@ -735,30 +983,37 @@ async def on_member_update(before, after):
     if before.nick != after.nick:
         ch = await sec_check(after.guild, "nick_change")
         if ch:
-            e = discord.Embed(title="✏️ Смена ника", color=discord.Color.blue(), timestamp=datetime.datetime.utcnow())
-            e.add_field(name="Участник", value=after.mention, inline=False)
-            e.add_field(name="Было", value=before.nick or before.name, inline=True)
-            e.add_field(name="Стало", value=after.nick or after.name, inline=True)
+            gid5 = after.guild.id
+            e = make_embed(color=C.INFO)
+            e.set_author(name=t(gid5, "nick_changed"))
+            e.add_field(name=t(gid5, "member"), value=after.mention,              inline=False)
+            e.add_field(name=t(gid5, "was"),    value=before.nick or before.name, inline=True)
+            e.add_field(name=t(gid5, "now"),    value=after.nick or after.name,   inline=True)
             await ch.send(embed=e)
     added = set(after.roles)-set(before.roles); removed = set(before.roles)-set(after.roles)
     if added or removed:
         ch = await sec_check(after.guild, "role_change")
         if ch:
-            e = discord.Embed(title="🎭 Смена ролей", color=discord.Color.blurple(), timestamp=datetime.datetime.utcnow())
-            e.add_field(name="Участник", value=after.mention, inline=False)
-            if added: e.add_field(name="Добавлены", value=", ".join(r.mention for r in added), inline=False)
-            if removed: e.add_field(name="Убраны", value=", ".join(r.mention for r in removed), inline=False)
+            gid6 = after.guild.id
+            e = make_embed(color=C.PRIMARY)
+            e.set_author(name=t(gid6, "roles_changed"))
+            e.add_field(name=t(gid6, "member"),  value=after.mention, inline=False)
+            if added:   e.add_field(name=t(gid6, "added"),   value=", ".join(r.mention for r in added),   inline=False)
+            if removed: e.add_field(name=t(gid6, "removed"), value=", ".join(r.mention for r in removed), inline=False)
             await ch.send(embed=e)
     if before.timed_out_until != after.timed_out_until:
         ch = await sec_check(after.guild, "timeouts")
         if ch:
+            gid7 = after.guild.id
             if after.timed_out_until:
-                e = discord.Embed(title="🔇 Мьют", color=discord.Color.orange(), timestamp=datetime.datetime.utcnow())
-                e.add_field(name="Участник", value=after.mention, inline=False)
-                e.add_field(name="До", value=after.timed_out_until.strftime("%d.%m.%Y %H:%M"), inline=True)
+                e = make_embed(color=C.WARNING)
+                e.set_author(name=t(gid7, "muted"))
+                e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
+                e.add_field(name=t(gid7, "until"),  value=after.timed_out_until.strftime("%d.%m.%Y %H:%M"), inline=True)
             else:
-                e = discord.Embed(title="🔊 Мьют снят", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
-                e.add_field(name="Участник", value=after.mention, inline=False)
+                e = make_embed(color=C.SUCCESS)
+                e.set_author(name=t(gid7, "unmuted"))
+                e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
             await ch.send(embed=e)
 
 @bot.event
@@ -766,10 +1021,12 @@ async def on_message_delete(message):
     if message.author.bot or not message.guild: return
     ch = await sec_check(message.guild, "msg_delete")
     if not ch: return
-    e = discord.Embed(title="🗑️ Удалено сообщение", color=discord.Color.red(), timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Автор", value=f"{message.author.mention}", inline=True)
-    e.add_field(name="Канал", value=getattr(message.channel, 'mention', str(message.channel)), inline=True)
-    e.add_field(name="Текст", value=message.content[:1020] or "*(вложение)*", inline=False)
+    gid8 = message.guild.id
+    e = make_embed(color=C.DANGER)
+    e.set_author(name=t(gid8, "msg_deleted"))
+    e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
+    e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
+    e.add_field(name=t(gid8, "text"),    value=message.content[:1020] or "*(attachment)*",                inline=False)
     await ch.send(embed=e)
 
 @bot.event
@@ -777,11 +1034,13 @@ async def on_message_edit(before, after):
     if before.author.bot or not before.guild or before.content == after.content: return
     ch = await sec_check(before.guild, "msg_edit")
     if not ch: return
-    e = discord.Embed(title="✏️ Редактирование", color=discord.Color.yellow(), timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Автор", value=before.author.mention, inline=False)
-    e.add_field(name="Было", value=before.content[:512] or "*(пусто)*", inline=False)
-    e.add_field(name="Стало", value=after.content[:512] or "*(пусто)*", inline=False)
-    e.add_field(name="Ссылка", value=f"[Перейти]({after.jump_url})", inline=True)
+    gid9 = before.guild.id
+    e = make_embed(color=C.WARNING)
+    e.set_author(name=t(gid9, "msg_edited"))
+    e.add_field(name=t(gid9, "member"), value=before.author.mention,        inline=False)
+    e.add_field(name=t(gid9, "was"),    value=before.content[:512] or "—",  inline=False)
+    e.add_field(name=t(gid9, "now"),    value=after.content[:512] or "—",   inline=False)
+    e.add_field(name="Link",            value=f"[Jump]({after.jump_url})",   inline=True)
     await ch.send(embed=e)
 
 @bot.event
@@ -790,11 +1049,13 @@ async def on_invite_create(invite):
     print(f"[INVITE] Created: {invite.code} by {invite.inviter}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
-    e = discord.Embed(title="🔗 Инвайт создан", color=discord.Color.teal(), timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Создал", value=f"{invite.inviter.mention} (`{invite.inviter.name}`)" if invite.inviter else "?", inline=True)
-    e.add_field(name="Код", value=f"`{invite.code}`", inline=True)
-    e.add_field(name="Использований", value=str(invite.max_uses) if invite.max_uses else "∞", inline=True)
-    e.add_field(name="Истекает", value=invite.expires_at.strftime("%d.%m.%Y %H:%M") if invite.expires_at else "никогда", inline=True)
+    gid10 = invite.guild.id
+    e = make_embed(color=C.INFO)
+    e.set_author(name=t(gid10, "invite_created"))
+    e.add_field(name=t(gid10, "member"),  value=f"{invite.inviter.mention} · `{invite.inviter.name}`" if invite.inviter else "?", inline=True)
+    e.add_field(name=t(gid10, "code"),    value=f"`{invite.code}`",                                                                inline=True)
+    e.add_field(name=t(gid10, "uses"),    value=str(invite.max_uses) if invite.max_uses else "∞",                                  inline=True)
+    e.add_field(name=t(gid10, "expires"), value=invite.expires_at.strftime("%d.%m.%Y %H:%M") if invite.expires_at else t(gid10, "never"), inline=True)
     await ch.send(embed=e)
 
 @bot.event
@@ -803,8 +1064,10 @@ async def on_invite_delete(invite):
     print(f"[INVITE] Deleted: {invite.code}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
-    e = discord.Embed(title="❌ Инвайт удалён", color=discord.Color.dark_gray(), timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Код", value=f"`{invite.code}`", inline=True)
+    gid11 = invite.guild.id
+    e = make_embed(color=C.MUTED)
+    e.set_author(name=t(gid11, "invite_deleted"))
+    e.add_field(name=t(gid11, "code"), value=f"`{invite.code}`", inline=True)
     await ch.send(embed=e)
 
 @bot.event
@@ -820,16 +1083,19 @@ async def on_voice_state_update(member, before, after):
     if before.channel is None: desc, color = f"вошёл в **{after.channel.name}**", discord.Color.green()
     elif after.channel is None: desc, color = f"вышел из **{before.channel.name}**", discord.Color.red()
     else: desc, color = f"**{before.channel.name}** → **{after.channel.name}**", discord.Color.blue()
-    e = discord.Embed(title="🔊 Голос", color=color, timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Участник", value=member.mention, inline=True)
-    e.add_field(name="Действие", value=desc, inline=True)
+    gid12 = member.guild.id
+    e = make_embed(color=color)
+    e.set_author(name=t(gid12, "voice_update"))
+    e.add_field(name=t(gid12, "member"), value=member.mention, inline=True)
+    e.add_field(name=t(gid12, "action"), value=desc,           inline=True)
     await ch.send(embed=e)
 
 @bot.event
 async def on_guild_channel_create(channel_created):
     ch = await sec_check(channel_created.guild, "channels")
     if not ch: return
-    e = discord.Embed(title="📁 Канал создан", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.SUCCESS)
+    e.set_author(name="Channel created")
     e.add_field(name="Канал", value=channel_created.mention, inline=True)
     await ch.send(embed=e)
 
@@ -837,7 +1103,8 @@ async def on_guild_channel_create(channel_created):
 async def on_guild_channel_delete(channel_deleted):
     ch = await sec_check(channel_deleted.guild, "channels")
     if not ch: return
-    e = discord.Embed(title="🗑️ Канал удалён", color=discord.Color.red(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.DANGER)
+    e.set_author(name="Channel deleted")
     e.add_field(name="Канал", value=channel_deleted.name, inline=True)
     await ch.send(embed=e)
 
@@ -845,7 +1112,8 @@ async def on_guild_channel_delete(channel_deleted):
 async def on_guild_role_create(role):
     ch = await sec_check(role.guild, "roles")
     if not ch: return
-    e = discord.Embed(title="🎭 Роль создана", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.SUCCESS)
+    e.set_author(name="Role created")
     e.add_field(name="Роль", value=role.mention, inline=True)
     await ch.send(embed=e)
 
@@ -853,7 +1121,8 @@ async def on_guild_role_create(role):
 async def on_guild_role_delete(role):
     ch = await sec_check(role.guild, "roles")
     if not ch: return
-    e = discord.Embed(title="🗑️ Роль удалена", color=discord.Color.red(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.DANGER)
+    e.set_author(name="Role deleted")
     e.add_field(name="Роль", value=role.name, inline=True)
     await ch.send(embed=e)
 
@@ -861,7 +1130,8 @@ async def on_guild_role_delete(role):
 async def on_guild_update(before, after):
     ch = await sec_check(after, "server_edit")
     if not ch or before.name == after.name: return
-    e = discord.Embed(title="⚙️ Сервер изменён", color=discord.Color.blue(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.INFO)
+    e.set_author(name="Server updated")
     e.add_field(name="Было", value=before.name, inline=True)
     e.add_field(name="Стало", value=after.name, inline=True)
     await ch.send(embed=e)
@@ -874,8 +1144,9 @@ async def on_user_update(before, after):
         if not member: continue
         ch = await sec_check(guild, "avatar_change")
         if not ch: continue
-        e = discord.Embed(title="🖼️ Аватарка изменена", color=discord.Color.blue(), timestamp=datetime.datetime.utcnow())
-        e.add_field(name="Участник", value=member.mention, inline=False)
+        e = make_embed(color=C.INFO)
+        e.set_author(name="Avatar changed")
+        e.add_field(name="Member", value=member.mention, inline=False)
         e.set_thumbnail(url=after.display_avatar.url)
         await ch.send(embed=e)
 
@@ -884,7 +1155,8 @@ async def on_user_update(before, after):
 async def on_thread_create(thread):
     ch = await sec_check(thread.guild, "threads")
     if not ch: return
-    e = discord.Embed(title="🧵 Тред создан", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.SUCCESS)
+    e.set_author(name="Thread created")
     e.add_field(name="Тред", value=thread.mention, inline=True)
     if thread.parent: e.add_field(name="Канал", value=thread.parent.mention, inline=True)
     await ch.send(embed=e)
@@ -895,7 +1167,8 @@ async def on_interaction(interaction):
     if interaction.type != discord.InteractionType.application_command: return
     ch = await get_log_ch(interaction.guild)
     if not ch: return
-    e = discord.Embed(title="⚡ Слэш-команда", color=discord.Color.blurple(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.PRIMARY)
+    e.set_author(name="Slash command")
     e.add_field(name="Пользователь", value=interaction.user.mention, inline=True)
     e.add_field(name="Команда", value=f"`/{interaction.data.get('name','?')}`", inline=True)
     await ch.send(embed=e)
@@ -903,6 +1176,37 @@ async def on_interaction(interaction):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ADMIN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@bot.tree.command(name="lang", description="Set bot language / Установить язык бота")
+@app_commands.describe(language="ru — Русский | en — English")
+async def lang_cmd(interaction: discord.Interaction, language: str = "ru"):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Manage Server permission required.", ephemeral=True)
+    lang = language.lower().strip()
+    if lang not in ("ru", "en"):
+        return await interaction.response.send_message("❌ Available: `ru` or `en`", ephemeral=True)
+    _guild_lang[interaction.guild_id] = lang
+    # Сохраняем в БД
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO guild_settings (guild_id, lang) VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET lang=excluded.lang
+        """, (interaction.guild_id, lang))
+        await db.commit()
+    if lang == "en":
+        e = make_embed(
+            title="Language set to English 🇬🇧",
+            description="All bot responses will now be in **English**.\nUse `/lang language:ru` to switch back.",
+            color=C.SUCCESS
+        )
+    else:
+        e = make_embed(
+            title="Язык изменён на Русский 🇷🇺",
+            description="Все ответы бота теперь на **русском** языке.\nИспользуй `/lang language:en` для переключения.",
+            color=C.SUCCESS
+        )
+    await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="setpremium", description="[ADMIN] Установить тир")
 @app_commands.describe(tier="0=Free 1=Premium 2=Pro", days="Дней")
@@ -2868,7 +3172,8 @@ async def on_reaction_add(reaction, user):
     if not reaction.message.guild: return
     ch = await sec_check(reaction.message.guild, "reactions")
     if not ch: return
-    e = discord.Embed(title="😀 Реакция", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
+    e = make_embed(color=C.SUCCESS)
+    e.set_author(name="Reaction added")
     e.add_field(name="Пользователь", value=user.mention, inline=True)
     e.add_field(name="Реакция", value=str(reaction.emoji), inline=True)
     e.add_field(name="Сообщение", value=f"[Перейти]({reaction.message.jump_url})", inline=True)
