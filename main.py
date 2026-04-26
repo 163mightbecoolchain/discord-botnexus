@@ -449,7 +449,7 @@ async def get_user_invites(gid, inviter_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=["-q ", "!"], intents=intents)
+bot = commands.Bot(command_prefix=["-", "!"], intents=intents)
 OWNER_IDS = set()  # {YOUR_USER_ID}
 
 def upsell_embed(req):
