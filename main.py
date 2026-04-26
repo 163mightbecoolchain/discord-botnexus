@@ -1,5 +1,5 @@
 """
-NexusBot v5.0 — Discord Bot for Gaming Communities
+Witness v5.0 — Discord Bot for Gaming Communities
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NEW IN v5:
 
@@ -64,7 +64,7 @@ STEAM_KEY     = os.getenv("STEAM_API_KEY")
 LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
-DB_PATH       = os.getenv("DB_PATH", "nexusbot.db")
+DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 # Security module
 HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!
 ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
@@ -79,7 +79,7 @@ TIER_COLORS = {0: 0x6b7fa3, 1: 0x00E5FF, 2: 0xFFD700}
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class C:
-    """Цветовая палитра NexusBot"""
+    """Цветовая палитра Witness"""
     PRIMARY   = 0x5865F2   # Discord blurple — основной цвет бота
     SUCCESS   = 0x57F287   # Зелёный — успех, прибыль
     DANGER    = 0xED4245   # Красный — ошибка, убыток
@@ -110,10 +110,10 @@ def profit_color(pct: float) -> int:
 
 def make_embed(title: str = "", description: str = "", color: int = C.PRIMARY,
                footer: str = "", thumbnail: str = "") -> discord.Embed:
-    """Создаёт эмбед в едином стиле NexusBot"""
+    """Создаёт эмбед в едином стиле Witness"""
     e = discord.Embed(title=title, description=description, color=color)
     ts = datetime.datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
-    e.set_footer(text=f"NexusBot · {footer + ' · ' if footer else ''}{ts}")
+    e.set_footer(text=f"Witness · {footer + ' · ' if footer else ''}{ts}")
     if thumbnail:
         e.set_thumbnail(url=thumbnail)
     return e
@@ -459,14 +459,14 @@ def upsell_embed(req):
             f"Эта функция требует **{req}**\n\n"
             f"⭐ **Premium** — €4.99/мес\n"
             f"💎 **Pro** — €9.99/мес\n\n"
-            f"nexusbot.gg/premium"
+            f"witnessbot.gg/premium"
         ),
         color=C.DANGER
     )
     return e
 
 # ── AI: Groq (free) → Gemini (free) → Claude (paid) ──────────
-async def ask_ai(prompt, system="You are NexusBot, a helpful Discord assistant. Be concise."):
+async def ask_ai(prompt, system="You are Witness, a helpful Discord assistant. Be concise."):
     if GROQ_KEY:
         try:
             async with aiohttp.ClientSession() as s:
@@ -565,9 +565,9 @@ async def on_ready():
         bot.loop.create_task(price_watch_loop())
         print("✅ Фоновые задачи запущены")
 
-    print(f"✅ NexusBot v5 | {bot.user} | {len(bot.guilds)} серверов | {len(_invite_cache)} инвайтов в кэше")
+    print(f"✅ Witness v5 | {bot.user} | {len(bot.guilds)} серверов | {len(_invite_cache)} инвайтов в кэше")
     await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.watching, name="/help | nexusbot.gg"))
+        type=discord.ActivityType.watching, name="/help | witnessbot.gg"))
 
 
 @bot.event
@@ -926,7 +926,7 @@ async def sechelp(interaction: discord.Interaction):
             "Все команды доступны **только администраторам**."
         ),
         color=0x5865F2,
-        footer="NexusBot Advanced Security"
+        footer="Witness Advanced Security"
     )
     commands_list = [
         ("-q scan @user",      "Полное сканирование: threat intel + fingerprint + граф + подпись"),
@@ -953,7 +953,7 @@ async def sechelp(interaction: discord.Interaction):
     tier = await get_tier(interaction.guild_id)
     e = discord.Embed(title="📋 Подписка", color=TIER_COLORS[tier])
     e.add_field(name="Тир", value=TIER_NAMES[tier], inline=True)
-    if tier == TIER_FREE: e.add_field(name="Апгрейд", value="nexusbot.gg/premium", inline=True)
+    if tier == TIER_FREE: e.add_field(name="Апгрейд", value="witnessbot.gg/premium", inline=True)
     await interaction.response.send_message(embed=e)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1194,7 +1194,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
     e = make_embed(
         title=data["title"],
         color=data["color"],
-        footer=f"Тир: {tier_badge(guild_tier)} · nexusbot.gg"
+        footer=f"Тир: {tier_badge(guild_tier)} · witnessbot.gg"
     )
 
     for name, val in data["fields"]:
@@ -1202,7 +1202,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
 
     e.add_field(
         name="Подписка",
-        value=f"{tier_badge(guild_tier)} `{tier_bar}` · nexusbot.gg/premium",
+        value=f"{tier_badge(guild_tier)} `{tier_bar}` · witnessbot.gg/premium",
         inline=False
     )
     return e
@@ -1263,7 +1263,7 @@ async def serverinfo(interaction: discord.Interaction):
     e.add_field(name="🎭 Роли", value=f"**{len(g.roles)}**", inline=True)
     e.add_field(name="💎 Буст", value=f"Уровень **{g.premium_tier}** · {g.premium_subscription_count} бустов", inline=True)
     e.add_field(name="📅 Создан", value=g.created_at.strftime("%d.%m.%Y"), inline=True)
-    e.add_field(name="NexusBot", value=tier_badge(tier), inline=True)
+    e.add_field(name="Witness", value=tier_badge(tier), inline=True)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="rank")
@@ -1300,7 +1300,7 @@ async def coins_cmd(interaction: discord.Interaction):
     e.add_field(name="🪙 Монеты", value=f"**{c:,}**", inline=True)
     e.add_field(name="⚡ XP", value=f"**{xp:,}**", inline=True)
     e.add_field(name="🏆 Уровень", value=f"**{xp//100}**", inline=True)
-    e.set_footer(text=f"NexusBot · +1 монета за каждое сообщение")
+    e.set_footer(text=f"Witness · +1 монета за каждое сообщение")
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="poll")
@@ -1574,7 +1574,7 @@ async def ai_cmd(interaction: discord.Interaction, question: str):
     await interaction.response.defer()
     try:
         answer = await ask_ai(question)
-        e = discord.Embed(title="🤖 NexusBot AI", description=answer[:4000], color=0x00E5FF)
+        e = discord.Embed(title="🤖 Witness AI", description=answer[:4000], color=0x00E5FF)
         e.set_footer(text=f"Спросил: {interaction.user.display_name}")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
@@ -2391,7 +2391,7 @@ async def tournament(interaction: discord.Interaction, name: str, participants: 
     if len(players)%2: matchups.append(f"👤 **{players[-1]}** — BYE")
     e = discord.Embed(title=f"🏆 {name}", color=0xFFD700)
     e.add_field(name=f"Раунд 1 ({len(matchups)} матчей)", value="\n".join(matchups), inline=False)
-    e.set_footer(text=f"Создал {interaction.user.display_name} · NexusBot Pro")
+    e.set_footer(text=f"Создал {interaction.user.display_name} · Witness Pro")
     await interaction.response.send_message(embed=e)
 
 
@@ -3482,7 +3482,7 @@ async def askalbion(interaction: discord.Interaction, question: str):
             )
         )
         e = discord.Embed(title="⚔️ Albion Expert", description=answer[:4000], color=0xC8A951)
-        e.set_footer(text=f"Вопрос: {question[:80]} · NexusBot AI")
+        e.set_footer(text=f"Вопрос: {question[:80]} · Witness AI")
         await interaction.followup.send(embed=e)
     except Exception as ex:
         await interaction.followup.send(f"❌ Ошибка: {ex}")
