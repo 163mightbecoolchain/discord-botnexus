@@ -852,9 +852,66 @@ async def create_alert(guild_id: int, alert_type: str, severity: str,
         await db.commit()
 
 
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  COG — основной класс модуля
+#  SCAN ACTION VIEW — кнопки под -q scan
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class ScanActionView(discord.ui.View):
+    def __init__(self, member: discord.Member):
+        super().__init__(timeout=120)
+        self.member = member
+
+    async def _admin_check(self, interaction: discord.Interaction) -> bool:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Only admins.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Kick", style=discord.ButtonStyle.danger)
+    async def kick_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._admin_check(interaction): return
+        try:
+            await self.member.kick(reason=f"Kicked via Witness scan by {interaction.user}")
+            await interaction.response.send_message(f"✓ **{self.member.display_name}** kicked.", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
+
+    @discord.ui.button(label="Ban", style=discord.ButtonStyle.secondary)
+    async def ban_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._admin_check(interaction): return
+        try:
+            await self.member.ban(reason=f"Banned via Witness scan by {interaction.user}")
+            await interaction.response.send_message(f"✓ **{self.member.display_name}** banned.", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
+
+    @discord.ui.button(label="Whitelist", style=discord.ButtonStyle.primary)
+    async def whitelist_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._admin_check(interaction): return
+        _lists_cache[interaction.guild_id][self.member.id] = "white"
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO sec_lists (guild_id,user_id,list_type,added_by,created_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(guild_id,user_id,list_type) DO UPDATE SET added_by=excluded.added_by",
+                (interaction.guild_id, self.member.id, "white", interaction.user.id,
+                 datetime.datetime.utcnow().isoformat())
+            )
+            await db.commit()
+        await interaction.response.send_message(f"✓ **{self.member.display_name}** added to whitelist.", ephemeral=True)
+
+    @discord.ui.button(label="Report", style=discord.ButtonStyle.secondary)
+    async def report_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self._admin_check(interaction): return
+        await report_to_global_db(self.member.id, interaction.guild_id, "Reported via scan button", "medium")
+        await interaction.response.send_message(f"✓ **{self.member.display_name}** reported to global DB.", ephemeral=True)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+
 
 class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
@@ -906,8 +963,9 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         return "LOW"
 
     def _bar(self, value: float, max_val: float = 100, width: int = 10) -> str:
+        """Правильный прогресс-бар: value=35, max=100, width=10 → ███░░░░░░░"""
         if max_val <= 0: return "░" * width
-        pct = min(value / max_val, 1.0)
+        pct = min(max(value / max_val, 0.0), 1.0)
         n = round(pct * width)
         return "█" * n + "░" * (width - n)
 
@@ -1007,8 +1065,28 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
     @commands.command(name="q")
     async def q_dispatch(self, ctx: commands.Context, subcmd: str = "help", *args):
-        """Диспетчер -q команд"""
+        """Диспетчер -q команд — требует Security tier"""
         if not await self._check_admin(ctx): return
+        # Check Security tier
+        try:
+            from main import get_tier, TIER_SECURITY
+            tier = await get_tier(ctx.guild.id)
+            if tier < TIER_SECURITY:
+                e = discord.Embed(
+                    color=0xFF6B35,
+                    description=(
+                        "**-q commands require Security plan**\n\n"
+                        "🛡️ **Security** — €4.99/mo\n"
+                        "Advanced threat intelligence, fingerprinting,\n"
+                        "NLP analysis, forensics, signed mod actions\n\n"
+                        "witnessbot.gg/premium"
+                    ),
+                    timestamp=datetime.datetime.utcnow()
+                )
+                e.set_author(name="Witness Security · Upgrade required")
+                return await ctx.send(embed=e)
+        except Exception:
+            pass  # if import fails, allow (dev mode)
 
         handlers = {
             "scan":        self._cmd_scan,
@@ -1061,73 +1139,86 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         member = await self._resolve_member(ctx, args)
         if not member: return
 
-        await ctx.send(f"🔍 Полное сканирование `{member.display_name}`...", delete_after=3)
+        await ctx.send(f"Scanning `{member.display_name}`...", delete_after=3)
 
-        # Запускаем все проверки параллельно
         threat_task = asyncio.create_task(check_threat_intelligence(member))
         fp_task     = asyncio.create_task(get_fingerprint_report(ctx.guild.id, member.id))
         graph_task  = asyncio.create_task(get_social_graph(ctx.guild.id, member.id))
-
         threat, fp, graph = await asyncio.gather(threat_task, fp_task, graph_task)
 
-        color = self._risk_color(threat["risk_score"])
-        e = self._make_embed(
-            f"🔐 Полное сканирование: {member.display_name}",
-            color=color
-        )
+        score  = threat["risk_score"]
+        level  = threat["threat_level"]
+        color  = self._risk_color(score)
+
+        # Уровень риска как текстовый бейдж
+        level_tag = {
+            "CRITICAL": "● CRITICAL",
+            "HIGH":     "◆ HIGH",
+            "MEDIUM":   "▲ MEDIUM",
+            "LOW":      "✓ LOW",
+        }.get(level, level)
+
+        age_days  = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
+        join_days = (datetime.datetime.utcnow() - member.joined_at.replace(tzinfo=None)).days if member.joined_at else "?"
+
+        e = discord.Embed(color=color, timestamp=datetime.datetime.utcnow())
+        e.set_author(name=f"Full Scan — {member.display_name}", icon_url=member.display_avatar.url)
         e.set_thumbnail(url=member.display_avatar.url)
 
-        # Основная информация
-        age_days = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
-        join_days = (datetime.datetime.utcnow() - member.joined_at.replace(tzinfo=None)).days if member.joined_at else "?"
-        e.add_field(name="👤 Аккаунт", value=(
-            f"Возраст: **{age_days} дней**\n"
-            f"На сервере: **{join_days} дней**\n"
-            f"Роли: {len(member.roles) - 1}"
+        # ── Колонка 1: Аккаунт ───────────────────────────────
+        e.add_field(name="Account", value=(
+            f"Age: **{age_days} days**\n"
+            f"On server: **{join_days} days**\n"
+            f"Roles: **{len(member.roles) - 1}**"
         ), inline=True)
 
-        # Risk score с визуальным баром
-        score = threat["risk_score"]
-        bar = "█" * int(score / 10) + "░" * (10 - int(score / 10))
-        e.add_field(name="⚠️ Risk Score", value=(
-            f"`{bar}` **{score}/100**\n"
-            f"Уровень: **{self._risk_emoji(threat['threat_level'])} {threat['threat_level']}**"
+        # ── Колонка 2: Risk Score ─────────────────────────────
+        e.add_field(name="Risk Score", value=(
+            f"**{score}/100**\n"
+            f"`{level_tag}`"
         ), inline=True)
 
-        # Fingerprint
+        # ── Колонка 3: NLP ────────────────────────────────────
+        nlp_val = "No data yet\n*(use `-q nlp` to analyze)*"
+        e.add_field(name="NLP", value=nlp_val, inline=True)
+
+        # ── Fingerprint ───────────────────────────────────────
         if "error" not in fp:
-            e.add_field(name="🧬 Fingerprint", value=(
-                f"Сообщений: **{fp.get('msg_count', 0):,}**\n"
-                f"Ср. длина: **{fp.get('avg_msg_len', 0):.0f} симв.**\n"
-                f"Risk FP: **{fp.get('risk_score', 0):.0f}/100**"
+            e.add_field(name="Fingerprint", value=(
+                f"Messages: **{fp.get('msg_count', 0):,}**\n"
+                f"Avg length: **{fp.get('avg_msg_len', 0):.0f}** chars\n"
+                f"FP risk: **{fp.get('risk_score', 0):.0f}/100**"
             ), inline=True)
+        else:
+            e.add_field(name="Fingerprint", value="Not enough data yet", inline=True)
 
-        # Граф
+        # ── Связи ─────────────────────────────────────────────
         conn_count = len(graph.get("connections", []))
         if conn_count > 0:
-            top_conn = graph["connections"][:3]
-            conn_lines = []
-            for c in top_conn:
+            top = graph["connections"][:3]
+            lines = []
+            for c in top:
                 u = ctx.guild.get_member(c["user_id"])
                 name = u.display_name if u else f"ID:{c['user_id']}"
-                conn_lines.append(f"**{name}** — {c['interactions']} взаим.")
-            e.add_field(name=f"🕸️ Связи ({conn_count})", value="\n".join(conn_lines), inline=False)
+                lines.append(f"**{name}** — {c['interactions']}x")
+            e.add_field(name=f"Connections ({conn_count})", value="\n".join(lines), inline=True)
 
-        # Угрозы
+        # ── Угрозы ────────────────────────────────────────────
         if threat["threats"]:
-            threat_lines = [
-                f"{self._risk_emoji(t['level'])} **{t['source']}**: {t['reason']}"
+            lines = [
+                f"`{t['level'].upper()}` **{t['source']}** — {t['reason']}"
                 for t in threat["threats"][:5]
             ]
-            e.add_field(name="🚨 Обнаруженные угрозы", value="\n".join(threat_lines), inline=False)
+            e.add_field(name="Detected Threats", value="\n".join(lines), inline=False)
         else:
-            e.add_field(name="✅ Угрозы", value="Не обнаружено", inline=False)
+            e.add_field(name="Threats", value="✓ None detected", inline=False)
 
-        # Подписываем действие
-        action_id = await log_signed_action(ctx.guild.id, ctx.author.id, "SCAN", member.id, "Полное сканирование")
+        action_id = await log_signed_action(ctx.guild.id, ctx.author.id, "SCAN", member.id, "Full Scan")
         e.set_footer(text=f"Action ID: #{action_id} · Witness Security")
 
-        await ctx.send(embed=e)
+        # ── Кнопки действий ──────────────────────────────────
+        view = ScanActionView(member)
+        await ctx.send(embed=e, view=view)
 
     # ── -q threat @user ───────────────────────────────────────
     async def _cmd_threat(self, ctx, *args):
@@ -1215,7 +1306,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         e = self._make_embed(f"🧬 Fingerprint: {member.display_name}", color=color)
         e.set_thumbnail(url=member.display_avatar.url)
 
-        bar = "█" * int(risk / 10) + "░" * (10 - int(risk / 10))
+        bar = "█" * round(risk / 10) + "░" * (10 - round(risk / 10))
         e.add_field(name="Risk Score", value=f"`{bar}` **{risk:.0f}/100**", inline=True)
         e.add_field(name="Сообщений", value=f"**{fp.get('msg_count', 0):,}**", inline=True)
         e.add_field(name="Ср. длина", value=f"**{fp.get('avg_msg_len', 0):.0f}** симв.", inline=True)
