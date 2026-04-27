@@ -1,5 +1,5 @@
 """
-Witness — Advanced Security Module
+NexusBot — Advanced Security Module
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Префиксные команды: -q <command>
 Доступ: только администраторы (administrator permission)
@@ -50,7 +50,8 @@ from typing import Optional
 
 # ── Константы ────────────────────────────────────────────────
 PREFIX        = "-q"
-DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
+PERSPECTIVE_KEY = os.getenv("PERSPECTIVE_API_KEY", "")  # google Perspective API (free)
+DB_PATH       = os.getenv("DB_PATH", "nexusbot.db")
 HMAC_SECRET   = os.getenv("HMAC_SECRET", hashlib.sha256(os.urandom(32)).hexdigest())
 
 # Цвета для эмбедов модуля безопасности
@@ -433,88 +434,76 @@ async def analyze_image_metadata(image_url: str) -> dict:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def nlp_analyze(text: str, groq_key: str = "", gemini_key: str = "") -> dict:
-    """Анализирует текст через AI на токсичность, угрозы, спам.
-    Groq (Llama 3.3 70B) → Gemini 2.0 Flash → Rule-based fallback
-    """
-    result = {"toxicity": 0.0, "threat": 0.0, "spam": 0.0, "summary": "", "source": ""}
+    """Анализирует текст через AI на токсичность, угрозы, спам"""
+    result = {"toxicity": 0.0, "threat": 0.0, "spam": 0.0, "summary": "", "raw": {}}
 
-    prompt = (
-        "Analyze this text for toxicity, threats, and spam. "
-        "Respond ONLY with valid JSON, no markdown, no explanation:\n"
-        "{\"toxicity\": 0.0-1.0, \"threat\": 0.0-1.0, \"spam\": 0.0-1.0, \"summary\": \"brief reason in Russian\"}\n\n"
-        f"Text: {text[:500]}"
-    )
-
-    # 1. Groq — Llama 3.3 70B (бесплатно, быстро)
-    if groq_key:
+    # Попробуем Perspective API (Google, бесплатно)
+    if PERSPECTIVE_KEY:
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    f"https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key={PERSPECTIVE_KEY}",
                     json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 150,
-                        "temperature": 0.1,
+                        "comment": {"text": text[:3000]},
+                        "requestedAttributes": {
+                            "TOXICITY": {}, "THREAT": {}, "SPAM": {},
+                            "INSULT": {}, "IDENTITY_ATTACK": {}
+                        },
+                        "languages": ["ru", "en"]
                     },
-                    timeout=aiohttp.ClientTimeout(total=15)
+                    timeout=aiohttp.ClientTimeout(total=10)
                 ) as r:
                     if r.status == 200:
                         data = await r.json()
-                        raw = data["choices"][0]["message"]["content"].strip()
-                        raw = raw.replace("```json", "").replace("```", "").strip()
-                        parsed = json.loads(raw)
-                        result.update(parsed)
-                        result["source"] = "Groq (Llama 3.3 70B)"
+                        scores = data.get("attributeScores", {})
+                        result["toxicity"] = scores.get("TOXICITY", {}).get("summaryScore", {}).get("value", 0)
+                        result["threat"]   = scores.get("THREAT",   {}).get("summaryScore", {}).get("value", 0)
+                        result["spam"]     = scores.get("SPAM",     {}).get("summaryScore", {}).get("value", 0)
+                        result["insult"]   = scores.get("INSULT",   {}).get("summaryScore", {}).get("value", 0)
+                        result["source"]   = "Perspective API"
                         return result
-        except Exception as ex:
-            print(f"[NLP] Groq error: {ex}")
+        except Exception:
+            pass
 
-    # 2. Gemini — fallback (бесплатно, 1500 req/day)
-    if gemini_key:
+    # Fallback — Groq/Gemini через prompt
+    ai_key = groq_key or gemini_key
+    if ai_key:
         try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
-                    json={"contents": [{"parts": [{"text": prompt}]}]},
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as r:
-                    if r.status == 200:
+            prompt = (
+                f"Analyze this text for toxicity, threats, and spam. "
+                f"Respond ONLY with JSON: {{\"toxicity\": 0.0-1.0, \"threat\": 0.0-1.0, \"spam\": 0.0-1.0, \"summary\": \"brief reason\"}}\n\n"
+                f"Text: {text[:500]}"
+            )
+            if groq_key:
+                async with aiohttp.ClientSession() as s:
+                    async with s.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                        json={"model": "llama-3.3-70b-versatile",
+                              "messages": [{"role": "user", "content": prompt}],
+                              "max_tokens": 150},
+                        timeout=aiohttp.ClientTimeout(total=15)
+                    ) as r:
                         data = await r.json()
-                        raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                        raw = raw.replace("```json", "").replace("```", "").strip()
-                        parsed = json.loads(raw)
+                        raw = data["choices"][0]["message"]["content"]
+                        parsed = json.loads(raw.strip().replace("```json", "").replace("```", ""))
                         result.update(parsed)
-                        result["source"] = "Gemini 2.0 Flash"
+                        result["source"] = "Groq"
                         return result
-        except Exception as ex:
-            print(f"[NLP] Gemini error: {ex}")
+        except Exception:
+            pass
 
-    # 3. Rule-based fallback — если нет AI ключей
+    # Базовый rule-based fallback если нет AI
     text_lower = text.lower()
-    toxic_words = [
-        "убью", "умри", "сдохни", "убить", "kill", "die", "kys", "hate",
-        "угрожаю", "расправлюсь", "уничтожу"
-    ]
-    scam_words = ["free nitro", "claim", "crypto", "bitcoin", "инвестиция", "заработок"]
-    spam_signals = (
-        len(re.findall(r"https?://", text)) > 2 or
-        (len(text) > 100 and len(set(text.lower())) < 15) or
-        text.count("@") > 5
-    )
-    threat_hit = any(w in text_lower for w in toxic_words)
-    scam_hit   = any(w in text_lower for w in scam_words)
+    toxic_words = ["убью", "умри", "сдохни", "kill", "die", "hate", "kys"]
+    spam_signals = len(re.findall(r'http[s]?://', text)) > 2 or len(text) > 500 and len(set(text)) < 20
+    threat_signals = any(w in text_lower for w in toxic_words)
 
-    result["toxicity"] = 0.85 if threat_hit else 0.1
-    result["threat"]   = 0.90 if threat_hit else 0.0
-    result["spam"]     = 0.85 if (spam_signals or scam_hit) else 0.1
-    result["summary"]  = (
-        "Обнаружены угрозы/токсичность" if threat_hit else
-        "Обнаружен спам/скам" if spam_signals or scam_hit else
-        "Контент выглядит безопасным"
-    )
-    result["source"] = "Rule-based (добавь GROQ_API_KEY для AI анализа)"
+    result["toxicity"] = 0.8 if threat_signals else 0.1
+    result["threat"]   = 0.9 if threat_signals else 0.0
+    result["spam"]     = 0.8 if spam_signals else 0.1
+    result["source"]   = "rule-based"
+    result["summary"]  = "Rule-based analysis (no AI key)"
     return result
 
 
@@ -852,66 +841,9 @@ async def create_alert(guild_id: int, alert_type: str, severity: str,
         await db.commit()
 
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  SCAN ACTION VIEW — кнопки под -q scan
+#  COG — основной класс модуля
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class ScanActionView(discord.ui.View):
-    def __init__(self, member: discord.Member):
-        super().__init__(timeout=120)
-        self.member = member
-
-    async def _admin_check(self, interaction: discord.Interaction) -> bool:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Only admins.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Kick", style=discord.ButtonStyle.danger)
-    async def kick_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self._admin_check(interaction): return
-        try:
-            await self.member.kick(reason=f"Kicked via Witness scan by {interaction.user}")
-            await interaction.response.send_message(f"✓ **{self.member.display_name}** kicked.", ephemeral=True)
-        except Exception as ex:
-            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
-
-    @discord.ui.button(label="Ban", style=discord.ButtonStyle.secondary)
-    async def ban_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self._admin_check(interaction): return
-        try:
-            await self.member.ban(reason=f"Banned via Witness scan by {interaction.user}")
-            await interaction.response.send_message(f"✓ **{self.member.display_name}** banned.", ephemeral=True)
-        except Exception as ex:
-            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
-
-    @discord.ui.button(label="Whitelist", style=discord.ButtonStyle.primary)
-    async def whitelist_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self._admin_check(interaction): return
-        _lists_cache[interaction.guild_id][self.member.id] = "white"
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                "INSERT INTO sec_lists (guild_id,user_id,list_type,added_by,created_at) VALUES (?,?,?,?,?) "
-                "ON CONFLICT(guild_id,user_id,list_type) DO UPDATE SET added_by=excluded.added_by",
-                (interaction.guild_id, self.member.id, "white", interaction.user.id,
-                 datetime.datetime.utcnow().isoformat())
-            )
-            await db.commit()
-        await interaction.response.send_message(f"✓ **{self.member.display_name}** added to whitelist.", ephemeral=True)
-
-    @discord.ui.button(label="Report", style=discord.ButtonStyle.secondary)
-    async def report_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self._admin_check(interaction): return
-        await report_to_global_db(self.member.id, interaction.guild_id, "Reported via scan button", "medium")
-        await interaction.response.send_message(f"✓ **{self.member.display_name}** reported to global DB.", ephemeral=True)
-
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-
-
-
 
 class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
@@ -934,17 +866,10 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
             return False
         return True
 
-    def _make_embed(self, title: str = "", description: str = "", color: int = SC.INFO,
-                    author: str = "", author_icon: str = "", thumbnail: str = "") -> discord.Embed:
-        e = discord.Embed(description=description, color=color, timestamp=datetime.datetime.utcnow())
-        if title:
-            e.set_author(name=title, icon_url=author_icon or None)
-        elif author:
-            e.set_author(name=author, icon_url=author_icon or None)
-        if thumbnail:
-            e.set_thumbnail(url=thumbnail)
-        ts = datetime.datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
-        e.set_footer(text=f"Witness Security · {ts}")
+    def _make_embed(self, title: str, description: str = "", color: int = SC.INFO) -> discord.Embed:
+        e = discord.Embed(title=title, description=description, color=color,
+                          timestamp=datetime.datetime.utcnow())
+        e.set_footer(text="NexusBot Security · -q help для списка команд")
         return e
 
     def _risk_color(self, score: float) -> int:
@@ -954,34 +879,14 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         return SC.LOW
 
     def _risk_emoji(self, level: str) -> str:
-        return {"CRITICAL": "●", "HIGH": "◆", "MEDIUM": "▲", "LOW": "✓"}.get(level.upper(), "○")
-
-    def _risk_label(self, score: float) -> str:
-        if score >= 70: return "CRITICAL"
-        if score >= 40: return "HIGH"
-        if score >= 20: return "MEDIUM"
-        return "LOW"
-
-    def _bar(self, value: float, max_val: float = 100, width: int = 10) -> str:
-        """Правильный прогресс-бар: value=35, max=100, width=10 → ███░░░░░░░"""
-        if max_val <= 0: return "░" * width
-        pct = min(max(value / max_val, 0.0), 1.0)
-        n = round(pct * width)
-        return "█" * n + "░" * (width - n)
+        return {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(level.upper(), "⚪")
 
     # ── Слушатели событий ─────────────────────────────────────
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
-
         gid, uid = message.guild.id, message.author.id
-
-        # Пропускаем команды — не анализируем как контент
-        # НО не делаем return — process_commands должен их получить
-        is_command = message.content.startswith(("-", "!"))
-        if is_command:
-            return  # просто не анализируем, process_commands в main.py сделает своё дело
 
         # Проверяем whitelist
         if _lists_cache[gid].get(uid) == "white": return
@@ -1065,28 +970,8 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
     @commands.command(name="q")
     async def q_dispatch(self, ctx: commands.Context, subcmd: str = "help", *args):
-        """Диспетчер -q команд — требует Security tier"""
+        """Диспетчер -q команд"""
         if not await self._check_admin(ctx): return
-        # Check Security tier
-        try:
-            from main import get_tier, TIER_SECURITY
-            tier = await get_tier(ctx.guild.id)
-            if tier < TIER_SECURITY:
-                e = discord.Embed(
-                    color=0xFF6B35,
-                    description=(
-                        "**-q commands require Security plan**\n\n"
-                        "🛡️ **Security** — €4.99/mo\n"
-                        "Advanced threat intelligence, fingerprinting,\n"
-                        "NLP analysis, forensics, signed mod actions\n\n"
-                        "witnessbot.gg/premium"
-                    ),
-                    timestamp=datetime.datetime.utcnow()
-                )
-                e.set_author(name="Witness Security · Upgrade required")
-                return await ctx.send(embed=e)
-        except Exception:
-            pass  # if import fails, allow (dev mode)
 
         handlers = {
             "scan":        self._cmd_scan,
@@ -1113,7 +998,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
     # ── -q help ───────────────────────────────────────────────
     async def _cmd_help(self, ctx, *args):
-        e = self._make_embed("🔐 Witness Advanced Security", color=SC.INFO)
+        e = self._make_embed("🔐 NexusBot Advanced Security", color=SC.INFO)
         cmds = [
             ("`-q scan @user`",      "Полный анализ участника (все проверки)"),
             ("`-q threat @user`",    "Threat Intelligence проверка"),
@@ -1131,7 +1016,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         ]
         for cmd, desc in cmds:
             e.add_field(name=cmd, value=desc, inline=False)
-        e.set_footer(text="Только для администраторов · Witness Security")
+        e.set_footer(text="Только для администраторов · NexusBot Security")
         await ctx.send(embed=e)
 
     # ── -q scan @user ─────────────────────────────────────────
@@ -1139,86 +1024,73 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         member = await self._resolve_member(ctx, args)
         if not member: return
 
-        await ctx.send(f"Scanning `{member.display_name}`...", delete_after=3)
+        await ctx.send(f"🔍 Полное сканирование `{member.display_name}`...", delete_after=3)
 
+        # Запускаем все проверки параллельно
         threat_task = asyncio.create_task(check_threat_intelligence(member))
         fp_task     = asyncio.create_task(get_fingerprint_report(ctx.guild.id, member.id))
         graph_task  = asyncio.create_task(get_social_graph(ctx.guild.id, member.id))
+
         threat, fp, graph = await asyncio.gather(threat_task, fp_task, graph_task)
 
-        score  = threat["risk_score"]
-        level  = threat["threat_level"]
-        color  = self._risk_color(score)
-
-        # Уровень риска как текстовый бейдж
-        level_tag = {
-            "CRITICAL": "● CRITICAL",
-            "HIGH":     "◆ HIGH",
-            "MEDIUM":   "▲ MEDIUM",
-            "LOW":      "✓ LOW",
-        }.get(level, level)
-
-        age_days  = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
-        join_days = (datetime.datetime.utcnow() - member.joined_at.replace(tzinfo=None)).days if member.joined_at else "?"
-
-        e = discord.Embed(color=color, timestamp=datetime.datetime.utcnow())
-        e.set_author(name=f"Full Scan — {member.display_name}", icon_url=member.display_avatar.url)
+        color = self._risk_color(threat["risk_score"])
+        e = self._make_embed(
+            f"🔐 Полное сканирование: {member.display_name}",
+            color=color
+        )
         e.set_thumbnail(url=member.display_avatar.url)
 
-        # ── Колонка 1: Аккаунт ───────────────────────────────
-        e.add_field(name="Account", value=(
-            f"Age: **{age_days} days**\n"
-            f"On server: **{join_days} days**\n"
-            f"Roles: **{len(member.roles) - 1}**"
+        # Основная информация
+        age_days = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
+        join_days = (datetime.datetime.utcnow() - member.joined_at.replace(tzinfo=None)).days if member.joined_at else "?"
+        e.add_field(name="👤 Аккаунт", value=(
+            f"Возраст: **{age_days} дней**\n"
+            f"На сервере: **{join_days} дней**\n"
+            f"Роли: {len(member.roles) - 1}"
         ), inline=True)
 
-        # ── Колонка 2: Risk Score ─────────────────────────────
-        e.add_field(name="Risk Score", value=(
-            f"**{score}/100**\n"
-            f"`{level_tag}`"
+        # Risk score с визуальным баром
+        score = threat["risk_score"]
+        bar = "█" * int(score / 10) + "░" * (10 - int(score / 10))
+        e.add_field(name="⚠️ Risk Score", value=(
+            f"`{bar}` **{score}/100**\n"
+            f"Уровень: **{self._risk_emoji(threat['threat_level'])} {threat['threat_level']}**"
         ), inline=True)
 
-        # ── Колонка 3: NLP ────────────────────────────────────
-        nlp_val = "No data yet\n*(use `-q nlp` to analyze)*"
-        e.add_field(name="NLP", value=nlp_val, inline=True)
-
-        # ── Fingerprint ───────────────────────────────────────
+        # Fingerprint
         if "error" not in fp:
-            e.add_field(name="Fingerprint", value=(
-                f"Messages: **{fp.get('msg_count', 0):,}**\n"
-                f"Avg length: **{fp.get('avg_msg_len', 0):.0f}** chars\n"
-                f"FP risk: **{fp.get('risk_score', 0):.0f}/100**"
+            e.add_field(name="🧬 Fingerprint", value=(
+                f"Сообщений: **{fp.get('msg_count', 0):,}**\n"
+                f"Ср. длина: **{fp.get('avg_msg_len', 0):.0f} симв.**\n"
+                f"Risk FP: **{fp.get('risk_score', 0):.0f}/100**"
             ), inline=True)
-        else:
-            e.add_field(name="Fingerprint", value="Not enough data yet", inline=True)
 
-        # ── Связи ─────────────────────────────────────────────
+        # Граф
         conn_count = len(graph.get("connections", []))
         if conn_count > 0:
-            top = graph["connections"][:3]
-            lines = []
-            for c in top:
+            top_conn = graph["connections"][:3]
+            conn_lines = []
+            for c in top_conn:
                 u = ctx.guild.get_member(c["user_id"])
                 name = u.display_name if u else f"ID:{c['user_id']}"
-                lines.append(f"**{name}** — {c['interactions']}x")
-            e.add_field(name=f"Connections ({conn_count})", value="\n".join(lines), inline=True)
+                conn_lines.append(f"**{name}** — {c['interactions']} взаим.")
+            e.add_field(name=f"🕸️ Связи ({conn_count})", value="\n".join(conn_lines), inline=False)
 
-        # ── Угрозы ────────────────────────────────────────────
+        # Угрозы
         if threat["threats"]:
-            lines = [
-                f"`{t['level'].upper()}` **{t['source']}** — {t['reason']}"
+            threat_lines = [
+                f"{self._risk_emoji(t['level'])} **{t['source']}**: {t['reason']}"
                 for t in threat["threats"][:5]
             ]
-            e.add_field(name="Detected Threats", value="\n".join(lines), inline=False)
+            e.add_field(name="🚨 Обнаруженные угрозы", value="\n".join(threat_lines), inline=False)
         else:
-            e.add_field(name="Threats", value="✓ None detected", inline=False)
+            e.add_field(name="✅ Угрозы", value="Не обнаружено", inline=False)
 
-        action_id = await log_signed_action(ctx.guild.id, ctx.author.id, "SCAN", member.id, "Full Scan")
-        e.set_footer(text=f"Action ID: #{action_id} · Witness Security")
+        # Подписываем действие
+        action_id = await log_signed_action(ctx.guild.id, ctx.author.id, "SCAN", member.id, "Полное сканирование")
+        e.set_footer(text=f"Action ID: #{action_id} · NexusBot Security")
 
-        # ── Кнопки действий ──────────────────────────────────
-        view = ScanActionView(member)
-        await ctx.send(embed=e, view=view)
+        await ctx.send(embed=e)
 
     # ── -q threat @user ───────────────────────────────────────
     async def _cmd_threat(self, ctx, *args):
@@ -1306,7 +1178,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         e = self._make_embed(f"🧬 Fingerprint: {member.display_name}", color=color)
         e.set_thumbnail(url=member.display_avatar.url)
 
-        bar = "█" * round(risk / 10) + "░" * (10 - round(risk / 10))
+        bar = "█" * int(risk / 10) + "░" * (10 - int(risk / 10))
         e.add_field(name="Risk Score", value=f"`{bar}` **{risk:.0f}/100**", inline=True)
         e.add_field(name="Сообщений", value=f"**{fp.get('msg_count', 0):,}**", inline=True)
         e.add_field(name="Ср. длина", value=f"**{fp.get('avg_msg_len', 0):.0f}** симв.", inline=True)
@@ -1602,7 +1474,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         e = self._make_embed("📋 Добавлено в глобальную базу угроз", color=SC.WARNING)
         e.add_field(name="Участник", value=f"{member.mention} (`{member.name}`)", inline=True)
         e.add_field(name="Причина", value=reason, inline=True)
-        e.description = "Этот участник будет отмечен при входе на другие серверы с Witness."
+        e.description = "Этот участник будет отмечен при входе на другие серверы с NexusBot."
         await ctx.send(embed=e)
 
     # ── -q status ─────────────────────────────────────────────
@@ -1624,6 +1496,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         ai_status = []
         if self.groq_key: ai_status.append("✅ Groq")
         if self.gemini_key: ai_status.append("✅ Gemini")
+        if PERSPECTIVE_KEY: ai_status.append("✅ Perspective API")
         if not ai_status: ai_status.append("⚠️ Нет AI ключей — используется rule-based")
         e.add_field(name="🤖 NLP Backend", value=" · ".join(ai_status), inline=False)
         e.add_field(name="🔑 HMAC Secret", value="✅ Настроен" if HMAC_SECRET else "❌ Не настроен", inline=True)
