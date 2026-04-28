@@ -65,6 +65,10 @@ LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
 DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
+# Автосоздание папки для БД (нужно если Volume ещё не примонтирован)
+_db_dir = os.path.dirname(DB_PATH)
+if _db_dir:
+    os.makedirs(_db_dir, exist_ok=True)
 # Security module
 HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!
 ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
@@ -720,7 +724,12 @@ async def get_user_invites(gid, inviter_id):
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=["-", "!"], intents=intents)
-OWNER_IDS = {474658252840370176}  # {YOUR_USER_ID}
+OWNER_IDS = set()
+_owner_env = os.getenv("OWNER_IDS", "")  # через запятую: 123456789,987654321
+if _owner_env:
+    for _oid in _owner_env.split(","):
+        try: OWNER_IDS.add(int(_oid.strip()))
+        except ValueError: pass
 
 def upsell_embed(req):
     e = build_embed(C.DANGER)
