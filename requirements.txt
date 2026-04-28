@@ -1,7 +1,7 @@
-discord.py
-aiohttp
-python-dotenv
-aiosqlite
-gspread
-google-auth
-Pillow
+discord.py>=2.3.0
+aiohttp>=3.9.0
+python-dotenv>=1.0.0
+aiosqlite>=0.19.0
+gspread>=5.12.0
+google-auth>=2.23.0
+Pillow>=10.0.0
