@@ -64,7 +64,7 @@ STEAM_KEY     = os.getenv("STEAM_API_KEY")
 LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
-DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
+DB_PATH       = os.getenv("DB_PATH", "witness-staging.db")
 # Security module
 HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!
 ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
