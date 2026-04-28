@@ -64,15 +64,16 @@ STEAM_KEY     = os.getenv("STEAM_API_KEY")
 LOSTARK_KEY   = os.getenv("LOSTARK_API_KEY")
 GOOGLE_CREDS  = os.getenv("GOOGLE_CREDENTIALS")
 SHEET_ID      = os.getenv("SHEET_ID")
-DB_PATH       = os.getenv("DB_PATH", "witness-staging.db")
+DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 # Security module
 HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!
 ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
 ALBION_DATA   = "https://west.albion-online-data.com/api/v2"
 
-TIER_FREE, TIER_PREMIUM, TIER_PRO = 0, 1, 2
-TIER_NAMES  = {0: "Free", 1: "⭐ Premium", 2: "💎 Pro"}
-TIER_COLORS = {0: 0x6b7fa3, 1: 0x00E5FF, 2: 0xFFD700}
+TIER_FREE, TIER_PREMIUM, TIER_SECURITY = 0, 1, 2
+TIER_PRO = TIER_PREMIUM  # backward compat alias
+TIER_NAMES  = {0: "Free", 1: "⭐ Premium €2.99", 2: "🛡️ Security €4.99"}
+TIER_COLORS = {0: 0x6b7fa3, 1: 0x00E5FF, 2: 0xFF6B35}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ДИЗАЙН-СИСТЕМА
@@ -100,6 +101,27 @@ def bar(value: float, max_val: float = 100, width: int = 10, filled: str = "█"
     return filled * filled_n + empty * (width - filled_n)
 
 
+def build_embed(color: int, description: str = "") -> discord.Embed:
+    """Создаёт пустой эмбед. Всегда используй set_author() отдельно."""
+    e = discord.Embed(color=color, description=description or None,
+                      timestamp=datetime.datetime.utcnow())
+    e.set_footer(text=f"Witness · {datetime.datetime.utcnow().strftime('%d.%m.%Y %H:%M')} UTC")
+    return e
+
+
+def risk_tag(level: str) -> str:
+    return {
+        "CRITICAL": "`● CRITICAL`",
+        "HIGH":     "`◆ HIGH`",
+        "MEDIUM":   "`▲ MEDIUM`",
+        "LOW":      "`✓ LOW`",
+    }.get(level.upper(), f"`{level}`")
+
+
+def tier_tag(tier: int) -> str:
+    return {0: "`FREE`", 1: "`⭐ PREMIUM €2.99`", 2: "`🛡️ SECURITY €4.99`"}.get(tier, "`?`")
+
+
 def profit_color(pct: float) -> int:
     """Цвет по % профита"""
     if pct >= 30:  return C.SUCCESS
@@ -120,7 +142,7 @@ def make_embed(title: str = "", description: str = "", color: int = C.PRIMARY,
 
 
 def tier_badge(tier: int) -> str:
-    return {0: "🔓 Free", 1: "⭐ Premium", 2: "💎 Pro"}.get(tier, "?")
+    return {0: "🔓 Free", 1: "⭐ Premium €2.99", 2: "🛡️ Security €4.99"}.get(tier, "?")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -524,7 +546,10 @@ async def db_init():
             CREATE TABLE IF NOT EXISTS invite_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
-                member_id INTEGER, member_name TEXT, joined_at TEXT);
+                member_id INTEGER, member_name TEXT, joined_at TEXT,
+                note TEXT DEFAULT '');
+            CREATE INDEX IF NOT EXISTS idx_invite_log_code
+                ON invite_log(guild_id, invite_code);
             CREATE TABLE IF NOT EXISTS birthdays (
                 guild_id INTEGER, user_id INTEGER, birthday TEXT,
                 PRIMARY KEY (guild_id, user_id));
@@ -553,6 +578,19 @@ async def db_init():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 channel_id INTEGER NOT NULL, item_id TEXT, threshold_pct REAL DEFAULT 5.0,
                 last_price INTEGER DEFAULT 0, created_at TEXT);
+
+            -- Persistent invite cache (переживает перезапуск)
+            CREATE TABLE IF NOT EXISTS invite_cache_db (
+                guild_id INTEGER NOT NULL,
+                invite_code TEXT NOT NULL,
+                uses INTEGER DEFAULT 0,
+                inviter_id INTEGER DEFAULT 0,
+                inviter_name TEXT DEFAULT '',
+                max_uses INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, invite_code));
+
+            -- invite notes stored in invite_log.note column
         """)
         await db.commit()
 
@@ -630,6 +668,9 @@ async def save_security(gid, log_channel, settings):
 async def is_enabled(gid, key):
     _, s = await get_security(gid); return s.get(key, False)
 
+async def get_log_channel(guild):  # alias
+    return await _get_log_ch_impl(guild)
+
 async def get_log_ch(guild):
     ch_id, _ = await get_security(guild.id)
     if ch_id: return guild.get_channel(ch_id)
@@ -638,7 +679,7 @@ async def get_log_ch(guild):
             discord.utils.get(guild.text_channels, name="mod-logs"))
 
 async def sec_check(guild, key):
-    if await get_tier(guild.id) < TIER_PREMIUM: return None
+    return await get_log_channel(guild)  # security logs free for all
     if not await is_enabled(guild.id, key): return None
     return await get_log_ch(guild)
 
@@ -682,8 +723,8 @@ bot = commands.Bot(command_prefix=["-", "!"], intents=intents)
 OWNER_IDS = set()  # {YOUR_USER_ID}
 
 def upsell_embed(req):
-    e = make_embed(
-        title="🔒 Требуется апгрейд",
+    e = build_embed(C.DANGER)
+    e.set_author(name="Upgrade required",
         description=(
             f"Эта функция требует **{req}**\n\n"
             f"⭐ **Premium** — €4.99/мес\n"
@@ -739,16 +780,41 @@ def fmt_item(item_id):
 _invite_cache: dict = {}
 
 async def refresh_invite_cache(guild) -> bool:
-    """Загружает инвайты гильдии в кэш. Возвращает True если успешно."""
+    """Загружает инвайты гильдии в кэш + сохраняет в БД для персистентности."""
     try:
         invites = await guild.invites()
-        for inv in invites:
-            _invite_cache[f"{guild.id}:{inv.code}"] = inv.uses or 0
+        async with aiosqlite.connect(DB_PATH) as db:
+            for inv in invites:
+                key = f"{guild.id}:{inv.code}"
+                _invite_cache[key] = inv.uses or 0
+                # Сохраняем в БД
+                await db.execute("""
+                    INSERT INTO invite_cache_db
+                        (guild_id, invite_code, uses, inviter_id, inviter_name, max_uses)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(guild_id, invite_code) DO UPDATE SET
+                        uses=excluded.uses, inviter_id=excluded.inviter_id,
+                        inviter_name=excluded.inviter_name
+                """, (
+                    guild.id, inv.code, inv.uses or 0,
+                    inv.inviter.id if inv.inviter else 0,
+                    inv.inviter.name if inv.inviter else "",
+                    inv.max_uses or 0
+                ))
+            await db.commit()
         print(f"✅ Invite cache loaded for {guild.name}: {len(invites)} invites")
         return True
     except discord.Forbidden:
-        print(f"⚠️ [{guild.name}] Нет прав MANAGE_GUILD — инвайт-трекинг отключён")
-        return False
+        # Нет прав — грузим из БД если есть
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT invite_code, uses FROM invite_cache_db WHERE guild_id=?", (guild.id,)
+            ) as c:
+                rows = await c.fetchall()
+        for code, uses in rows:
+            _invite_cache[f"{guild.id}:{code}"] = uses
+        print(f"⚠️ [{guild.name}] No MANAGE_GUILD — loaded {len(rows)} invites from DB cache")
+        return len(rows) > 0
     except Exception as ex:
         print(f"⚠️ [{guild.name}] Invite cache error: {ex}")
         return False
@@ -827,7 +893,7 @@ async def on_message(message):
     xp = await get_xp(gid, uid)
     if xp > 0 and xp % 100 < 5:
         await message.channel.send(f"⚡ {message.author.mention} → **Уровень {xp//100}**! 🎉", delete_after=10)
-    if await get_tier(gid) >= TIER_PREMIUM and await is_enabled(gid, "anti_spam"):
+    if await is_enabled(gid, "anti_spam"):
         key = (gid, uid); now = time.time()
         _spam_tracker.setdefault(key, [])
         _spam_tracker[key] = [t for t in _spam_tracker[key] if now-t<5]
@@ -838,7 +904,7 @@ async def on_message(message):
                 await message.author.timeout(timedelta(seconds=30), reason="Anti-spam")
                 ch = await get_log_ch(message.guild)
                 if ch:
-                    e = make_embed(color=C.DANGER)
+                    e = build_embed(C.DANGER)
                     e.set_author(name=t(gid, "antispam_title"))
                     e.add_field(name=t(gid, "member"), value=message.author.mention)
                     e.add_field(name=t(gid, "action"), value=t(gid, "timeout_auto"))
@@ -847,9 +913,46 @@ async def on_message(message):
     await bot.process_commands(message)
 
 @bot.event
+async def on_invite_create(invite: discord.Invite):
+    """Обновляем кэш при создании нового инвайта — без sleep, мгновенно."""
+    if not invite.guild: return
+    gid = invite.guild.id
+    key = f"{gid}:{invite.code}"
+    _invite_cache[key] = invite.uses or 0
+    # Сохраняем в БД
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO invite_cache_db
+                (guild_id, invite_code, uses, inviter_id, inviter_name, max_uses, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, invite_code) DO UPDATE SET
+                uses=excluded.uses, max_uses=excluded.max_uses
+        """, (
+            gid, invite.code, 0,
+            invite.inviter.id if invite.inviter else 0,
+            invite.inviter.name if invite.inviter else "",
+            invite.max_uses or 0,
+            datetime.datetime.utcnow().isoformat()
+        ))
+        await db.commit()
+    print(f"[INVITE] Created: {invite.code} by {invite.inviter}")
+
+
+@bot.event
+async def on_invite_delete(invite: discord.Invite):
+    """Убираем из кэша при удалении инвайта."""
+    if not invite.guild: return
+    gid = invite.guild.id
+    key = f"{gid}:{invite.code}"
+    _invite_cache.pop(key, None)
+    # Удалять из БД не нужно — нужен для истории /invcheck
+    print(f"[INVITE] Deleted: {invite.code}")
+
+
+@bot.event
 async def on_member_join(member):
     gid = member.guild.id
-    if await get_tier(gid) >= TIER_PREMIUM and await is_enabled(gid, "anti_raid"):
+    if await is_enabled(gid, "anti_raid"):
         now = time.time()
         _raid_tracker.setdefault(gid, [])
         _raid_tracker[gid] = [t for t in _raid_tracker[gid] if now-t<10]
@@ -859,7 +962,7 @@ async def on_member_join(member):
                 await member.kick(reason="Anti-raid")
                 ch = await get_log_ch(member.guild)
                 if ch:
-                    e = make_embed(color=C.DANGER)
+                    e = build_embed(C.DANGER)
                     e.set_author(name=t(gid, "raid_title"))
                     e.add_field(name=t(gid, "member"), value=member.mention, inline=False)
                     e.add_field(name=t(gid, "reason"), value=t(gid, "raid_reason"), inline=False)
@@ -867,62 +970,73 @@ async def on_member_join(member):
                 return
             except Exception: pass
 
-    # ── Invite tracking ────────────────────────────────────────
-    # Снимок кэша ДО того как Discord обновит счётчики
+    # ── Invite tracking (переработано — без sleep, event-driven) ─
+    # Снимок кэша СРАЗУ при входе (on_invite_create уже обновил кэш)
     old_snapshot = {k: v for k, v in _invite_cache.items() if k.startswith(f"{gid}:")}
-    print(f"[INVITE DEBUG] {member.name} joined {member.guild.name}. Cache snapshot: {old_snapshot}")
 
-    used_code = None
-    inviter_name = "неизвестно"
-    inviter_id = 0
+    used_code   = None
+    inviter_name = t(gid, "unknown")
+    inviter_id   = 0
 
-    # Ждём пока Discord обновит счётчик инвайта
-    await asyncio.sleep(3)
-
-    try:
-        fresh_invites = await member.guild.invites()
-        print(f"[INVITE DEBUG] Fresh invites: {[(inv.code, inv.uses) for inv in fresh_invites]}")
-
-        for inv in fresh_invites:
-            cache_key = f"{gid}:{inv.code}"
-            old_uses = old_snapshot.get(cache_key, 0)
-            new_uses = inv.uses or 0
-            print(f"[INVITE DEBUG] {inv.code}: old={old_uses} new={new_uses}")
-            if new_uses > old_uses:
-                used_code = inv.code
-                if inv.inviter:
-                    inviter_name = inv.inviter.name
-                    inviter_id = inv.inviter.id
-                _invite_cache[cache_key] = new_uses
-                print(f"[INVITE DEBUG] ✅ Found! code={used_code} inviter={inviter_name}")
-                break
-
-        # Синхронизируем весь кэш
-        for inv in fresh_invites:
-            _invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
-
-    except discord.Forbidden:
-        print(f"[INVITE DEBUG] ❌ Forbidden — нет прав MANAGE_GUILD на {member.guild.name}")
-    except Exception as ex:
-        print(f"[INVITE DEBUG] ❌ Error: {ex}")
-
-    # Разовые инвайты — исчезли из списка после использования
-    if not used_code:
+    # Retry логика: 3 попытки с нарастающей задержкой
+    for _attempt in range(3):
+        await asyncio.sleep(3 + _attempt * 2)  # 3с / 5с / 7с
         try:
-            fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.invites()}
-            for cache_key in list(old_snapshot.keys()):
-                if cache_key not in fresh_codes:
-                    used_code = cache_key.split(":", 1)[1]
-                    inviter_name = "неизвестно (разовый инвайт)"
-                    _invite_cache.pop(cache_key, None)
-                    print(f"[INVITE DEBUG] Single-use invite detected: {used_code}")
+            fresh_invites = await member.guild.invites()
+
+            for inv in fresh_invites:
+                cache_key = f"{gid}:{inv.code}"
+                old_uses  = old_snapshot.get(cache_key, 0)
+                new_uses  = inv.uses or 0
+                if new_uses > old_uses:
+                    used_code    = inv.code
+                    inviter_id   = inv.inviter.id   if inv.inviter else 0
+                    inviter_name = inv.inviter.name if inv.inviter else t(gid, "unknown")
+                    _invite_cache[cache_key] = new_uses
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute(
+                            "UPDATE invite_cache_db SET uses=? WHERE guild_id=? AND invite_code=?",
+                            (new_uses, gid, inv.code)
+                        )
+                        await db.commit()
                     break
-        except Exception:
-            pass
 
-    print(f"[INVITE DEBUG] Result: code={used_code}, inviter={inviter_name} ({inviter_id})")
+            # Синхронизируем кэш
+            for inv in fresh_invites:
+                _invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
 
-    # Пишем в БД всегда (для /invcheck и /invuser)
+            # Разовый инвайт — исчез из списка
+            if not used_code:
+                fresh_codes = {f"{gid}:{inv.code}" for inv in fresh_invites}
+                for cache_key in list(old_snapshot.keys()):
+                    if cache_key not in fresh_codes:
+                        code = cache_key.split(":", 1)[1]
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            async with db.execute(
+                                "SELECT inviter_id, inviter_name FROM invite_cache_db WHERE guild_id=? AND invite_code=?",
+                                (gid, code)
+                            ) as c:
+                                row = await c.fetchone()
+                        if row and row[0]:
+                            used_code    = code
+                            inviter_id   = row[0]
+                            inviter_name = row[1] or t(gid, "unknown")
+                        _invite_cache.pop(cache_key, None)
+                        break
+
+            if used_code:
+                print(f"[INVITE] ✅ Found on attempt {_attempt+1}: {used_code} → {inviter_name}")
+                break  # нашли — выходим из retry loop
+
+            print(f"[INVITE] Attempt {_attempt+1}: not found yet, retrying...")
+
+        except discord.Forbidden:
+            print(f"[INVITE] Forbidden on {member.guild.name}")
+            break
+        except Exception as ex:
+            print(f"[INVITE] Error attempt {_attempt+1}: {ex}")
+
+    # Пишем в БД
     if used_code and inviter_id:
         await log_invite_use(gid, used_code, inviter_id, inviter_name, member.id, member.name)
 
@@ -930,17 +1044,27 @@ async def on_member_join(member):
     ch = await sec_check(member.guild, "joins")
     if ch:
         sus = "🔴 Подозрительный (<7д)" if age<7 else "🟡 Новый (<30д)" if age<30 else "🟢 Обычный"
-        e = discord.Embed(title="📥 Вход", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
+        e = build_embed(C.SUCCESS)
         e.set_thumbnail(url=member.display_avatar.url)
         e.add_field(name="Участник", value=f"{member.mention} (`{member.name}`)", inline=False)
-        e.add_field(name="Аккаунт", value=f"{age} дней — {sus}", inline=True)
-        e.add_field(name="Инвайт", value=f"`{used_code}`" if used_code else "неизвестно", inline=True)
+        e.add_field(name="Аккаунт",  value=f"{age} дней — {sus}",                inline=True)
+        e.add_field(name="Инвайт",   value=f"`{used_code}`" if used_code else "неизвестно", inline=True)
         e.add_field(name="Пригласил", value=f"{inviter_name} (`{inviter_id}`)" if inviter_id else "неизвестно", inline=True)
+        # Заметка к инвайту (из invite_log.note)
+        if used_code:
+            async with aiosqlite.connect(DB_PATH) as _db_note:
+                async with _db_note.execute(
+                    "SELECT note FROM invite_log WHERE guild_id=? AND invite_code=? AND note!='' LIMIT 1",
+                    (gid, used_code)
+                ) as _cn:
+                    _note_row = await _cn.fetchone()
+            if _note_row and _note_row[0]:
+                e.add_field(name="📝 Invite note", value=_note_row[0], inline=False)
         await ch.send(embed=e)
 
     ch2 = await sec_check(member.guild, "suspicious")
     if ch2 and age < 7:
-        e = discord.Embed(title="🚨 Подозрительный аккаунт", color=discord.Color.red(), timestamp=datetime.datetime.utcnow())
+        e = build_embed(C.DANGER)
         e.set_thumbnail(url=member.display_avatar.url)
         e.add_field(name="Участник", value=f"{member.mention}", inline=False)
         e.add_field(name="Возраст", value=f"{age} дней", inline=True)
@@ -953,7 +1077,7 @@ async def on_member_remove(member):
     if not ch: return
     roles = [r.mention for r in member.roles if r.name != "@everyone"]
     gid2 = member.guild.id
-    e = make_embed(color=C.DANGER, thumbnail=member.display_avatar.url)
+    e = build_embed(C.DANGER, thumbnail=member.display_avatar.url)
     e.set_author(name=t(gid2, "left"))
     e.add_field(name=t(gid2, "member"), value=f"{member.mention} · `{member.name}`", inline=False)
     e.add_field(name=t(gid2, "roles"),  value=", ".join(roles) if roles else "—",    inline=False)
@@ -964,7 +1088,7 @@ async def on_member_ban(guild, user):
     ch = await sec_check(guild, "bans")
     if not ch: return
     gid3 = guild.id
-    e = make_embed(color=C.DANGER)
+    e = build_embed(C.DANGER)
     e.set_author(name=t(gid3, "banned"))
     e.add_field(name=t(gid3, "member"), value=f"{user.mention} · `{user.name}`", inline=False)
     await ch.send(embed=e)
@@ -974,7 +1098,7 @@ async def on_member_unban(guild, user):
     ch = await sec_check(guild, "bans")
     if not ch: return
     gid4 = guild.id
-    e = make_embed(color=C.SUCCESS)
+    e = build_embed(C.SUCCESS)
     e.set_author(name=t(gid4, "unbanned"))
     e.add_field(name=t(gid4, "member"), value=user.mention, inline=False)
     await ch.send(embed=e)
@@ -985,7 +1109,7 @@ async def on_member_update(before, after):
         ch = await sec_check(after.guild, "nick_change")
         if ch:
             gid5 = after.guild.id
-            e = make_embed(color=C.INFO)
+            e = build_embed(C.INFO)
             e.set_author(name=t(gid5, "nick_changed"))
             e.add_field(name=t(gid5, "member"), value=after.mention,              inline=False)
             e.add_field(name=t(gid5, "was"),    value=before.nick or before.name, inline=True)
@@ -996,7 +1120,7 @@ async def on_member_update(before, after):
         ch = await sec_check(after.guild, "role_change")
         if ch:
             gid6 = after.guild.id
-            e = make_embed(color=C.PRIMARY)
+            e = build_embed(C.PRIMARY)
             e.set_author(name=t(gid6, "roles_changed"))
             e.add_field(name=t(gid6, "member"),  value=after.mention, inline=False)
             if added:   e.add_field(name=t(gid6, "added"),   value=", ".join(r.mention for r in added),   inline=False)
@@ -1007,12 +1131,12 @@ async def on_member_update(before, after):
         if ch:
             gid7 = after.guild.id
             if after.timed_out_until:
-                e = make_embed(color=C.WARNING)
+                e = build_embed(C.WARNING)
                 e.set_author(name=t(gid7, "muted"))
                 e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
                 e.add_field(name=t(gid7, "until"),  value=after.timed_out_until.strftime("%d.%m.%Y %H:%M"), inline=True)
             else:
-                e = make_embed(color=C.SUCCESS)
+                e = build_embed(C.SUCCESS)
                 e.set_author(name=t(gid7, "unmuted"))
                 e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
             await ch.send(embed=e)
@@ -1023,7 +1147,7 @@ async def on_message_delete(message):
     ch = await sec_check(message.guild, "msg_delete")
     if not ch: return
     gid8 = message.guild.id
-    e = make_embed(color=C.DANGER)
+    e = build_embed(C.DANGER)
     e.set_author(name=t(gid8, "msg_deleted"))
     e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
     e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
@@ -1036,7 +1160,7 @@ async def on_message_edit(before, after):
     ch = await sec_check(before.guild, "msg_edit")
     if not ch: return
     gid9 = before.guild.id
-    e = make_embed(color=C.WARNING)
+    e = build_embed(C.WARNING)
     e.set_author(name=t(gid9, "msg_edited"))
     e.add_field(name=t(gid9, "member"), value=before.author.mention,        inline=False)
     e.add_field(name=t(gid9, "was"),    value=before.content[:512] or "—",  inline=False)
@@ -1051,7 +1175,7 @@ async def on_invite_create(invite):
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
     gid10 = invite.guild.id
-    e = make_embed(color=C.INFO)
+    e = build_embed(C.INFO)
     e.set_author(name=t(gid10, "invite_created"))
     e.add_field(name=t(gid10, "member"),  value=f"{invite.inviter.mention} · `{invite.inviter.name}`" if invite.inviter else "?", inline=True)
     e.add_field(name=t(gid10, "code"),    value=f"`{invite.code}`",                                                                inline=True)
@@ -1066,7 +1190,7 @@ async def on_invite_delete(invite):
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
     gid11 = invite.guild.id
-    e = make_embed(color=C.MUTED)
+    e = build_embed(C.MUTED)
     e.set_author(name=t(gid11, "invite_deleted"))
     e.add_field(name=t(gid11, "code"), value=f"`{invite.code}`", inline=True)
     await ch.send(embed=e)
@@ -1085,7 +1209,7 @@ async def on_voice_state_update(member, before, after):
     elif after.channel is None: desc, color = f"вышел из **{before.channel.name}**", discord.Color.red()
     else: desc, color = f"**{before.channel.name}** → **{after.channel.name}**", discord.Color.blue()
     gid12 = member.guild.id
-    e = make_embed(color=color)
+    e = build_embed(color)
     e.set_author(name=t(gid12, "voice_update"))
     e.add_field(name=t(gid12, "member"), value=member.mention, inline=True)
     e.add_field(name=t(gid12, "action"), value=desc,           inline=True)
@@ -1095,7 +1219,7 @@ async def on_voice_state_update(member, before, after):
 async def on_guild_channel_create(channel_created):
     ch = await sec_check(channel_created.guild, "channels")
     if not ch: return
-    e = make_embed(color=C.SUCCESS)
+    e = build_embed(C.SUCCESS)
     e.set_author(name="Channel created")
     e.add_field(name="Канал", value=channel_created.mention, inline=True)
     await ch.send(embed=e)
@@ -1104,7 +1228,7 @@ async def on_guild_channel_create(channel_created):
 async def on_guild_channel_delete(channel_deleted):
     ch = await sec_check(channel_deleted.guild, "channels")
     if not ch: return
-    e = make_embed(color=C.DANGER)
+    e = build_embed(C.DANGER)
     e.set_author(name="Channel deleted")
     e.add_field(name="Канал", value=channel_deleted.name, inline=True)
     await ch.send(embed=e)
@@ -1113,7 +1237,7 @@ async def on_guild_channel_delete(channel_deleted):
 async def on_guild_role_create(role):
     ch = await sec_check(role.guild, "roles")
     if not ch: return
-    e = make_embed(color=C.SUCCESS)
+    e = build_embed(C.SUCCESS)
     e.set_author(name="Role created")
     e.add_field(name="Роль", value=role.mention, inline=True)
     await ch.send(embed=e)
@@ -1122,7 +1246,7 @@ async def on_guild_role_create(role):
 async def on_guild_role_delete(role):
     ch = await sec_check(role.guild, "roles")
     if not ch: return
-    e = make_embed(color=C.DANGER)
+    e = build_embed(C.DANGER)
     e.set_author(name="Role deleted")
     e.add_field(name="Роль", value=role.name, inline=True)
     await ch.send(embed=e)
@@ -1131,7 +1255,7 @@ async def on_guild_role_delete(role):
 async def on_guild_update(before, after):
     ch = await sec_check(after, "server_edit")
     if not ch or before.name == after.name: return
-    e = make_embed(color=C.INFO)
+    e = build_embed(C.INFO)
     e.set_author(name="Server updated")
     e.add_field(name="Было", value=before.name, inline=True)
     e.add_field(name="Стало", value=after.name, inline=True)
@@ -1145,7 +1269,7 @@ async def on_user_update(before, after):
         if not member: continue
         ch = await sec_check(guild, "avatar_change")
         if not ch: continue
-        e = make_embed(color=C.INFO)
+        e = build_embed(C.INFO)
         e.set_author(name="Avatar changed")
         e.add_field(name="Member", value=member.mention, inline=False)
         e.set_thumbnail(url=after.display_avatar.url)
@@ -1156,7 +1280,7 @@ async def on_user_update(before, after):
 async def on_thread_create(thread):
     ch = await sec_check(thread.guild, "threads")
     if not ch: return
-    e = make_embed(color=C.SUCCESS)
+    e = build_embed(C.SUCCESS)
     e.set_author(name="Thread created")
     e.add_field(name="Тред", value=thread.mention, inline=True)
     if thread.parent: e.add_field(name="Канал", value=thread.parent.mention, inline=True)
@@ -1168,7 +1292,7 @@ async def on_interaction(interaction):
     if interaction.type != discord.InteractionType.application_command: return
     ch = await get_log_ch(interaction.guild)
     if not ch: return
-    e = make_embed(color=C.PRIMARY)
+    e = build_embed(C.PRIMARY)
     e.set_author(name="Slash command")
     e.add_field(name="Пользователь", value=interaction.user.mention, inline=True)
     e.add_field(name="Команда", value=f"`/{interaction.data.get('name','?')}`", inline=True)
@@ -1196,21 +1320,130 @@ async def lang_cmd(interaction: discord.Interaction, language: str = "ru"):
         """, (interaction.guild_id, lang))
         await db.commit()
     if lang == "en":
-        e = make_embed(
-            title="Language set to English 🇬🇧",
-            description="All bot responses will now be in **English**.\nUse `/lang language:ru` to switch back.",
-            color=C.SUCCESS
-        )
+        e = build_embed(C.SUCCESS, description="All bot responses will now be in **English**.\nUse `/lang language:ru` to switch back.")
+        e.set_author(name="Language → English 🇬🇧")
     else:
-        e = make_embed(
-            title="Язык изменён на Русский 🇷🇺",
-            description="Все ответы бота теперь на **русском** языке.\nИспользуй `/lang language:en` для переключения.",
-            color=C.SUCCESS
-        )
+        e = build_embed(C.SUCCESS, description="Все ответы бота теперь на **русском** языке.\nИспользуй `/lang language:en` для переключения.")
+        e.set_author(name="Язык → Русский 🇷🇺")
     await interaction.response.send_message(embed=e)
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ACTION VIEWS — кнопки действий
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class MemberActionView(discord.ui.View):
+    """Кнопки для /userinfo — быстрые действия над участником"""
+    def __init__(self, member: discord.Member):
+        super().__init__(timeout=120)
+        self.member = member
+
+    @discord.ui.button(label="Warn", style=discord.ButtonStyle.secondary)
+    async def warn_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("No permission.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO warnings (guild_id,user_id,mod_id,reason,created_at) VALUES (?,?,?,?,?)",
+                (interaction.guild_id, self.member.id, interaction.user.id,
+                 "Quick warn via button", datetime.datetime.utcnow().isoformat())
+            )
+            await db.commit()
+        await interaction.response.send_message(
+            f"⚠️ **{self.member.display_name}** warned.", ephemeral=True)
+
+    @discord.ui.button(label="Kick", style=discord.ButtonStyle.danger)
+    async def kick_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.kick_members:
+            return await interaction.response.send_message("No permission.", ephemeral=True)
+        try:
+            await self.member.kick(reason=f"Kicked by {interaction.user}")
+            await interaction.response.send_message(f"✓ Kicked **{self.member.display_name}**.", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
+
+    @discord.ui.button(label="Mute 10m", style=discord.ButtonStyle.secondary)
+    async def mute_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.moderate_members:
+            return await interaction.response.send_message("No permission.", ephemeral=True)
+        try:
+            until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
+            await self.member.timeout(until, reason=f"Muted by {interaction.user}")
+            await interaction.response.send_message(f"✓ **{self.member.display_name}** muted 10 min.", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class AlbionPlayerView(discord.ui.View):
+    """Кнопки для /stats — быстрый переход к деталям"""
+    def __init__(self, player_name: str):
+        super().__init__(timeout=120)
+        self.player_name = player_name
+        # Кнопка-ссылка на профиль игрока
+        self.add_item(discord.ui.Button(
+            label="View on albionbb.com",
+            style=discord.ButtonStyle.link,
+            url=f"https://albionbb.com/player/{player_name}"
+        ))
+
+    @discord.ui.button(label="Kills", style=discord.ButtonStyle.secondary)
+    async def kills_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            f"Use `/kills player:{self.player_name}`", ephemeral=True)
+
+    @discord.ui.button(label="Deaths", style=discord.ButtonStyle.secondary)
+    async def deaths_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            f"Use `/deaths player:{self.player_name}`", ephemeral=True)
+
+    @discord.ui.button(label="History", style=discord.ButtonStyle.secondary)
+    async def history_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            f"Use `/history player:{self.player_name}`", ephemeral=True)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+class WarnActionView(discord.ui.View):
+    """Кнопки после /warn — быстрые действия"""
+    def __init__(self, member: discord.Member, warn_count: int):
+        super().__init__(timeout=60)
+        self.member = member
+        self.warn_count = warn_count
+
+    @discord.ui.button(label="Mute 1h", style=discord.ButtonStyle.secondary)
+    async def mute_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.moderate_members:
+            return await interaction.response.send_message("No permission.", ephemeral=True)
+        try:
+            until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+            await self.member.timeout(until, reason="Muted after warn")
+            await interaction.response.send_message(f"✓ **{self.member.display_name}** muted 1h.", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
+
+    @discord.ui.button(label="Kick", style=discord.ButtonStyle.danger)
+    async def kick_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.kick_members:
+            return await interaction.response.send_message("No permission.", ephemeral=True)
+        try:
+            await self.member.kick(reason="Kicked after warn")
+            await interaction.response.send_message(f"✓ Kicked.", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
 @bot.tree.command(name="setpremium", description="[ADMIN] Установить тир")
-@app_commands.describe(tier="0=Free 1=Premium 2=Pro", days="Дней")
+@app_commands.describe(tier="0=Free 1=Premium(€2.99) 2=Security(€4.99)", days="Days")
 async def setpremium(interaction: discord.Interaction, tier: int, days: int = 30):
     if interaction.user.id not in OWNER_IDS and not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Нет доступа.", ephemeral=True)
@@ -1221,18 +1454,17 @@ async def setpremium(interaction: discord.Interaction, tier: int, days: int = 30
 async def sechelp(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message(
-            embed=make_embed("🔒 Нет доступа", "Только для администраторов.", C.DANGER),
+            embed=build_embed(C.DANGER, description="Admins only."),
             ephemeral=True
         )
-    e = make_embed(
-        title="🔐 Advanced Security — префикс `-q`",
-        description=(
-            "Расширенный модуль безопасности с AI анализом.\n"
-            "Все команды доступны **только администраторам**."
-        ),
-        color=0x5865F2,
-        footer="Witness Advanced Security"
-    )
+    e = build_embed(C.PRIMARY)
+
+
+
+
+
+    e = build_embed(0x5865F2)
+    e.set_author(name="Witness Advanced Security · -q commands")
     commands_list = [
         ("-q scan @user",      "Полное сканирование: threat intel + fingerprint + граф + подпись"),
         ("-q threat @user",    "Threat Intelligence: возраст, паттерны, impersonation, unicode spoofing"),
@@ -1256,7 +1488,8 @@ async def sechelp(interaction: discord.Interaction):
 
 
     tier = await get_tier(interaction.guild_id)
-    e = discord.Embed(title="📋 Подписка", color=TIER_COLORS[tier])
+    e = build_embed(TIER_COLORS[tier])
+    e.set_author(name="Witness · Подписка")
     e.add_field(name="Тир", value=TIER_NAMES[tier], inline=True)
     if tier == TIER_FREE: e.add_field(name="Апгрейд", value="witnessbot.gg/premium", inline=True)
     await interaction.response.send_message(embed=e)
@@ -1269,11 +1502,10 @@ sec_grp = app_commands.Group(name="security", description="🛡️ Безопа�
 
 @sec_grp.command(name="status", description="Статус всех модулей")
 async def sec_status(interaction: discord.Interaction):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
     log_ch, settings = await get_security(interaction.guild_id)
     ch_obj = interaction.guild.get_channel(log_ch)
-    e = discord.Embed(title="🛡️ Security Status", color=0x00E5FF)
+    e = build_embed(C.INFO)
+    e.set_author(name="Security Status")
     e.add_field(name="Канал логов", value=ch_obj.mention if ch_obj else "не задан (/security setlog)", inline=False)
     on_lines = [f"✅ `{k}` — {n}" for k,n in SEC_NAMES.items() if settings.get(k,False)]
     off_lines = [f"❌ `{k}` — {n}" for k,n in SEC_NAMES.items() if not settings.get(k,False)]
@@ -1305,13 +1537,91 @@ async def sec_setlog(interaction: discord.Interaction, channel: discord.TextChan
 
 bot.tree.add_command(sec_grp)
 
+
+@bot.tree.command(name="invnote", description="Добавить заметку к инвайт-коду")
+@app_commands.describe(
+    code="Код инвайта (без discord.gg/)",
+    note="Заметка (например: 'Реклама Reddit', 'Партнёр XYZ', пусто = удалить)"
+)
+async def invnote(interaction: discord.Interaction, code: str, note: str = ""):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно право Manage Server.", ephemeral=True)
+    gid = interaction.guild_id
+    code = code.strip().removeprefix("discord.gg/").removeprefix("https://discord.gg/")
+    now  = datetime.datetime.utcnow().isoformat()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        if note:
+            # Обновляем note во всех записях с этим кодом
+            await db.execute(
+                "UPDATE invite_log SET note=? WHERE guild_id=? AND invite_code=?",
+                (note, gid, code)
+            )
+            # Если записей нет ещё — вставляем placeholder
+            async with db.execute(
+                "SELECT COUNT(*) FROM invite_log WHERE guild_id=? AND invite_code=?",
+                (gid, code)
+            ) as c:
+                count = (await c.fetchone())[0]
+            if count == 0:
+                await db.execute(
+                    "INSERT INTO invite_log (guild_id, invite_code, note) VALUES (?,?,?)",
+                    (gid, code, note)
+                )
+            await db.commit()
+            e = build_embed(C.SUCCESS)
+            e.set_author(name=f"Заметка сохранена · {code}")
+            e.add_field(name="Код",     value=f"`{code}`",        inline=True)
+            e.add_field(name="Заметка", value=note,               inline=True)
+            e.add_field(name="Добавил", value=interaction.user.mention, inline=True)
+        else:
+            await db.execute(
+                "UPDATE invite_log SET note='' WHERE guild_id=? AND invite_code=?",
+                (gid, code)
+            )
+            await db.commit()
+            e = build_embed(C.MUTED)
+            e.set_author(name=f"Заметка удалена · {code}")
+
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+@bot.tree.command(name="invnotes", description="Список всех заметок к инвайтам")
+async def invnotes(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно право Manage Server.", ephemeral=True)
+    gid = interaction.guild_id
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT invite_code, note, set_by, updated_at FROM invite_notes WHERE guild_id=? ORDER BY updated_at DESC",
+            (gid,)
+        ) as c:
+            rows = await c.fetchall()
+
+    e = build_embed(C.INFO)
+    e.set_author(name="Invite Notes")
+    if not rows:
+        e.description = "Заметок нет. Добавь через `/invnote code:КОД note:ЗАМЕТКА`"
+    else:
+        for code, note, set_by, updated in rows[:15]:
+            mod = interaction.guild.get_member(set_by)
+            mod_str = mod.display_name if mod else str(set_by)
+            e.add_field(
+                name=f"`{code}`",
+                value=f"{note}\n*{mod_str} · {updated[:10]}*",
+                inline=False
+            )
+        if len(rows) > 15:
+            e.set_footer(text=f"Witness · Показано 15 из {len(rows)}")
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
 @bot.tree.command(name="invcheck", description="История инвайта [Premium]")
 @app_commands.describe(code="Код инвайта")
 async def invcheck(interaction: discord.Interaction, code: str):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     rows = await get_invite_history(interaction.guild_id, code)
-    e = discord.Embed(title=f"🔗 Инвайт: {code}", color=discord.Color.teal())
+    e = build_embed(C.INFO)
     e.add_field(name="Использований", value=str(len(rows)), inline=True)
     if rows:
         lines = [f"{i+1}. **{r[0]}** (`{r[1]}`) — {r[2][:10]}" for i,r in enumerate(rows[:15])]
@@ -1323,10 +1633,10 @@ async def invcheck(interaction: discord.Interaction, code: str):
 @bot.tree.command(name="invuser", description="Инвайты пользователя [Premium]")
 @app_commands.describe(member="Пользователь")
 async def invuser(interaction: discord.Interaction, member: discord.Member):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     rows = await get_user_invites(interaction.guild_id, member.id)
-    e = discord.Embed(title=f"👤 Инвайты: {member.display_name}", color=discord.Color.blurple())
+    e = build_embed(C.PRIMARY)
+    e.set_author(name=f"Invites: {member.display_name}", icon_url=member.display_avatar.url)
     e.add_field(name="Всего приглашено", value=str(len(rows)), inline=True)
     if rows:
         lines = [f"`{r[0]}` — **{r[1]}** — {r[2][:10]}" for r in rows[:15]]
@@ -1336,8 +1646,7 @@ async def invuser(interaction: discord.Interaction, member: discord.Member):
 @bot.tree.command(name="invdel", description="Удалить инвайт [Premium]")
 @app_commands.describe(code="Код инвайта")
 async def invdel(interaction: discord.Interaction, code: str):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     if not interaction.user.guild_permissions.manage_guild:
         return await interaction.response.send_message("❌ Нужно Manage Server.", ephemeral=True)
     try:
@@ -1352,21 +1661,22 @@ async def invdel(interaction: discord.Interaction, code: str):
 @bot.tree.command(name="warn", description="Выдать варн [Premium]")
 @app_commands.describe(member="Пользователь", reason="Причина")
 async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "Не указана"):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     if not interaction.user.guild_permissions.moderate_members:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
     await add_warning(interaction.guild_id, member.id, interaction.user.id, reason)
     warns = await get_warnings(interaction.guild_id, member.id)
-    warn_bar = bar(len(warns), 5, 8)
+    gid   = interaction.guild_id
     color = C.WARNING if len(warns) < 3 else C.DANGER
-    e = make_embed(color=color)
-    e.set_author(name=f"Предупреждение выдано · {member.display_name}", icon_url=member.display_avatar.url)
-    e.add_field(name="Участник",    value=member.mention,    inline=True)
-    e.add_field(name="Модератор",   value=interaction.user.mention, inline=True)
-    e.add_field(name="Причина",     value=reason,            inline=False)
-    e.add_field(name="Варнов всего", value=f"**{len(warns)}/5** `{warn_bar}`", inline=True)
-    await interaction.response.send_message(embed=e)
+    e = build_embed(color)
+    e.set_author(name=f"Warning — {member.display_name}", icon_url=member.display_avatar.url)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.add_field(name=t(gid,"member"),    value=member.mention,           inline=True)
+    e.add_field(name=t(gid,"moderator"), value=interaction.user.mention, inline=True)
+    e.add_field(name="Warns",            value=f"**{len(warns)}/5**",    inline=True)
+    e.add_field(name=t(gid,"reason"),    value=reason,                   inline=False)
+    view = WarnActionView(member, len(warns))
+    await interaction.response.send_message(embed=e, view=view)
     if len(warns) >= 3:
         try:
             await member.timeout(timedelta(hours=1), reason=f"Авто-таймаут: {len(warns)} варнов")
@@ -1376,22 +1686,24 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
 @bot.tree.command(name="warnings", description="Список варнов [Premium]")
 @app_commands.describe(member="Пользователь")
 async def warnings(interaction: discord.Interaction, member: discord.Member):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     rows = await get_warnings(interaction.guild_id, member.id)
+    gid   = interaction.guild_id
     color = C.DANGER if len(rows) >= 3 else C.WARNING if rows else C.SUCCESS
-    e = make_embed(color=color, thumbnail=member.display_avatar.url)
-    e.set_author(name=f"Варны: {member.display_name}", icon_url=member.display_avatar.url)
+    e = build_embed(color)
+    e.set_author(name=f"Warns — {member.display_name}", icon_url=member.display_avatar.url)
+    e.set_thumbnail(url=member.display_avatar.url)
     if not rows:
-        e.description = "Варнов нет."
+        e.description = "No warnings."
     else:
-        warn_bar = bar(len(rows), 5, 8)
-        e.add_field(name="Всего", value=f"**{len(rows)}/5** `{warn_bar}`", inline=False)
+        e.add_field(name="Total", value=f"**{len(rows)}/5**", inline=True)
+        e.add_field(name="Status", value="`● HIGH`" if len(rows)>=3 else "`▲ MEDIUM`", inline=True)
+        e.add_field(name="​", value="​", inline=True)
         for wid, mod_id, reason, created in rows:
             mod = interaction.guild.get_member(mod_id)
             e.add_field(
                 name=f"#{wid} · {created[:10]}",
-                value=f"Модератор: {mod.mention if mod else mod_id}\nПричина: {reason}",
+                value=f"By: {mod.mention if mod else mod_id}\nReason: {reason}",
                 inline=False
             )
     await interaction.response.send_message(embed=e, ephemeral=True)
@@ -1399,8 +1711,7 @@ async def warnings(interaction: discord.Interaction, member: discord.Member):
 @bot.tree.command(name="clearwarn", description="Снять варн [Premium]")
 @app_commands.describe(warn_id="ID варна")
 async def clearwarn(interaction: discord.Interaction, warn_id: int):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     if not interaction.user.guild_permissions.moderate_members:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
     await remove_warning(warn_id, interaction.guild_id)
@@ -1409,8 +1720,7 @@ async def clearwarn(interaction: discord.Interaction, warn_id: int):
 @bot.tree.command(name="purge", description="Удалить N сообщений [Premium]")
 @app_commands.describe(count="Количество (1-100)")
 async def purge(interaction: discord.Interaction, count: int):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     if not interaction.user.guild_permissions.manage_messages:
         return await interaction.response.send_message("❌ Нужно Manage Messages.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
@@ -1507,14 +1817,9 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
         page = "general"
 
     data = PAGES[page]
-    tier_name = TIER_NAMES.get(guild_tier, "Free")
-    tier_bar = bar(guild_tier, 2, 5)
 
-    e = make_embed(
-        title=data["title"],
-        color=data["color"],
-        footer=f"Тир: {tier_badge(guild_tier)} · witnessbot.gg"
-    )
+    e = build_embed(data["color"])
+    e.set_author(name=data["title"])
 
     for name, val in data["fields"]:
         e.add_field(name=name, value=val, inline=False)
@@ -1542,19 +1847,19 @@ async def help_cmd(interaction: discord.Interaction, page: str = "general"):
 async def ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
     color = C.SUCCESS if ms < 100 else C.WARNING if ms < 200 else C.DANGER
-    quality = "Отлично" if ms < 100 else "Нормально" if ms < 200 else "Плохо"
-    bar_str = bar(max(0, 200 - ms), 200, 10)
-    e = make_embed(title="Witness · Pong!", color=color)
+    tag = "`✓ GOOD`" if ms < 100 else "`▲ OK`" if ms < 200 else "`● SLOW`"
+    e = build_embed(color)
+    e.set_author(name="Witness · Pong!")
     e.add_field(name="Latency", value=f"**{ms}ms**", inline=True)
-    e.add_field(name="Качество", value=quality, inline=True)
-    e.add_field(name="Статус", value=f"`{bar_str}`", inline=True)
+    e.add_field(name="Status",  value=tag,            inline=True)
+    e.add_field(name="Shards",  value=f"**{len(bot.guilds)}** servers", inline=True)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="userinfo")
 @app_commands.describe(member="Пользователь")
 async def userinfo(interaction: discord.Interaction, member: discord.Member = None):
     m = member or interaction.user
-    e = discord.Embed(title=f"👤 {m.display_name}", color=0x00E5FF)
+    e = build_embed(C.PRIMARY, thumbnail=m.display_avatar.url)
     e.set_thumbnail(url=m.display_avatar.url)
     e.add_field(name="ID", value=m.id, inline=True)
     e.add_field(name="Зашёл", value=m.joined_at.strftime("%d.%m.%Y"), inline=True)
@@ -1573,44 +1878,40 @@ async def serverinfo(interaction: discord.Interaction):
     bots  = sum(1 for m in g.members if m.bot)
     humans = g.member_count - bots
     age   = (datetime.datetime.utcnow() - g.created_at.replace(tzinfo=None)).days
-    e = make_embed(
-        color=TIER_COLORS[tier],
-        thumbnail=g.icon.url if g.icon else "",
-        footer=f"ID: {g.id}"
-    )
+    e = build_embed(TIER_COLORS[tier])
     e.set_author(name=g.name, icon_url=g.icon.url if g.icon else None)
-    e.add_field(name="Участники",  value=f"**{humans}** люди · {bots} боты",                    inline=True)
-    e.add_field(name="Каналы",     value=f"**{len(g.text_channels)}** текст · {len(g.voice_channels)} голос", inline=True)
-    e.add_field(name="Роли",       value=f"**{len(g.roles)}**",                                  inline=True)
-    e.add_field(name="Буст",       value=f"Уровень **{g.premium_tier}** · {g.premium_subscription_count}×", inline=True)
-    e.add_field(name="Возраст",    value=f"**{age}** дней",                                      inline=True)
-    e.add_field(name="Witness",    value=tier_badge(tier),                                        inline=True)
+    if g.icon: e.set_thumbnail(url=g.icon.url)
+    e.add_field(name="Members",  value=f"**{humans}** humans · {bots} bots",                 inline=True)
+    e.add_field(name="Channels", value=f"**{len(g.text_channels)}** text · {len(g.voice_channels)} voice", inline=True)
+    e.add_field(name="Roles",    value=f"**{len(g.roles)}**",                                inline=True)
+    e.add_field(name="Boost",    value=f"Level **{g.premium_tier}** · {g.premium_subscription_count}×", inline=True)
+    e.add_field(name="Age",      value=f"**{age}** days",                                    inline=True)
+    e.add_field(name="Plan",     value=tier_tag(tier),                                       inline=True)
+    e.set_footer(text=f"ID: {g.id} · Witness")
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="rank")
 async def rank(interaction: discord.Interaction):
-    xp     = await get_xp(interaction.guild_id, interaction.user.id)
-    coins  = await get_coins(interaction.guild_id, interaction.user.id)
-    lvl    = xp // 100
-    prog   = xp % 100
-    bar_s  = bar(prog, 100, 12)
-    e = make_embed(color=C.PRIMARY, thumbnail=interaction.user.display_avatar.url)
+    lang  = get_lang(interaction.guild_id)
+    xp    = await get_xp(interaction.guild_id, interaction.user.id)
+    coins = await get_coins(interaction.guild_id, interaction.user.id)
+    lvl   = xp // 100
+    prog  = xp % 100
+    e = build_embed(C.PRIMARY)
     e.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    e.add_field(name="Уровень",  value=f"**{lvl}**",    inline=True)
-    e.add_field(name="XP",       value=f"**{xp:,}**",   inline=True)
-    e.add_field(name="Монеты",   value=f"**{coins:,}**", inline=True)
-    e.add_field(
-        name=f"До уровня {lvl+1} — {prog}/100 XP",
-        value=f"`{bar_s}` **{prog}%**",
-        inline=False
-    )
+    e.set_thumbnail(url=interaction.user.display_avatar.url)
+    e.add_field(name=t(interaction.guild_id,"level"), value=f"**{lvl}**",    inline=True)
+    e.add_field(name="XP",                            value=f"**{xp:,}**",   inline=True)
+    e.add_field(name=t(interaction.guild_id,"coins"), value=f"**{coins:,}**", inline=True)
+    e.add_field(name=f"→ Level {lvl+1}", value=f"**{prog}/100 XP**", inline=False)
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     rows = await get_leaderboard(interaction.guild_id)
     medals = ["🥇","🥈","🥉","4.","5.","6.","7.","8.","9.","10."]
-    e = make_embed(title="Топ активных участников", color=C.GOLD)
+    e = build_embed(C.GOLD)
+    e.set_author(name="Top members")
     if not rows:
         e.description = "Нет данных."
     else:
@@ -1621,13 +1922,15 @@ async def leaderboard(interaction: discord.Interaction):
             b = bar(xp % 100, 100, 6)
             lines.append(f"{medals[i]} **{name}** — {xp:,} XP · ур. {xp//100} `{b}`")
         e.description = "\n".join(lines)
-    await interaction.response.send_message(embed=e)
+    view = MemberActionView(m)
+    await interaction.response.send_message(embed=e, view=view)
 
 @bot.tree.command(name="coins")
 async def coins_cmd(interaction: discord.Interaction):
     c = await get_coins(interaction.guild_id, interaction.user.id)
     xp = await get_xp(interaction.guild_id, interaction.user.id)
-    e = make_embed(title="💰 Баланс", color=C.GOLD)
+    e = build_embed(C.GOLD)
+    e.set_author(name="Balance")
     e.add_field(name="🪙 Монеты", value=f"**{c:,}**", inline=True)
     e.add_field(name="⚡ XP", value=f"**{xp:,}**", inline=True)
     e.add_field(name="🏆 Уровень", value=f"**{xp//100}**", inline=True)
@@ -1639,7 +1942,8 @@ async def coins_cmd(interaction: discord.Interaction):
 async def poll(interaction: discord.Interaction, question: str, option1: str, option2: str, option3: str = None, option4: str = None):
     options = [o for o in [option1,option2,option3,option4] if o]
     emojis = ["1️⃣","2️⃣","3️⃣","4️⃣"]
-    e = discord.Embed(title=f"📊 {question}", color=0x00E5FF)
+    e = build_embed(C.INFO)
+    e.set_author(name=f"Poll: {question}")
     for i,opt in enumerate(options): e.add_field(name=f"{emojis[i]} {opt}", value="​", inline=False)
     await interaction.response.send_message(embed=e)
     msg = await interaction.original_response()
@@ -1652,13 +1956,14 @@ async def remind(interaction: discord.Interaction, minutes: int, message: str):
     await interaction.response.send_message(f"⏰ Напомню через **{minutes} мин**!", ephemeral=True)
     await asyncio.sleep(minutes*60)
     try:
-        await interaction.user.send(embed=discord.Embed(title="⏰ Напоминание!", description=message, color=0x00E5FF))
+        await interaction.user.send(embed=build_embed(0x5865F2, description=message, color=C.INFO))
     except discord.Forbidden: pass
 
 @bot.tree.command(name="lfg")
 @app_commands.describe(game="Игра", slots="Нужно игроков", note="Дополнительно")
 async def lfg(interaction: discord.Interaction, game: str, slots: int = 1, note: str = ""):
-    e = discord.Embed(title=f"🎮 LFG — {game}", color=0x00FF9D)
+    e = build_embed(C.SUCCESS)
+    e.set_author(name=f"LFG — {game}", icon_url=interaction.user.display_avatar.url)
     e.description = f"**{interaction.user.display_name}** ищет **{slots}** игрока(-ов)"
     if note: e.add_field(name="📝", value=note, inline=False)
     e.add_field(name="Присоединиться", value=f"✅ или ЛС {interaction.user.mention}", inline=False)
@@ -1681,17 +1986,19 @@ async def weather(interaction: discord.Interaction, city: str):
             async with s.get(f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_KEY}&units=metric") as r:
                 if r.status!=200: return await interaction.followup.send(f"❌ Город **{city}** не найден.")
                 d = await r.json()
-        desc = d["weather"][0]["description"].capitalize()
-        temp = d["main"]["temp"]
-        feels = d["main"]["feels_like"]
+        desc     = d["weather"][0]["description"].capitalize()
+        temp     = d["main"]["temp"]
+        feels    = d["main"]["feels_like"]
         humidity = d["main"]["humidity"]
-        wind = d["wind"]["speed"]
-        e = make_embed(color=C.INFO)
+        wind     = d["wind"]["speed"]
+        gid = interaction.guild_id
+        e = build_embed(C.INFO)
         e.set_author(name=f"{d['name']}, {d['sys']['country']}")
-        e.add_field(name="Температура", value=f"**{temp:.1f}°C** (ощущается {feels:.1f}°C)", inline=True)
-        e.add_field(name="Описание",    value=desc,                                          inline=True)
-        e.add_field(name="Влажность",   value=f"**{humidity}%**",                            inline=True)
-        e.add_field(name="Ветер",       value=f"**{wind} м/с**",                             inline=True)
+        e.add_field(name=t(gid,"temp"),        value=f"**{temp:.1f}°C**",         inline=True)
+        e.add_field(name=t(gid,"feels"),       value=f"**{feels:.1f}°C**",        inline=True)
+        e.add_field(name=t(gid,"description"), value=desc,                         inline=True)
+        e.add_field(name=t(gid,"humidity"),    value=f"**{humidity}%**",           inline=True)
+        e.add_field(name=t(gid,"wind"),        value=f"**{wind} m/s**",            inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1704,7 +2011,7 @@ async def translate(interaction: discord.Interaction, text: str, to: str = "en")
     target = langs.get(to.lower(),"English")
     try:
         result = await ask_ai(f"Translate to {target}. Reply ONLY with translation:\n\n{text}", system="Precise translator. Output only translated text.")
-        e = discord.Embed(title=f"🌍 → {target}", color=0x00E5FF)
+        e = build_embed(C.INFO)
         e.add_field(name="Оригинал", value=text[:1024], inline=False)
         e.add_field(name="Перевод", value=result[:1024], inline=False)
         await interaction.followup.send(embed=e)
@@ -1726,16 +2033,18 @@ async def stats(interaction: discord.Interaction, player: str):
         df  = p.get("DeathFame", 0)
         pve = p.get("LifetimeStatistics", {}).get("PvE", {}).get("Total", 0)
         kd  = round(kf / df, 2) if df else "∞"
-        kd_bar = bar(min(kf / max(df, 1), 5), 5, 8) if df else "████████"
-        e = make_embed(color=C.INFO, footer=f"EU · Albion Online")
+        gid = interaction.guild_id
+        e = build_embed(C.INFO)
         e.set_author(name=pname, icon_url=f"https://render.albiononline.com/v1/player/{pname}/avatar?size=40")
-        e.add_field(name="Гильдия",    value=p.get("GuildName") or "—",  inline=True)
-        e.add_field(name="Альянс",     value=p.get("AllianceName") or "—", inline=True)
-        e.add_field(name="K/D",        value=f"**{kd}** `{kd_bar}`",      inline=True)
-        e.add_field(name="Kill Fame",  value=f"**{kf:,}**",               inline=True)
-        e.add_field(name="Death Fame", value=f"**{df:,}**",               inline=True)
-        e.add_field(name="PvE Fame",   value=f"**{pve:,}**",              inline=True)
-        await interaction.followup.send(embed=e)
+        e.add_field(name=t(gid,"guild"),      value=p.get("GuildName") or "—",     inline=True)
+        e.add_field(name=t(gid,"alliance"),   value=p.get("AllianceName") or "—",  inline=True)
+        e.add_field(name=t(gid,"kd"),         value=f"**{kd}**",                   inline=True)
+        e.add_field(name=t(gid,"kill_fame"),  value=f"**{kf:,}**",                 inline=True)
+        e.add_field(name=t(gid,"death_fame"), value=f"**{df:,}**",                 inline=True)
+        e.add_field(name=t(gid,"pve_fame"),   value=f"**{pve:,}**",                inline=True)
+        e.set_footer(text=f"Albion Online · {ALBION_SERVER_NAMES.get('eu','EU')}")
+        view = AlbionPlayerView(pname)
+        await interaction.followup.send(embed=e, view=view)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
 @bot.tree.command(name="kills")
@@ -1748,21 +2057,21 @@ async def kills(interaction: discord.Interaction, player: str):
             pid, pname = await albion_find_player(s, player)
             if not pid: return await interaction.followup.send(f"❌ **{player}** не найден.")
             async with s.get(f"{ALBION_BASE}/players/{pid}/kills?limit=5") as r: evs = await r.json()
-        if not evs: return await interaction.followup.send(f"Нет недавних убийств у **{pname}**.")
-        e = make_embed(color=C.DANGER, footer=f"EU · Albion Online")
-        e.set_author(name=f"{pname} — последние убийства")
-        total_fame = sum(ev.get("TotalVictimKillFame", 0) for ev in evs[:5])
-        e.description = f"За последние 5 убийств заработано **{total_fame:,}** fame"
+        if not evs: return await interaction.followup.send(f"No recent kills for **{pname}**.")
+        gid = interaction.guild_id
+        total = sum(ev.get("TotalVictimKillFame", 0) for ev in evs[:5])
+        e = build_embed(C.DANGER, description=f"**{total:,}** fame from last {len(evs[:5])} kills")
+        e.set_author(name=f"{pname} — {t(gid,'last_kills')}")
         for ev in evs[:5]:
-            v      = ev.get("Victim", {})
-            weapon = fmt_item(v.get("Equipment", {}).get("MainHand", {}).get("Type", "") if v.get("Equipment") else "")
-            fame   = ev.get("TotalVictimKillFame", 0)
-            date   = ev.get("TimeStamp", "")[:10]
+            v    = ev.get("Victim", {})
+            fame = ev.get("TotalVictimKillFame", 0)
+            date = ev.get("TimeStamp", "")[:10]
             e.add_field(
-                name=f"{v.get('Name', '?')} · {date}",
-                value=f"Fame: **{fame:,}** · {weapon}",
+                name=f"{v.get('Name','?')} · {date}",
+                value=f"**{fame:,}** fame",
                 inline=True
             )
+        e.set_footer(text="Albion Online · EU")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1776,20 +2085,21 @@ async def deaths(interaction: discord.Interaction, player: str):
             pid, pname = await albion_find_player(s, player)
             if not pid: return await interaction.followup.send(f"❌ **{player}** не найден.")
             async with s.get(f"{ALBION_BASE}/players/{pid}/deaths?limit=5") as r: evs = await r.json()
-        if not evs: return await interaction.followup.send(f"Нет недавних смертей у **{pname}**.")
-        e = make_embed(color=C.MUTED, footer="EU · Albion Online")
-        e.set_author(name=f"{pname} — последние смерти")
+        if not evs: return await interaction.followup.send(f"No recent deaths for **{pname}**.")
+        gid = interaction.guild_id
         total = sum(ev.get("TotalVictimKillFame", 0) for ev in evs[:5])
-        e.description = f"Потеряно **{total:,}** fame в 5 последних смертях"
+        e = build_embed(C.MUTED, description=f"**{total:,}** fame lost in last {len(evs[:5])} deaths")
+        e.set_author(name=f"{pname} — {t(gid,'last_deaths')}")
         for ev in evs[:5]:
             k    = ev.get("Killer", {})
             fame = ev.get("TotalVictimKillFame", 0)
             date = ev.get("TimeStamp", "")[:10]
             e.add_field(
-                name=f"Убит: {k.get('Name', '?')} · {date}",
-                value=f"Потеряно fame: **{fame:,}**",
+                name=f"Killed by: {k.get('Name','?')} · {date}",
+                value=f"**{fame:,}** fame lost",
                 inline=True
             )
+        e.set_footer(text="Albion Online · EU")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1805,7 +2115,7 @@ async def guild_cmd(interaction: discord.Interaction, name: str):
             gid = guilds[0]["Id"]
             async with s.get(f"{ALBION_BASE}/guilds/{gid}") as r: gdata = await r.json()
             async with s.get(f"{ALBION_BASE}/guilds/{gid}/members") as r: members = await r.json()
-        e = discord.Embed(title=f"🏰 {gdata.get('Name',name)}", color=0x00E5FF)
+        e = build_embed(C.INFO)
         e.add_field(name="Участники", value=str(len(members)), inline=True)
         top = sorted(members, key=lambda m: m.get("KillFame",0), reverse=True)[:5]
         lines = [f"{i+1}. **{m.get('Name','?')}** — {m.get('KillFame',0):,}" for i,m in enumerate(top)]
@@ -1820,22 +2130,20 @@ async def battle(interaction: discord.Interaction):
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(f"{ALBION_BASE}/battles?sort=recent&limit=5") as r: battles = await r.json()
-        e = make_embed(
-            title="Последние ZvZ битвы",
-            description=f"Данные по {len(battles[:5])} последним сражениям",
-            color=C.DANGER, footer="EU · Albion Online"
-        )
+        e = build_embed(C.DANGER, description=f"Last {len(battles[:5])} battles")
+        e.set_author(name="Recent ZvZ Battles")
         for b in battles[:5]:
-            guilds = list(b.get("Guilds", {}).keys())[:3]
+            guilds   = list(b.get("Guilds", {}).keys())[:3]
             name_str = " vs ".join(guilds) if guilds else "Open World"
-            kills = b.get("TotalKills", 0)
-            fame  = b.get("TotalFame", 0)
-            date  = b.get("StartTime", "")[:10]
+            kills    = b.get("TotalKills", 0)
+            fame     = b.get("TotalFame", 0)
+            date     = b.get("StartTime", "")[:10]
             e.add_field(
                 name=f"{name_str} · {date}",
-                value=f"Убийств: **{kills}** · Fame: **{fame:,}**",
+                value=f"Kills: **{kills}** · Fame: **{fame:,}**",
                 inline=False
             )
+        e.set_footer(text="Albion Online · EU")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1855,7 +2163,7 @@ async def compare(interaction: discord.Interaction, player1: str, player2: str):
         kf1,kf2 = d1.get("KillFame",0),d2.get("KillFame",0)
         def w(a,b): return ("✅","❌") if a>b else (("❌","✅") if b>a else ("🟡","🟡"))
         wf1,wf2 = w(kf1,kf2)
-        e = discord.Embed(title=f"⚔️ {p1name} vs {p2name}", color=0x00E5FF)
+        e = build_embed(C.INFO)
         e.add_field(name=f"{wf1} {p1name}", value=f"Fame: **{kf1:,}**\nK/D: **{kd(d1)}**\n{d1.get('GuildName') or '—'}", inline=True)
         e.add_field(name="VS", value="​", inline=True)
         e.add_field(name=f"{wf2} {p2name}", value=f"Fame: **{kf2:,}**\nK/D: **{kd(d2)}**\n{d2.get('GuildName') or '—'}", inline=True)
@@ -1884,23 +2192,24 @@ async def history(interaction: discord.Interaction, player: str):
             return out
         wk,wd = recent(ak),recent(ad)
         fame = sum(e.get("TotalVictimKillFame",0) for e in wk)
-        kd_week = round(len(wk) / len(wd), 2) if wd else "∞"
-        activity = "Очень активен" if len(wk) > 20 else "Активен" if len(wk) > 5 else "Тихая неделя"
-        act_bar  = bar(min(len(wk), 30), 30, 10)
-        e = make_embed(color=C.SUCCESS, footer="EU · Albion Online · 7 дней")
-        e.set_author(name=f"{pname} — активность за 7 дней")
-        e.add_field(name="Убийств",  value=f"**{len(wk)}**",   inline=True)
-        e.add_field(name="Смертей",  value=f"**{len(wd)}**",   inline=True)
-        e.add_field(name="K/D",      value=f"**{kd_week}**",   inline=True)
-        e.add_field(name="Fame",     value=f"**{fame:,}**",    inline=True)
-        e.add_field(name="Активность", value=f"{activity} `{act_bar}`", inline=True)
+        kd_week  = round(len(wk) / len(wd), 2) if wd else "∞"
+        activity = "`✓ ACTIVE`" if len(wk) > 20 else "`▲ NORMAL`" if len(wk) > 5 else "`○ QUIET`"
+        gid = interaction.guild_id
+        e = build_embed(C.SUCCESS)
+        e.set_author(name=f"{pname} — 7 days")
+        e.add_field(name=t(gid,"kills"),    value=f"**{len(wk)}**",  inline=True)
+        e.add_field(name=t(gid,"deaths"),   value=f"**{len(wd)}**",  inline=True)
+        e.add_field(name=t(gid,"kd"),       value=f"**{kd_week}**",  inline=True)
+        e.add_field(name="Fame",            value=f"**{fame:,}**",   inline=True)
+        e.add_field(name=t(gid,"activity"), value=activity,          inline=True)
         if wk:
             victims = {}
             for ev in wk:
                 n = ev.get("Victim", {}).get("Name", "?")
                 victims[n] = victims.get(n, 0) + 1
             top = max(victims, key=victims.get)
-            e.add_field(name="Любимая жертва", value=f"**{top}** × {victims[top]}", inline=True)
+            e.add_field(name=t(gid,"fav_target"), value=f"**{top}** × {victims[top]}", inline=True)
+        e.set_footer(text="Albion Online · EU · 7 days")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1915,7 +2224,7 @@ async def rs(interaction: discord.Interaction, username: str):
             async with s.get(f"https://secure.runescape.com/m=hiscore_oldschool/index_lite.ws?player={username}") as r:
                 if r.status!=200: return await interaction.followup.send(f"❌ **{username}** не найден.")
                 lines = (await r.text()).strip().split("\n")
-        e = discord.Embed(title=f"⚔️ OSRS — {username}", color=0xB5651D)
+        e = build_embed(0xB5651D)
         overall = lines[0].split(",")
         e.add_field(name="Total Level", value=overall[1], inline=True)
         e.add_field(name="Total XP", value=f"{int(overall[2]):,}", inline=True)
@@ -1936,7 +2245,7 @@ async def mc(interaction: discord.Interaction, address: str):
         async with aiohttp.ClientSession() as s:
             async with s.get(f"https://api.mcstatus.io/v2/status/java/{address}") as r: d = await r.json()
         if not d.get("online"): return await interaction.followup.send(f"🔴 **{address}** оффлайн.")
-        e = discord.Embed(title=f"🟢 {address}", color=0x00FF9D)
+        e = build_embed(C.SUCCESS)
         e.add_field(name="Игроки", value=f"{d['players']['online']}/{d['players']['max']}", inline=True)
         e.add_field(name="Версия", value=d.get("version",{}).get("name_clean","?"), inline=True)
         motd = d.get("motd",{}).get("clean","")
@@ -1956,9 +2265,9 @@ async def ai_cmd(interaction: discord.Interaction, question: str):
     await interaction.response.defer()
     try:
         answer = await ask_ai(question)
-        e = make_embed(description=answer[:4000], color=C.PREMIUM)
+        e = build_embed(C.PREMIUM, description=answer[:4000])
         e.set_author(name="Witness AI", icon_url=interaction.user.display_avatar.url)
-        e.add_field(name="Запрос", value=f"`{question[:100]}`", inline=False)
+        e.add_field(name="Query", value=f"`{question[:100]}`", inline=False)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -1974,7 +2283,9 @@ async def summarize(interaction: discord.Interaction, count: int = 20):
     msgs.reverse()
     try:
         summary = await ask_ai("\n".join(msgs), system="Summarize this Discord chat in 3-5 bullet points. Be concise.")
-        await interaction.followup.send(embed=discord.Embed(title=f"📋 Резюме ({count} сообщений)", description=summary, color=0x00E5FF))
+        sm = build_embed(0x5865F2, description=summary, color=C.INFO)
+        sm.set_author(name=f"Summary — {count} messages")
+        await interaction.followup.send(embed=sm)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
 @bot.tree.command(name="roast")
@@ -1987,7 +2298,8 @@ async def roast(interaction: discord.Interaction, member: discord.Member):
     days=(datetime.datetime.utcnow()-member.joined_at.replace(tzinfo=None)).days
     try:
         text = await ask_ai(f"Funny 2-3 sentence roast: Name={member.display_name}, Roles={','.join(roles) or 'None'}, Days={days}. Playful, not offensive.", system="Write friendly roasts for Discord.")
-        e = discord.Embed(title=f"🔥 {member.display_name}", description=text, color=0xFF6B35)
+        e = build_embed(0x5865F2, description=text, color=0xFF6B35, thumbnail=member.display_avatar.url)
+        e.set_author(name=f"Roast: {member.display_name}", icon_url=member.display_avatar.url)
         e.set_thumbnail(url=member.display_avatar.url)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
@@ -1996,7 +2308,8 @@ async def roast(interaction: discord.Interaction, member: discord.Member):
 @app_commands.describe(prize="Приз", duration="Минут")
 async def giveaway(interaction: discord.Interaction, prize: str, duration: int = 60):
     if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
-    e = discord.Embed(title="🎉 РОЗЫГРЫШ", description=f"**Приз:** {prize}\n🎮 — участие\n⏰ **{duration} мин**", color=0x00FF9D)
+    e = build_embed(C.SUCCESS, description=f"**Prize:** {prize}\n🎮 — react to enter\n⏰ **{duration} min**")
+    e.set_author(name="GIVEAWAY")
     await interaction.response.send_message(embed=e)
     msg = await interaction.original_response(); await msg.add_reaction("🎮")
     await asyncio.sleep(duration*60)
@@ -2020,14 +2333,14 @@ async def val(interaction: discord.Interaction, username: str):
         if d.get("status")!=200: return await interaction.followup.send(f"❌ **{username}** не найден.")
         data = d["data"]
         rank_name = data.get("currenttierpatched", "Unranked")
-        rr        = data.get("ranking_in_tier", 0)
-        peak      = data.get("highest_rank", {}).get("patched_tier", "?")
-        rr_bar    = bar(rr, 100, 10)
-        e = make_embed(color=0xFF4655, footer="Valorant · EU")
+        rr   = data.get("ranking_in_tier", 0)
+        peak = data.get("highest_rank", {}).get("patched_tier", "?")
+        e = build_embed(0xFF4655)
         e.set_author(name=username)
-        e.add_field(name="Ранг",       value=f"**{rank_name}**",         inline=True)
-        e.add_field(name="RR",         value=f"**{rr}/100** `{rr_bar}`", inline=True)
-        e.add_field(name="Пик",        value=f"**{peak}**",              inline=True)
+        e.add_field(name="Rank", value=f"**{rank_name}**", inline=True)
+        e.add_field(name="RR",   value=f"**{rr}/100**",    inline=True)
+        e.add_field(name="Peak", value=f"**{peak}**",      inline=True)
+        e.set_footer(text="Valorant")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -2049,13 +2362,13 @@ async def cs2(interaction: discord.Interaction, steam_id: str):
         kills,deaths,wins,hs = sd.get("total_kills",0),sd.get("total_deaths",0),sd.get("total_wins",0),sd.get("total_kills_headshot",0)
         kd     = round(kills / deaths, 2) if deaths else "∞"
         hs_pct = round(hs / kills * 100, 1) if kills else 0
-        hs_bar = bar(hs_pct, 100, 8)
-        e = make_embed(color=0xF0A500, footer="CS2 · Steam")
+        e = build_embed(0xF0A500)
         e.set_author(name=f"CS2 — {steam_id}")
-        e.add_field(name="K/D",      value=f"**{kd}**",                        inline=True)
-        e.add_field(name="Убийств",  value=f"**{kills:,}**",                   inline=True)
-        e.add_field(name="Побед",    value=f"**{wins:,}**",                    inline=True)
-        e.add_field(name="HS%",      value=f"**{hs_pct}%** `{hs_bar}`",        inline=True)
+        e.add_field(name="K/D",    value=f"**{kd}**",        inline=True)
+        e.add_field(name="Kills",  value=f"**{kills:,}**",   inline=True)
+        e.add_field(name="Wins",   value=f"**{wins:,}**",    inline=True)
+        e.add_field(name="HS%",    value=f"**{hs_pct}%**",   inline=True)
+        e.set_footer(text="CS2 · Steam")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -2074,22 +2387,22 @@ async def lol(interaction: discord.Interaction, summoner: str, region: str = "eu
                 sid = (await r.json())["id"]
             async with s.get(f"https://{region}.api.riotgames.com/lol/league/v4/entries/by-summoner/{sid}",headers=headers) as r:
                 entries = await r.json()
-        e = make_embed(color=0xC89B3C, footer=f"League of Legends · {region.upper()}")
+        e = build_embed(0xC89B3C)
         e.set_author(name=summoner)
         if not entries:
             e.description = "Unranked this season."
         for en in entries:
             w, l = en["wins"], en["losses"]
             wr   = round(w / (w + l) * 100, 1) if (w + l) else 0
-            wr_b = bar(wr, 100, 8)
             e.add_field(
                 name=en["queueType"].replace("_", " ").title(),
                 value=(
                     f"**{en['tier']} {en['rank']}** · {en['leaguePoints']} LP\n"
-                    f"{w}W / {l}L · **{wr}%** WR `{wr_b}`"
+                    f"{w}W / {l}L · **{wr}%** WR"
                 ),
                 inline=True
             )
+        e.set_footer(text=f"League of Legends · {region.upper()}")
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
 
@@ -2105,7 +2418,7 @@ async def lostark(interaction: discord.Interaction, character: str):
             async with s.get(f"https://developer-lostark.game.onstove.com/characters/{character}/siblings", headers={"Authorization":f"bearer {LOSTARK_KEY}"}) as r:
                 if r.status!=200: return await interaction.followup.send(f"❌ **{character}** не найден.")
                 chars = await r.json()
-        e = discord.Embed(title=f"⚔️ Lost Ark — {character}", color=0x3D9BD4)
+        e = build_embed(0x3D9BD4)
         for c in chars[:8]: e.add_field(name=c.get("CharacterName","?"), value=f"{c.get('CharacterClassName','?')}\niLvl: **{c.get('ItemMaxLevel','?')}**", inline=True)
         await interaction.followup.send(embed=e)
     except Exception as ex: await interaction.followup.send(f"❌ {ex}")
@@ -2463,11 +2776,23 @@ async def fetch_bm_prices(category_keys: list, tier: int, server: str = "eu") ->
                 data_stale = False
                 if bm_updated:
                     try:
-                        upd_dt = datetime.datetime.fromisoformat(bm_updated.replace("Z", "+00:00").replace("+00:00", ""))
-                        data_age_hours = round((datetime.datetime.utcnow() - upd_dt).total_seconds() / 3600, 1)
-                        data_stale = data_age_hours > 3  # данные старше 3 часов — предупреждение
-                    except Exception:
-                        pass
+                        # Нормализуем разные форматы: 2026-04-27T14:23:00Z / +00:00 / без tz
+                        upd_clean = bm_updated.strip()
+                        if upd_clean.endswith("Z"):
+                            upd_clean = upd_clean[:-1]  # убираем Z, делаем naive UTC
+                        elif upd_clean.endswith("+00:00"):
+                            upd_clean = upd_clean[:-6]  # убираем +00:00
+                        elif "+" in upd_clean[10:]:
+                            upd_clean = upd_clean[:upd_clean.rfind("+")]
+                        upd_dt = datetime.datetime.fromisoformat(upd_clean)
+                        data_age_hours = round(
+                            (datetime.datetime.utcnow() - upd_dt).total_seconds() / 3600, 1
+                        )
+                        data_stale = data_age_hours > 3
+                    except Exception as _date_ex:
+                        print(f"[BM] Date parse error for '{bm_updated}': {_date_ex}")
+                        data_age_hours = None
+                        data_stale = False
 
                 # Лучший город — минимальная цена продажи
                 best_city = None
@@ -2543,7 +2868,7 @@ async def blackmarket(
     server: str = "eu",
     sheets: str = "no",
 ):
-    if await get_tier(interaction.guild_id) < TIER_PRO:
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
     await interaction.response.defer()
 
@@ -2579,15 +2904,12 @@ async def blackmarket(
 
     def build_bm_page(items_chunk: list, page_num: int, total_pages: int) -> discord.Embed:
         color = profit_color(items_chunk[0]["city_pct"] if items_chunk else 0)
-        desc_lines = f"{server_name} · Топ по % профиту\n⚠️ Цены ЧР приблизительные — проверяй в игре перед продажей!"
+        desc_lines = f"{server_name} · Sorted by profit %\n⚠️ BM prices are approximate — verify in game before selling!"
         if stale_count:
-            desc_lines += f"\n⚠️ **{stale_count} предметов** с устаревшими данными (>3ч)"
-        e = make_embed(
-            title=f"💰 Чёрный рынок — {cat_label} T{tier}",
-            description=desc_lines,
-            color=color,
-            footer=f"albion-online-data.com · {len(results)} предметов · стр. {page_num}/{total_pages}"
-        )
+            desc_lines += f"\n⚠️ **{stale_count} items** with stale data (>3h)"
+        e = build_embed(color, description=desc_lines)
+        e.set_author(name=f"Black Market — {cat_label} T{tier}")
+        e.set_footer(text=f"albion-online-data.com · {len(results)} items · p.{page_num}/{total_pages}")
         for item in items_chunk:
             city_ru = CITY_NAMES_RU.get(item["best_city"], item["best_city"]) if item["best_city"] else "—"
             age_h = item.get("data_age_hours")
@@ -2765,7 +3087,7 @@ async def party(interaction: discord.Interaction, p1: str, p2: str, p3: str, p4:
     if await get_tier(interaction.guild_id)<TIER_PRO: return await interaction.response.send_message(embed=upsell_embed("Pro"),ephemeral=True)
     await interaction.response.defer()
     players=[p for p in [p1,p2,p3,p4,p5] if p]
-    e = make_embed(color=C.SUCCESS, footer="EU · Albion Online")
+    e = build_embed(C.SUCCESS, footer="EU · Albion Online")
     e.set_author(name=f"Анализ группы — {len(players)} игроков")
     total_kf=total_df=found=0; lines=[]
     async with aiohttp.ClientSession() as s:
@@ -2795,7 +3117,8 @@ async def tournament(interaction: discord.Interaction, name: str, participants: 
     random.shuffle(players)
     matchups=[f"⚔️ **{players[i]}** vs **{players[i+1]}**" for i in range(0,len(players)-1,2)]
     if len(players)%2: matchups.append(f"👤 **{players[-1]}** — BYE")
-    e = discord.Embed(title=f"🏆 {name}", color=0xFFD700)
+    e = build_embed(C.GOLD)
+    e.set_author(name=name)
     e.add_field(name=f"Раунд 1 ({len(matchups)} матчей)", value="\n".join(matchups), inline=False)
     e.set_footer(text=f"Создал {interaction.user.display_name} · Witness Pro")
     await interaction.response.send_message(embed=e)
@@ -2832,14 +3155,13 @@ async def set_guild_setting(gid: int, key: str, value):
 @bot.tree.command(name="lockdown", description="Режим локдауна — запрет входа новых участников [Premium]")
 @app_commands.describe(action="on / off", min_age="Минимальный возраст аккаунта в днях (по умолчанию 7)")
 async def lockdown(interaction: discord.Interaction, action: str = "on", min_age: int = 7):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
     enabled = action.lower() in ("on", "вкл", "yes", "1")
     await set_guild_setting(interaction.guild_id, "lockdown", 1 if enabled else 0)
     if enabled:
-        e = discord.Embed(title="🔒 ЛОКДАУН ВКЛЮЧЁН", color=0xFF0000)
+        e = build_embed(C.DANGER)
         e.add_field(name="Статус", value="Новые участники с аккаунтом младше **{} дней** будут автоматически кикнуты".format(min_age), inline=False)
         e.add_field(name="Выключить", value="`/lockdown action:off`", inline=False)
         # Store min_age in settings
@@ -2848,15 +3170,14 @@ async def lockdown(interaction: discord.Interaction, action: str = "on", min_age
         log_ch_id, _ = await get_security(interaction.guild_id)
         await save_security(interaction.guild_id, log_ch_id, settings)
     else:
-        e = discord.Embed(title="🔓 Локдаун выключен", color=0x00FF9D)
+        e = build_embed(C.SUCCESS)
         e.description = "Новые участники снова могут заходить свободно."
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="slowmode", description="Установить slow mode в канале [Premium]")
 @app_commands.describe(seconds="Задержка в секундах (0 = выключить, макс 21600)")
 async def slowmode(interaction: discord.Interaction, seconds: int = 0):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     if not interaction.user.guild_permissions.manage_channels:
         return await interaction.response.send_message("❌ Нужно Manage Channels.", ephemeral=True)
     seconds = max(0, min(seconds, 21600))
@@ -2869,15 +3190,14 @@ async def slowmode(interaction: discord.Interaction, seconds: int = 0):
 @bot.tree.command(name="report", description="Пожаловаться на сообщение модераторам [Premium]")
 @app_commands.describe(message_id="ID сообщения", reason="Причина жалобы")
 async def report(interaction: discord.Interaction, message_id: str, reason: str = "Не указана"):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
     ch = await get_log_ch(interaction.guild)
     if not ch:
         return await interaction.response.send_message("❌ Канал логов не настроен. Используй `/security setlog`", ephemeral=True)
     try:
         msg_id = int(message_id)
         msg = await interaction.channel.fetch_message(msg_id)
-        e = discord.Embed(title="🚨 Жалоба на сообщение", color=0xFF4444, timestamp=datetime.datetime.utcnow())
+        e = build_embed(C.DANGER)
         e.add_field(name="От кого", value=interaction.user.mention, inline=True)
         e.add_field(name="Автор сообщения", value=msg.author.mention, inline=True)
         e.add_field(name="Канал", value=interaction.channel.mention, inline=True)
@@ -2955,7 +3275,7 @@ async def birthday_check_loop():
                 if not ch: continue
                 member = guild.get_member(uid)
                 if not member: continue
-                e = discord.Embed(title="🎂 День рождения!", color=0xFF69B4)
+                e = build_embed(0xFF69B4)
                 e.description = f"Сегодня день рождения у {member.mention}! 🎉\nПоздравьте его/её!"
                 e.set_thumbnail(url=member.display_avatar.url)
                 try:
@@ -2972,8 +3292,7 @@ async def birthday_check_loop():
 @bot.tree.command(name="ticket", description="Система тикетов [Premium]")
 @app_commands.describe(action="open / close / setup", reason="Причина обращения")
 async def ticket(interaction: discord.Interaction, action: str = "open", reason: str = "Обращение в поддержку"):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    # basic security — free for all
 
     if action.lower() == "setup":
         if not interaction.user.guild_permissions.administrator:
@@ -2981,7 +3300,7 @@ async def ticket(interaction: discord.Interaction, action: str = "open", reason:
         # Создаём категорию для тикетов
         cat = await interaction.guild.create_category("🎫 Tickets")
         await set_guild_setting(interaction.guild_id, "ticket_category", cat.id)
-        e = discord.Embed(title="✅ Тикеты настроены", color=0x00E5FF)
+        e = build_embed(C.SUCCESS)
         e.add_field(name="Категория", value=cat.name, inline=True)
         e.add_field(name="Использование", value="Участники могут открывать тикеты: `/ticket`", inline=False)
         return await interaction.response.send_message(embed=e)
@@ -3050,7 +3369,7 @@ async def ticket(interaction: discord.Interaction, action: str = "open", reason:
         )
         await db.commit()
 
-    e = discord.Embed(title="🎫 Тикет открыт", color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+    e = build_embed(C.INFO)
     e.add_field(name="Участник", value=interaction.user.mention, inline=True)
     e.add_field(name="Причина", value=reason, inline=True)
     e.add_field(name="Закрыть", value="`/ticket action:close`", inline=False)
@@ -3079,7 +3398,7 @@ async def suggestion(interaction: discord.Interaction, action: str = "submit", t
                 (interaction.guild_id,)
             ) as c:
                 rows = await c.fetchall()
-        e = discord.Embed(title="💡 Топ предложений", color=0x00E5FF)
+        e = build_embed(C.INFO)
         if not rows:
             e.description = "Пока нет предложений. Добавь первое: `/suggestion text:...`"
         for i, (sid, text_s, up, down, uid) in enumerate(rows):
@@ -3099,7 +3418,7 @@ async def suggestion(interaction: discord.Interaction, action: str = "submit", t
     ch_id = settings.get("suggestion_channel", 0)
     ch = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
 
-    e = discord.Embed(title="💡 Предложение", description=text, color=0x7C3AED, timestamp=datetime.datetime.utcnow())
+    e = build_embed(0x5865F2, description=text, color=0x7C3AED)
     e.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     e.add_field(name="Статус", value="⏳ На рассмотрении", inline=True)
     e.set_footer(text="👍 — за  |  👎 — против")
@@ -3173,7 +3492,7 @@ async def on_reaction_add(reaction, user):
     if not reaction.message.guild: return
     ch = await sec_check(reaction.message.guild, "reactions")
     if not ch: return
-    e = make_embed(color=C.SUCCESS)
+    e = build_embed(C.SUCCESS)
     e.set_author(name="Reaction added")
     e.add_field(name="Пользователь", value=user.mention, inline=True)
     e.add_field(name="Реакция", value=str(reaction.emoji), inline=True)
@@ -3225,7 +3544,7 @@ async def serverstats(interaction: discord.Interaction):
     else:
         activity_str = "Нет данных за текущую сессию"
 
-    e = discord.Embed(title=f"📊 Статистика: {g.name}", color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+    e = build_embed(TIER_COLORS[await get_tier(g.id)])
     if g.icon: e.set_thumbnail(url=g.icon.url)
     e.add_field(name="👥 Участников", value=f"**{g.member_count}**\n{humans} людей · {bots} ботов", inline=True)
     e.add_field(name="📁 Каналов", value=f"**{len(g.channels)}**\n{len(g.text_channels)} текст · {len(g.voice_channels)} голос", inline=True)
@@ -3280,7 +3599,7 @@ async def imagine(interaction: discord.Interaction, prompt: str, style: str = "r
             fp=__import__("io").BytesIO(img_data),
             filename="generated.png"
         )
-        e = discord.Embed(title="🎨 Сгенерированное изображение", color=0x7C3AED)
+        e = build_embed(0x7C3AED)
         e.add_field(name="Запрос", value=prompt[:200], inline=False)
         e.add_field(name="Стиль", value=style, inline=True)
         e.set_footer(text=f"Запросил: {interaction.user.display_name} · Pollinations.ai (free)")
@@ -3326,11 +3645,11 @@ ITEM_MATERIAL_TYPE = {
 )
 @cooldown(20)
 async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str = "eu", tax: int = 8):
-    if await get_tier(interaction.guild_id) < TIER_PRO:
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
 
     if not GOOGLE_CREDS or not SHEET_ID:
-        e = discord.Embed(title="⚙️ Настройка Google Sheets", color=0xFF4444)
+        e = build_embed(C.DANGER)
         e.description = (
             "Для использования `/craftcalc` нужно настроить Google Sheets.\n\n"
             "**1.** Зайди в [Google Cloud Console](https://console.cloud.google.com)\n"
@@ -3573,7 +3892,7 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
         total = len(item_rows)
         profitable = len([r for r in item_rows if r[9] and str(r[9]) != "" and float(str(r[9]).replace("%","").replace("","0") or 0) > 0])
 
-        e = discord.Embed(title=f"📊 Таблица крафта T{tier} · {server_name}", color=0x00E5FF)
+        e = build_embed(C.INFO)
         e.add_field(name="Таблица", value=f"[Открыть Google Sheets]({sheet_url})\nВкладка: **{tab_name}**", inline=False)
         e.add_field(name="Предметов", value=str(total), inline=True)
         e.add_field(name="Выгодных (ЧР)", value=str(profitable), inline=True)
@@ -3607,7 +3926,7 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
 )
 @cooldown(30)
 async def flipper(interaction: discord.Interaction, category: str = "weapon", tier: int = 8, server: str = "eu"):
-    if await get_tier(interaction.guild_id) < TIER_PRO:
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
     await interaction.response.defer()
 
@@ -3710,7 +4029,7 @@ async def flipper(interaction: discord.Interaction, category: str = "weapon", ti
 @app_commands.describe(limit="Сколько гильдий показать (5-20)")
 @cooldown(20)
 async def guildwar(interaction: discord.Interaction, limit: int = 10):
-    if await get_tier(interaction.guild_id) < TIER_PRO:
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
     await interaction.response.defer()
     limit = max(5, min(limit, 20))
@@ -3736,18 +4055,15 @@ async def guildwar(interaction: discord.Interaction, limit: int = 10):
 
         top = sorted(guild_stats.items(), key=lambda x: x[1]["fame"], reverse=True)[:limit]
 
-        e = make_embed(
-            title="Топ гильдий по ZvZ",
-            description=f"По данным последних 50 битв · {datetime.datetime.utcnow().strftime('%d.%m.%Y')}",
-            color=C.DANGER, footer="EU · Albion Online"
-        )
+        e = build_embed(C.DANGER, description=f"Last 50 battles · {datetime.datetime.utcnow().strftime('%d.%m.%Y')}")
+        e.set_author(name="Guild War — Top Guilds")
+        e.set_footer(text="Albion Online · EU")
         for i, (gname, stats) in enumerate(top):
-            fame_bar = bar(stats["fame"], top[0][1]["fame"] if top else 1, 6)
             e.add_field(
                 name=f"{i+1}. {gname}",
                 value=(
-                    f"Битв: **{stats['battles']}** · Убийств: **{stats['kills']}**\n"
-                    f"Fame: **{stats['fame']:,}** `{fame_bar}`"
+                    f"Battles: **{stats['battles']}** · Kills: **{stats['kills']}**\n"
+                    f"Fame: **{stats['fame']:,}**"
                 ),
                 inline=True
             )
@@ -3769,7 +4085,7 @@ async def guildwar(interaction: discord.Interaction, limit: int = 10):
 )
 async def pricewatch(interaction: discord.Interaction, action: str = "list",
                      item_key: str = "", tier: int = 8, threshold: float = 5.0):
-    if await get_tier(interaction.guild_id) < TIER_PRO:
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
 
     gid = interaction.guild_id
@@ -3780,7 +4096,7 @@ async def pricewatch(interaction: discord.Interaction, action: str = "list",
                 "SELECT id, item_id, threshold_pct, last_price FROM price_watch WHERE guild_id=?", (gid,)
             ) as c:
                 rows = await c.fetchall()
-        e = discord.Embed(title="📡 Price Watch", color=0x00E5FF)
+        e = build_embed(C.INFO)
         if not rows:
             e.description = "Нет активных подписок. Добавь: `/pricewatch action:add item_key:sword`"
         for wid, iid, thr, last_p in rows:
@@ -3856,7 +4172,7 @@ async def price_watch_loop():
                     change_pct = abs(current_price - last_price) / last_price * 100
                     if change_pct >= thr:
                         direction = "📈 вырос" if current_price > last_price else "📉 упал"
-                        e = discord.Embed(title=f"📡 Price Alert: {item_id}", color=0xFFD700)
+                        e = build_embed(C.GOLD)
                         e.add_field(name="Цена на ЧР", value=f"**{direction}** на {change_pct:.1f}%", inline=False)
                         e.add_field(name="Было", value=f"{last_price:,}", inline=True)
                         e.add_field(name="Стало", value=f"{current_price:,}", inline=True)
@@ -3893,7 +4209,8 @@ async def askalbion(interaction: discord.Interaction, question: str):
                 "If asked in Russian, reply in Russian. Keep answers concise but complete."
             )
         )
-        e = discord.Embed(title="⚔️ Albion Expert", description=answer[:4000], color=0xC8A951)
+        e = build_embed(0x5865F2, description=answer[:4000], color=0xC8A951)
+        e.set_author(name="Albion Expert")
         e.set_footer(text=f"Вопрос: {question[:80]} · Witness AI")
         await interaction.followup.send(embed=e)
     except Exception as ex:
@@ -3920,7 +4237,7 @@ async def bmtest(interaction: discord.Interaction, item_id: str = "T8_MAIN_SWORD
                 status = r.status
                 data = await r.json()
 
-        e = discord.Embed(title=f"🔧 BM Test — {item_id}", color=0x00E5FF)
+        e = build_embed(C.INFO)
         e.add_field(name="HTTP Status", value=str(status), inline=True)
         e.add_field(name="Записей в ответе", value=str(len(data)), inline=True)
         e.add_field(name="URL", value=f"`{url}`", inline=False)
