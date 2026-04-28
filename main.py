@@ -558,6 +558,18 @@ async def db_init():
         """)
         await db.commit()
 
+        # Миграции — добавляем новые колонки если их нет (для существующих БД)
+        migrations = [
+            "ALTER TABLE guild_settings ADD COLUMN tickets_enabled INTEGER DEFAULT 1",
+            "ALTER TABLE invite_log ADD COLUMN note TEXT DEFAULT ''",
+        ]
+        for sql in migrations:
+            try:
+                await db.execute(sql)
+                await db.commit()
+            except Exception:
+                pass  # колонка уже существует — игнорируем
+
 async def get_tier(gid):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT tier,expires_at FROM subscriptions WHERE guild_id=?", (gid,)) as c:
