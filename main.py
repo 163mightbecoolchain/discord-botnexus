@@ -724,7 +724,7 @@ async def get_user_invites(gid, inviter_id):
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=["-", "!"], intents=intents)
-OWNER_IDS = set{474658252840370176}
+OWNER_IDS = set(474658252840370176)
 _owner_env = os.getenv("OWNER_IDS", "")  # через запятую: 123456789,987654321
 if _owner_env:
     for _oid in _owner_env.split(","):
