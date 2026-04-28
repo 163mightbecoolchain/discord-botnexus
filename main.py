@@ -720,7 +720,7 @@ async def get_user_invites(gid, inviter_id):
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=["-", "!"], intents=intents)
-OWNER_IDS = set()  # {YOUR_USER_ID}
+OWNER_IDS = set(474658252840370176)  # {YOUR_USER_ID}
 
 def upsell_embed(req):
     e = build_embed(C.DANGER)
