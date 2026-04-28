@@ -524,7 +524,8 @@ async def db_init():
             CREATE TABLE IF NOT EXISTS invite_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
-                member_id INTEGER, member_name TEXT, joined_at TEXT);
+                member_id INTEGER, member_name TEXT, joined_at TEXT,
+                note TEXT DEFAULT '');
             CREATE TABLE IF NOT EXISTS birthdays (
                 guild_id INTEGER, user_id INTEGER, birthday TEXT,
                 PRIMARY KEY (guild_id, user_id));
@@ -548,7 +549,8 @@ async def db_init():
                 birthday_channel INTEGER DEFAULT 0,
                 lockdown INTEGER DEFAULT 0,
                 price_watch TEXT DEFAULT '{}',
-                lang TEXT DEFAULT 'ru');
+                lang TEXT DEFAULT 'ru',
+                tickets_enabled INTEGER DEFAULT 1);
             CREATE TABLE IF NOT EXISTS price_watch (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 channel_id INTEGER NOT NULL, item_id TEXT, threshold_pct REAL DEFAULT 5.0,
@@ -1304,6 +1306,81 @@ async def sec_setlog(interaction: discord.Interaction, channel: discord.TextChan
     await interaction.response.send_message(f"✅ Канал логов → {channel.mention}", ephemeral=True)
 
 bot.tree.add_command(sec_grp)
+
+@bot.tree.command(name="invnote", description="Добавить заметку к инвайт-коду")
+@app_commands.describe(
+    code="Код инвайта (без discord.gg/)",
+    note="Заметка (например: 'Реклама Reddit'). Пусто = удалить заметку"
+)
+async def invnote(interaction: discord.Interaction, code: str, note: str = ""):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно право Manage Server.", ephemeral=True)
+    gid = interaction.guild_id
+    code = code.strip().removeprefix("https://discord.gg/").removeprefix("discord.gg/")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        if note:
+            # Обновляем note во всех записях с этим кодом
+            await db.execute(
+                "UPDATE invite_log SET note=? WHERE guild_id=? AND invite_code=?",
+                (note, gid, code)
+            )
+            # Если записей ещё нет — вставляем placeholder
+            async with db.execute(
+                "SELECT COUNT(*) FROM invite_log WHERE guild_id=? AND invite_code=?", (gid, code)
+            ) as c:
+                count = (await c.fetchone())[0]
+            if count == 0:
+                await db.execute(
+                    "INSERT INTO invite_log (guild_id, invite_code, note) VALUES (?,?,?)",
+                    (gid, code, note)
+                )
+            await db.commit()
+            e = discord.Embed(title="📝 Заметка сохранена", color=0x57F287)
+            e.add_field(name="Код",      value=f"`{code}`",             inline=True)
+            e.add_field(name="Заметка",  value=note,                    inline=True)
+            e.add_field(name="Добавил",  value=interaction.user.mention, inline=True)
+        else:
+            await db.execute(
+                "UPDATE invite_log SET note='' WHERE guild_id=? AND invite_code=?", (gid, code)
+            )
+            await db.commit()
+            e = discord.Embed(title="🗑️ Заметка удалена", description=f"Код: `{code}`", color=0x36393F)
+
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+@bot.tree.command(name="invnotes", description="Список всех заметок к инвайтам")
+async def invnotes(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно право Manage Server.", ephemeral=True)
+    gid = interaction.guild_id
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT invite_code, note, MAX(joined_at) as last_use, COUNT(*) as uses
+            FROM invite_log
+            WHERE guild_id=? AND note != '' AND note IS NOT NULL
+            GROUP BY invite_code
+            ORDER BY last_use DESC
+        """, (gid,)) as c:
+            rows = await c.fetchall()
+
+    e = discord.Embed(title="📝 Invite Notes", color=0x00B0F4)
+    if not rows:
+        e.description = "Заметок нет. Добавь через `/invnote code:КОД note:ЗАМЕТКА`"
+    else:
+        for code, note, last_use, uses in rows[:15]:
+            date_str = last_use[:10] if last_use else "—"
+            e.add_field(
+                name=f"`{code}`",
+                value=f"{note}\n*{uses} uses · last: {date_str}*",
+                inline=False
+            )
+        if len(rows) > 15:
+            e.set_footer(text=f"Показано 15 из {len(rows)}")
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
 
 @bot.tree.command(name="invcheck", description="История инвайта [Premium]")
 @app_commands.describe(code="Код инвайта")
@@ -2812,7 +2889,7 @@ async def get_guild_settings(gid: int) -> dict:
             if not row:
                 return {"guild_id": gid, "starboard_channel": 0, "starboard_threshold": 3,
                         "suggestion_channel": 0, "ticket_category": 0, "birthday_channel": 0,
-                        "lockdown": 0, "price_watch": "{}"}
+                        "lockdown": 0, "price_watch": "{}", "tickets_enabled": 1}
             cols = [d[0] for d in c.description]
             return dict(zip(cols, row))
 
@@ -2970,7 +3047,7 @@ async def birthday_check_loop():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @bot.tree.command(name="ticket", description="Система тикетов [Premium]")
-@app_commands.describe(action="open / close / setup", reason="Причина обращения")
+@app_commands.describe(action="open / close / setup / enable / disable", reason="Причина обращения")
 async def ticket(interaction: discord.Interaction, action: str = "open", reason: str = "Обращение в поддержку"):
     if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
@@ -2981,9 +3058,21 @@ async def ticket(interaction: discord.Interaction, action: str = "open", reason:
         # Создаём категорию для тикетов
         cat = await interaction.guild.create_category("🎫 Tickets")
         await set_guild_setting(interaction.guild_id, "ticket_category", cat.id)
+        await set_guild_setting(interaction.guild_id, "tickets_enabled", 1)
         e = discord.Embed(title="✅ Тикеты настроены", color=0x00E5FF)
         e.add_field(name="Категория", value=cat.name, inline=True)
-        e.add_field(name="Использование", value="Участники могут открывать тикеты: `/ticket`", inline=False)
+        e.add_field(name="Статус", value="✅ Включены", inline=True)
+        e.add_field(name="Использование", value="`/ticket` — открыть · `close` — закрыть · `disable/enable` — вкл/выкл", inline=False)
+        return await interaction.response.send_message(embed=e)
+
+    if action.lower() in ("disable", "enable"):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
+        enabled = action.lower() == "enable"
+        await set_guild_setting(interaction.guild_id, "tickets_enabled", 1 if enabled else 0)
+        status = "✅ Тикеты включены" if enabled else "🔒 Тикеты отключены"
+        desc = "Участники могут открывать тикеты." if enabled else "Новые тикеты открыть нельзя. Существующие не затронуты."
+        e = discord.Embed(title=status, description=desc, color=0x00E5FF if enabled else 0x36393F)
         return await interaction.response.send_message(embed=e)
 
     if action.lower() == "close":
@@ -3006,6 +3095,13 @@ async def ticket(interaction: discord.Interaction, action: str = "open", reason:
 
     # open — создаём новый тикет
     settings = await get_guild_settings(interaction.guild_id)
+
+    # Проверяем включены ли тикеты
+    if not settings.get("tickets_enabled", 1):
+        return await interaction.response.send_message(
+            "❌ Система тикетов отключена на этом сервере.", ephemeral=True
+        )
+
     cat_id = settings.get("ticket_category", 0)
     category = interaction.guild.get_channel(cat_id) if cat_id else None
 
