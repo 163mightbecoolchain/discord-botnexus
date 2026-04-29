@@ -505,6 +505,31 @@ def t(guild_id: int, key: str, **kwargs) -> str:
 #  DATABASE — per-guild isolation
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  HEALTH CHECK — Railway мониторит порт 8080
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def health_check_server():
+    """Простой HTTP сервер для Railway health check"""
+    from aiohttp import web
+
+    async def handle(request):
+        guilds = len(bot.guilds) if bot.is_ready() else 0
+        return web.Response(
+            text=f"OK|guilds={guilds}|latency={round(bot.latency*1000)}ms",
+            status=200
+        )
+
+    app = web.Application()
+    app.router.add_get("/", handle)
+    app.router.add_get("/health", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+    await site.start()
+    print(f"✅ Health check server started on port {os.getenv('PORT', 8080)}")
+
+
 async def db_init():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript("""
@@ -555,12 +580,136 @@ async def db_init():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 channel_id INTEGER NOT NULL, item_id TEXT, threshold_pct REAL DEFAULT 5.0,
                 last_price INTEGER DEFAULT 0, created_at TEXT);
+
+            -- Привязка Discord → Albion ник
+            CREATE TABLE IF NOT EXISTS albion_registration (
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                player_id   TEXT NOT NULL,
+                registered_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, user_id));
+
+            -- Reaction roles
+            CREATE TABLE IF NOT EXISTS reaction_roles (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                channel_id  INTEGER NOT NULL,
+                message_id  INTEGER NOT NULL,
+                emoji       TEXT NOT NULL,
+                role_id     INTEGER NOT NULL,
+                style       TEXT DEFAULT 'toggle');
+            CREATE INDEX IF NOT EXISTS idx_rr
+                ON reaction_roles(guild_id, message_id, emoji);
+
+            -- Модлог (история действий над участником)
+            CREATE TABLE IF NOT EXISTS modlog (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                mod_id      INTEGER NOT NULL,
+                action      TEXT NOT NULL,
+                reason      TEXT DEFAULT '',
+                duration    TEXT DEFAULT '',
+                created_at  TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_modlog
+                ON modlog(guild_id, user_id);
+
+            -- Временные баны
+            CREATE TABLE IF NOT EXISTS temp_bans (
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                mod_id      INTEGER NOT NULL,
+                reason      TEXT DEFAULT '',
+                unban_at    TEXT NOT NULL,
+                unbanned    INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id));
+
+            -- Карантинные роли
+            CREATE TABLE IF NOT EXISTS quarantine (
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                quarantined_at TEXT NOT NULL,
+                release_at  TEXT,
+                released    INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id));
+
+            -- Настройки карантина
+            CREATE TABLE IF NOT EXISTS quarantine_settings (
+                guild_id    INTEGER PRIMARY KEY,
+                role_id     INTEGER DEFAULT 0,
+                duration_hours INTEGER DEFAULT 24,
+                min_age_days   INTEGER DEFAULT 7,
+                enabled     INTEGER DEFAULT 0);
+
+            -- Albion watch (алерты на игрока)
+            CREATE TABLE IF NOT EXISTS albion_watch (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                channel_id  INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                player_id   TEXT NOT NULL,
+                last_check  TEXT DEFAULT '',
+                created_at  TEXT NOT NULL);
+
+            -- Прогрессивные наказания (настройки)
+            CREATE TABLE IF NOT EXISTS punishment_settings (
+                guild_id    INTEGER PRIMARY KEY,
+                warn2_action TEXT DEFAULT 'mute_1h',
+                warn3_action TEXT DEFAULT 'mute_24h',
+                warn4_action TEXT DEFAULT 'kick',
+                warn5_action TEXT DEFAULT 'ban');
+
+            -- Invite лидерборд
+            CREATE TABLE IF NOT EXISTS invite_stats (
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                total_invites INTEGER DEFAULT 0,
+                active_invites INTEGER DEFAULT 0,
+                left_count  INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id));
+
+            -- Стилометрический профиль участника
+            CREATE TABLE IF NOT EXISTS style_profiles (
+                guild_id        INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                msg_count       INTEGER DEFAULT 0,
+                avg_word_len    REAL DEFAULT 0,
+                avg_msg_len     REAL DEFAULT 0,
+                punct_ratio     REAL DEFAULT 0,
+                caps_ratio      REAL DEFAULT 0,
+                emoji_ratio     REAL DEFAULT 0,
+                no_punct_ratio  REAL DEFAULT 0,
+                common_words    TEXT DEFAULT '{}',
+                common_typos    TEXT DEFAULT '{}',
+                sentence_enders TEXT DEFAULT '{}',
+                active_hours    TEXT DEFAULT '{}',
+                updated_at      TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, user_id));
+
+            -- Найденные твинк-связи
+            CREATE TABLE IF NOT EXISTS twin_links (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id        INTEGER NOT NULL,
+                user_a          INTEGER NOT NULL,
+                user_b          INTEGER NOT NULL,
+                similarity      REAL DEFAULT 0,
+                reasons         TEXT DEFAULT '[]',
+                confirmed       INTEGER DEFAULT 0,
+                false_positive  INTEGER DEFAULT 0,
+                detected_at     TEXT NOT NULL,
+                confirmed_by    INTEGER DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS idx_twin_links
+                ON twin_links(guild_id, user_a, user_b);
         """)
         await db.commit()
 
         # Миграции — добавляем новые колонки если их нет (для существующих БД)
         migrations = [
             "ALTER TABLE guild_settings ADD COLUMN tickets_enabled INTEGER DEFAULT 1",
+            "ALTER TABLE guild_settings ADD COLUMN quarantine_role INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN mod_channel INTEGER DEFAULT 0",
             "ALTER TABLE invite_log ADD COLUMN note TEXT DEFAULT ''",
         ]
         for sql in migrations:
@@ -568,7 +717,7 @@ async def db_init():
                 await db.execute(sql)
                 await db.commit()
             except Exception:
-                pass  # колонка уже существует — игнорируем
+                pass
 
 async def get_tier(gid):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -752,6 +901,26 @@ def fmt_item(item_id):
 # Это гарантирует что cache существует до on_ready
 _invite_cache: dict = {}
 
+# ── Кэш настроек сервера (TTL 60 сек) ────────────────────────
+# Снижает нагрузку на БД: вместо запроса на каждое событие
+# читаем из памяти и обновляем раз в минуту
+_settings_cache: dict = {}       # {guild_id: {"data": {...}, "ts": float}}
+_SETTINGS_TTL = 60               # секунд
+
+async def get_guild_settings_cached(gid: int) -> dict:
+    """Получает настройки сервера с кэшированием TTL 60 сек"""
+    now = time.time()
+    cached = _settings_cache.get(gid)
+    if cached and (now - cached["ts"]) < _SETTINGS_TTL:
+        return cached["data"]
+    data = await get_guild_settings(gid)
+    _settings_cache[gid] = {"data": data, "ts": now}
+    return data
+
+def invalidate_settings_cache(gid: int):
+    """Сбрасывает кэш настроек при изменении"""
+    _settings_cache.pop(gid, None)
+
 async def refresh_invite_cache(guild) -> bool:
     """Загружает инвайты гильдии в кэш. Возвращает True если успешно."""
     try:
@@ -770,6 +939,135 @@ async def refresh_invite_cache(guild) -> bool:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  EVENTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  MODLOG + PROGRESSIVE PUNISHMENTS + TEMPBAN
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def add_modlog(guild_id: int, user_id: int, mod_id: int,
+                     action: str, reason: str = "", duration: str = ""):
+    """Записывает действие модератора в историю"""
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO modlog (guild_id,user_id,mod_id,action,reason,duration,created_at) VALUES (?,?,?,?,?,?,?)",
+            (guild_id, user_id, mod_id, action, reason, duration, now)
+        )
+        await db.commit()
+
+
+async def apply_progressive_punishment(member: discord.Member, warn_count: int, mod_id: int):
+    """Применяет автоматическое наказание по количеству варнов"""
+    gid = member.guild.id
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT warn2_action,warn3_action,warn4_action,warn5_action FROM punishment_settings WHERE guild_id=?",
+            (gid,)
+        ) as c:
+            row = await c.fetchone()
+    if not row:
+        # Дефолтные правила
+        row = ("mute_1h", "mute_24h", "kick", "ban")
+
+    action_map = {
+        2: row[0], 3: row[1], 4: row[2], 5: row[3]
+    }
+    action = action_map.get(warn_count)
+    if not action:
+        return
+
+    reason = f"Auto: {warn_count} warnings"
+    try:
+        if action == "mute_1h":
+            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=1)
+            await member.timeout(until, reason=reason)
+            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_1H", reason)
+        elif action == "mute_24h":
+            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=24)
+            await member.timeout(until, reason=reason)
+            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_24H", reason)
+        elif action == "kick":
+            await member.kick(reason=reason)
+            await add_modlog(gid, member.id, mod_id, "AUTO_KICK", reason)
+        elif action == "ban":
+            await member.ban(reason=reason)
+            await add_modlog(gid, member.id, mod_id, "AUTO_BAN", reason)
+    except discord.Forbidden:
+        pass
+
+
+async def tempban_loop(bot_instance):
+    """Фоновая задача — проверяет истёкшие временные баны"""
+    await bot_instance.wait_until_ready()
+    while not bot_instance.is_closed():
+        try:
+            now = datetime.datetime.utcnow().isoformat()
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT guild_id,user_id,reason FROM temp_bans WHERE unban_at<=? AND unbanned=0",
+                    (now,)
+                ) as c:
+                    rows = await c.fetchall()
+            for guild_id, user_id, reason in rows:
+                guild = bot_instance.get_guild(guild_id)
+                if guild:
+                    try:
+                        await guild.unban(discord.Object(id=user_id), reason=f"Tempban expired: {reason}")
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            await db.execute(
+                                "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=?",
+                                (guild_id, user_id)
+                            )
+                            await db.commit()
+                        await add_modlog(guild_id, user_id, 0, "AUTO_UNBAN", "Tempban expired")
+                        print(f"[TEMPBAN] Auto-unbanned {user_id} from {guild.name}")
+                    except Exception as ex:
+                        print(f"[TEMPBAN] Error unbanning {user_id}: {ex}")
+        except Exception as ex:
+            print(f"[TEMPBAN LOOP] Error: {ex}")
+        await asyncio.sleep(60)  # проверяем каждую минуту
+
+
+async def quarantine_loop(bot_instance):
+    """Снимает карантинную роль по истечении времени"""
+    await bot_instance.wait_until_ready()
+    while not bot_instance.is_closed():
+        try:
+            now = datetime.datetime.utcnow().isoformat()
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT q.guild_id,q.user_id FROM quarantine q WHERE q.release_at<=? AND q.released=0",
+                    (now,)
+                ) as c:
+                    rows = await c.fetchall()
+            for guild_id, user_id in rows:
+                guild = bot_instance.get_guild(guild_id)
+                if not guild: continue
+                member = guild.get_member(user_id)
+                if not member: continue
+                # Получаем настройки карантина
+                async with aiosqlite.connect(DB_PATH) as db:
+                    async with db.execute(
+                        "SELECT role_id FROM quarantine_settings WHERE guild_id=?", (guild_id,)
+                    ) as c:
+                        qrow = await c.fetchone()
+                if qrow and qrow[0]:
+                    role = guild.get_role(qrow[0])
+                    if role and role in member.roles:
+                        try:
+                            await member.remove_roles(role, reason="Quarantine expired")
+                        except discord.Forbidden:
+                            pass
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        "UPDATE quarantine SET released=1 WHERE guild_id=? AND user_id=?",
+                        (guild_id, user_id)
+                    )
+                    await db.commit()
+        except Exception as ex:
+            print(f"[QUARANTINE LOOP] Error: {ex}")
+        await asyncio.sleep(60)
+
 
 @bot.event
 async def on_ready():
@@ -807,6 +1105,10 @@ async def on_ready():
         bot._tasks_started = True
         bot.loop.create_task(birthday_check_loop())
         bot.loop.create_task(price_watch_loop())
+        bot.loop.create_task(tempban_loop(bot))
+        bot.loop.create_task(quarantine_loop(bot))
+        bot.loop.create_task(albion_watch_loop(bot))
+        bot.loop.create_task(health_check_server())
         print("✅ Фоновые задачи запущены")
 
     # ── Загружаем языки серверов из БД ───────────────────────
@@ -838,6 +1140,10 @@ async def on_message(message):
     if message.author.bot or not message.guild: return
     gid, uid = message.guild.id, message.author.id
     await add_xp(gid, uid, 5); await add_coins(gid, uid, 1)
+
+    # Стилометрия — обновляем профиль если есть текст
+    if message.content and len(message.content) >= 3:
+        asyncio.create_task(update_style_profile(gid, uid, message))
     xp = await get_xp(gid, uid)
     if xp > 0 and xp % 100 < 5:
         await message.channel.send(f"⚡ {message.author.mention} → **Уровень {xp//100}**! 🎉", delete_after=10)
@@ -960,6 +1266,28 @@ async def on_member_join(member):
         e.add_field(name="Возраст", value=f"{age} дней", inline=True)
         e.add_field(name="Инвайт", value=f"`{used_code}`" if used_code else "неизвестно", inline=True)
         await ch2.send(embed=e)
+
+    # Карантинная роль для новых аккаунтов (auto-quarantine)
+    async with aiosqlite.connect(DB_PATH) as _qdb:
+        async with _qdb.execute(
+            "SELECT role_id,duration_hours,min_age_days,enabled FROM quarantine_settings WHERE guild_id=?",
+            (gid,)
+        ) as _qc:
+            qsettings = await _qc.fetchone()
+    if qsettings and qsettings[3] and age < qsettings[2]:
+        qrole = member.guild.get_role(qsettings[0])
+        if qrole:
+            try:
+                await member.add_roles(qrole, reason=f"Auto-quarantine: account {age}d old")
+                release_at = (datetime.datetime.utcnow() + timedelta(hours=qsettings[1])).isoformat()
+                async with aiosqlite.connect(DB_PATH) as _qdb2:
+                    await _qdb2.execute(
+                        "INSERT INTO quarantine (guild_id,user_id,quarantined_at,release_at) VALUES (?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET released=0,release_at=excluded.release_at",
+                        (gid, member.id, datetime.datetime.utcnow().isoformat(), release_at)
+                    )
+                    await _qdb2.commit()
+            except discord.Forbidden:
+                pass
 
 @bot.event
 async def on_member_remove(member):
@@ -1724,40 +2052,99 @@ async def coins_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="poll")
-@app_commands.describe(question="Вопрос", option1="Вариант 1", option2="Вариант 2", option3="Вариант 3", option4="Вариант 4")
-async def poll(interaction: discord.Interaction, question: str, option1: str, option2: str, option3: str = None, option4: str = None):
-    options = [o for o in [option1,option2,option3,option4] if o]
-    emojis = ["1️⃣","2️⃣","3️⃣","4️⃣"]
+@app_commands.describe(question="Вопрос", option1="Вариант 1", option2="Вариант 2", option3="Вариант 3", option4="Вариант 4", duration="Длительность в минутах (0 = без ограничения)")
+async def poll(interaction: discord.Interaction, question: str, option1: str, option2: str, option3: str = None, option4: str = None, duration: int = 0):
+    options = [o for o in [option1, option2, option3, option4] if o]
+    emojis  = ["1️⃣","2️⃣","3️⃣","4️⃣"]
     e = discord.Embed(title=f"📊 {question}", color=0x00E5FF)
-    for i,opt in enumerate(options): e.add_field(name=f"{emojis[i]} {opt}", value="​", inline=False)
+    for i, opt in enumerate(options):
+        e.add_field(name=f"{emojis[i]} {opt}", value="​", inline=False)
+    if duration > 0:
+        e.set_footer(text=f"Закроется через {duration} мин")
     await interaction.response.send_message(embed=e)
     msg = await interaction.original_response()
-    for i in range(len(options)): await msg.add_reaction(emojis[i])
+    for i in range(len(options)):
+        await msg.add_reaction(emojis[i])
+    # Авто-закрытие
+    if duration > 0:
+        await asyncio.sleep(duration * 60)
+        try:
+            msg = await msg.channel.fetch_message(msg.id)
+            results = [f"{r.emoji} — {r.count-1} голосов" for r in msg.reactions]
+            result_e = discord.Embed(color=0xFEE75C, timestamp=datetime.datetime.utcnow())
+            result_e.set_author(name=f"Poll closed — {question}")
+            result_e.description = "\n".join(results) or "Нет голосов."
+            await msg.channel.send(embed=result_e, reference=msg)
+        except Exception:
+            pass
 
 @bot.tree.command(name="remind")
-@app_commands.describe(minutes="Через сколько минут", message="Текст")
-async def remind(interaction: discord.Interaction, minutes: int, message: str):
-    if not 1<=minutes<=10080: return await interaction.response.send_message("⚠️ 1–10080 мин.", ephemeral=True)
-    await interaction.response.send_message(f"⏰ Напомню через **{minutes} мин**!", ephemeral=True)
-    await asyncio.sleep(minutes*60)
-    try:
-        await interaction.user.send(embed=discord.Embed(title="⏰ Напоминание!", description=message, color=0x00E5FF))
-    except discord.Forbidden: pass
+@app_commands.describe(minutes="Через сколько минут", message="Текст", repeat="Повторять каждые N минут (0 = без повтора)")
+async def remind(interaction: discord.Interaction, minutes: int, message: str, repeat: int = 0):
+    if not 1 <= minutes <= 10080:
+        return await interaction.response.send_message("⚠️ 1–10080 мин.", ephemeral=True)
+    suffix = f" · повтор каждые {repeat} мин" if repeat > 0 else ""
+    await interaction.response.send_message(f"⏰ Напомню через **{minutes} мин**!{suffix}", ephemeral=True)
+    count = 0
+    max_repeats = 20
+    current_minutes = minutes
+    while count == 0 or (repeat > 0 and count < max_repeats):
+        await asyncio.sleep(current_minutes * 60)
+        try:
+            e = discord.Embed(description=f"⏰ {message}", color=0x00B0F4, timestamp=datetime.datetime.utcnow())
+            e.set_author(name="Reminder")
+            if repeat > 0:
+                e.set_footer(text=f"Повтор {count+1}/{max_repeats} · каждые {repeat} мин")
+            await interaction.user.send(embed=e)
+        except discord.Forbidden:
+            try:
+                await interaction.channel.send(f"⏰ {interaction.user.mention} {message}")
+            except Exception:
+                pass
+        count += 1
+        current_minutes = repeat if repeat > 0 else minutes
+        if repeat == 0:
+            break
 
 @bot.tree.command(name="lfg")
 @app_commands.describe(game="Игра", slots="Нужно игроков", note="Дополнительно")
 async def lfg(interaction: discord.Interaction, game: str, slots: int = 1, note: str = ""):
     e = discord.Embed(title=f"🎮 LFG — {game}", color=0x00FF9D)
     e.description = f"**{interaction.user.display_name}** ищет **{slots}** игрока(-ов)"
-    if note: e.add_field(name="📝", value=note, inline=False)
-    e.add_field(name="Присоединиться", value=f"✅ или ЛС {interaction.user.mention}", inline=False)
-    e.set_footer(text="Авто-удаление через 2 часа")
-    await interaction.response.send_message(embed=e)
-    msg = await interaction.original_response()
-    await msg.add_reaction("✅"); await msg.add_reaction("❌")
-    await asyncio.sleep(7200)
-    try: await msg.delete()
-    except Exception: pass
+    if note:
+        e.add_field(name="📝", value=note, inline=False)
+    e.set_footer(text="Нажми Join чтобы вступить · авто-удаление через 2 часа")
+
+    class LFGJoinView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=7200)
+            self.joined = [interaction.user]
+
+        @discord.ui.button(label=f"Join (1/{slots})", style=discord.ButtonStyle.success)
+        async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
+            if inter.user in self.joined:
+                return await inter.response.send_message("Ты уже в группе.", ephemeral=True)
+            self.joined.append(inter.user)
+            button.label = f"Join ({len(self.joined)}/{slots})"
+            if len(self.joined) >= slots:
+                button.disabled = True
+                button.label = f"Full ({len(self.joined)}/{slots})"
+                try:
+                    names = ", ".join(m.display_name for m in self.joined)
+                    await interaction.user.send(f"✅ Группа собрана! Участники: {names}")
+                except Exception:
+                    pass
+            await inter.response.edit_message(view=self)
+            await inter.followup.send(f"✅ Вступил в группу!", ephemeral=True)
+
+        async def on_timeout(self):
+            try:
+                msg = await interaction.original_response()
+                await msg.delete()
+            except Exception:
+                pass
+
+    await interaction.response.send_message(embed=e, view=LFGJoinView())
 
 @bot.tree.command(name="weather")
 @app_commands.describe(city="Город")
@@ -4049,6 +4436,1095 @@ async def bmtest(interaction: discord.Interaction, item_id: str = "T8_MAIN_SWORD
         await interaction.followup.send(embed=e)
     except Exception as ex:
         await interaction.followup.send(f"❌ Ошибка запроса: `{ex}`")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ВРЕМЕННЫЙ БАН
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="tempban", description="Временный бан участника")
+@app_commands.describe(
+    member="Участник",
+    duration="Длительность: 1h / 12h / 1d / 7d / 30d",
+    reason="Причина"
+)
+async def tempban(interaction: discord.Interaction, member: discord.Member,
+                  duration: str = "1d", reason: str = "Нарушение правил"):
+    if not interaction.user.guild_permissions.ban_members:
+        return await interaction.response.send_message("❌ Нет прав.", ephemeral=True)
+
+    # Парсим длительность
+    unit_map = {"h": 1, "d": 24, "w": 168}
+    try:
+        num = int(duration[:-1])
+        unit = duration[-1].lower()
+        hours = num * unit_map.get(unit, 24)
+    except Exception:
+        return await interaction.response.send_message("❌ Формат: `1h` `12h` `1d` `7d` `30d`", ephemeral=True)
+
+    unban_at = (datetime.datetime.utcnow() + timedelta(hours=hours)).isoformat()
+
+    try:
+        await member.ban(reason=f"[Tempban {duration}] {reason}")
+    except discord.Forbidden:
+        return await interaction.response.send_message("❌ Нет прав забанить.", ephemeral=True)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO temp_bans (guild_id,user_id,mod_id,reason,unban_at) VALUES (?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET unban_at=excluded.unban_at,unbanned=0,reason=excluded.reason",
+            (interaction.guild_id, member.id, interaction.user.id, reason, unban_at)
+        )
+        await db.commit()
+
+    await add_modlog(interaction.guild_id, member.id, interaction.user.id, "TEMPBAN", reason, duration)
+
+    e = discord.Embed(color=0xED4245, timestamp=datetime.datetime.utcnow())
+    e.set_author(name=f"Tempban — {member.display_name}", icon_url=member.display_avatar.url)
+    e.add_field(name="Member",    value=member.mention,           inline=True)
+    e.add_field(name="Duration",  value=f"**{duration}**",        inline=True)
+    e.add_field(name="Unban at",  value=unban_at[:16],            inline=True)
+    e.add_field(name="Reason",    value=reason,                   inline=False)
+    await interaction.response.send_message(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  MODLOG
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="modlog", description="История действий над участником")
+@app_commands.describe(member="Участник")
+async def modlog_cmd(interaction: discord.Interaction, member: discord.Member):
+    if not interaction.user.guild_permissions.manage_messages:
+        return await interaction.response.send_message("❌ Нет прав.", ephemeral=True)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT action,reason,duration,mod_id,created_at FROM modlog WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 15",
+            (interaction.guild_id, member.id)
+        ) as c:
+            rows = await c.fetchall()
+
+    e = discord.Embed(color=0xFEE75C, timestamp=datetime.datetime.utcnow())
+    e.set_author(name=f"Modlog — {member.display_name}", icon_url=member.display_avatar.url)
+    e.set_thumbnail(url=member.display_avatar.url)
+
+    if not rows:
+        e.description = "No moderation history."
+    else:
+        for action, reason, duration, mod_id, created_at in rows:
+            mod = interaction.guild.get_member(mod_id)
+            mod_str = mod.display_name if mod else ("Auto" if mod_id == 0 else str(mod_id))
+            dur_str = f" · {duration}" if duration else ""
+            e.add_field(
+                name=f"`{action}`{dur_str} · {created_at[:10]}",
+                value=f"{reason or '—'} · by {mod_str}",
+                inline=False
+            )
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  КАРАНТИН НАСТРОЙКИ
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="quarantine", description="Настройка карантина для новых аккаунтов")
+@app_commands.describe(
+    action="setup / enable / disable / release",
+    role="Карантинная роль",
+    hours="Длительность карантина в часах (по умолчанию 24)",
+    min_age="Минимальный возраст аккаунта в днях (по умолчанию 7)",
+    member="Участник для release"
+)
+async def quarantine_cmd(interaction: discord.Interaction,
+                          action: str,
+                          role: discord.Role = None,
+                          hours: int = 24,
+                          min_age: int = 7,
+                          member: discord.Member = None):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
+
+    gid = interaction.guild_id
+
+    if action == "setup":
+        if not role:
+            return await interaction.response.send_message("❌ Укажи роль: `/quarantine action:setup role:@Quarantine`", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO quarantine_settings (guild_id,role_id,duration_hours,min_age_days,enabled)
+                VALUES (?,?,?,?,1)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    role_id=excluded.role_id, duration_hours=excluded.duration_hours,
+                    min_age_days=excluded.min_age_days, enabled=1
+            """, (gid, role.id, hours, min_age))
+            await db.commit()
+        e = discord.Embed(color=0x57F287, timestamp=datetime.datetime.utcnow())
+        e.set_author(name="Quarantine configured")
+        e.add_field(name="Role",     value=role.mention,      inline=True)
+        e.add_field(name="Duration", value=f"**{hours}h**",   inline=True)
+        e.add_field(name="Min age",  value=f"**{min_age} days**", inline=True)
+        return await interaction.response.send_message(embed=e)
+
+    if action in ("enable", "disable"):
+        enabled = action == "enable"
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE quarantine_settings SET enabled=? WHERE guild_id=?",
+                (1 if enabled else 0, gid)
+            )
+            await db.commit()
+        status = "✅ Карантин включён" if enabled else "🔒 Карантин выключен"
+        return await interaction.response.send_message(status)
+
+    if action == "release":
+        if not member:
+            return await interaction.response.send_message("❌ Укажи участника.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT role_id FROM quarantine_settings WHERE guild_id=?", (gid,)
+            ) as c:
+                row = await c.fetchone()
+        if row and row[0]:
+            qrole = interaction.guild.get_role(row[0])
+            if qrole and qrole in member.roles:
+                await member.remove_roles(qrole, reason=f"Released by {interaction.user}")
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE quarantine SET released=1 WHERE guild_id=? AND user_id=?",
+                (gid, member.id)
+            )
+            await db.commit()
+        e = discord.Embed(color=0x57F287, timestamp=datetime.datetime.utcnow())
+        e.set_author(name=f"Released from quarantine — {member.display_name}")
+        return await interaction.response.send_message(embed=e)
+
+    await interaction.response.send_message("❌ Действие: `setup` `enable` `disable` `release`", ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  PUNISHMENT SETTINGS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="punishments", description="Настройка прогрессивных наказаний")
+@app_commands.describe(
+    warn2="Действие при 2 варнах: mute_1h / mute_24h / kick / ban",
+    warn3="Действие при 3 варнах",
+    warn4="Действие при 4 варнах",
+    warn5="Действие при 5 варнах"
+)
+async def punishments_cmd(interaction: discord.Interaction,
+                           warn2: str = "mute_1h",
+                           warn3: str = "mute_24h",
+                           warn4: str = "kick",
+                           warn5: str = "ban"):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
+    valid = {"mute_1h", "mute_24h", "kick", "ban", "none"}
+    for val in [warn2, warn3, warn4, warn5]:
+        if val not in valid:
+            return await interaction.response.send_message(
+                f"❌ Допустимые значения: `mute_1h` `mute_24h` `kick` `ban` `none`", ephemeral=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO punishment_settings (guild_id,warn2_action,warn3_action,warn4_action,warn5_action)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                warn2_action=excluded.warn2_action, warn3_action=excluded.warn3_action,
+                warn4_action=excluded.warn4_action, warn5_action=excluded.warn5_action
+        """, (interaction.guild_id, warn2, warn3, warn4, warn5))
+        await db.commit()
+
+    e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+    e.set_author(name="Progressive Punishments")
+    e.add_field(name="2 warns", value=f"`{warn2}`", inline=True)
+    e.add_field(name="3 warns", value=f"`{warn3}`", inline=True)
+    e.add_field(name="4 warns", value=f"`{warn4}`", inline=True)
+    e.add_field(name="5 warns", value=f"`{warn5}`", inline=True)
+    await interaction.response.send_message(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  REACTION ROLES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="reactionrole", description="Настройка reaction roles")
+@app_commands.describe(
+    action="add / remove / list / clear",
+    message_id="ID сообщения",
+    emoji="Эмодзи",
+    role="Роль"
+)
+async def reactionrole_cmd(interaction: discord.Interaction,
+                            action: str,
+                            message_id: str = "",
+                            emoji: str = "",
+                            role: discord.Role = None):
+    if not interaction.user.guild_permissions.manage_roles:
+        return await interaction.response.send_message("❌ Нужны права Manage Roles.", ephemeral=True)
+    gid = interaction.guild_id
+
+    if action == "add":
+        if not message_id or not emoji or not role:
+            return await interaction.response.send_message("❌ Нужны: `message_id` `emoji` `role`", ephemeral=True)
+        try:
+            mid = int(message_id)
+        except ValueError:
+            return await interaction.response.send_message("❌ message_id должен быть числом", ephemeral=True)
+
+        # Находим сообщение и добавляем реакцию
+        msg = None
+        for ch in interaction.guild.text_channels:
+            try:
+                msg = await ch.fetch_message(mid)
+                break
+            except Exception:
+                continue
+        if not msg:
+            return await interaction.response.send_message("❌ Сообщение не найдено.", ephemeral=True)
+
+        await msg.add_reaction(emoji)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO reaction_roles (guild_id,channel_id,message_id,emoji,role_id) VALUES (?,?,?,?,?)",
+                (gid, msg.channel.id, mid, emoji, role.id)
+            )
+            await db.commit()
+        e = discord.Embed(color=0x57F287, timestamp=datetime.datetime.utcnow())
+        e.set_author(name="Reaction Role added")
+        e.add_field(name="Emoji", value=emoji,        inline=True)
+        e.add_field(name="Role",  value=role.mention, inline=True)
+        return await interaction.response.send_message(embed=e)
+
+    if action == "list":
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT message_id,emoji,role_id FROM reaction_roles WHERE guild_id=?", (gid,)
+            ) as c:
+                rows = await c.fetchall()
+        e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+        e.set_author(name="Reaction Roles")
+        if not rows:
+            e.description = "Нет настроенных reaction roles."
+        for mid, em, rid in rows:
+            r = interaction.guild.get_role(rid)
+            e.add_field(name=f"{em} · msg `{mid}`", value=r.mention if r else str(rid), inline=True)
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+
+    if action == "remove":
+        if not message_id or not emoji:
+            return await interaction.response.send_message("❌ Нужны: `message_id` `emoji`", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?",
+                (gid, int(message_id), emoji)
+            )
+            await db.commit()
+        return await interaction.response.send_message("✅ Reaction role удалена.", ephemeral=True)
+
+    if action == "clear":
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM reaction_roles WHERE guild_id=?", (gid,))
+            await db.commit()
+        return await interaction.response.send_message("✅ Все reaction roles удалены.", ephemeral=True)
+
+    await interaction.response.send_message("❌ Действие: `add` `remove` `list` `clear`", ephemeral=True)
+
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    if payload.user_id == bot.user.id: return
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT role_id FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?",
+            (payload.guild_id, payload.message_id, str(payload.emoji))
+        ) as c:
+            row = await c.fetchone()
+    if not row: return
+    guild = bot.get_guild(payload.guild_id)
+    if not guild: return
+    member = guild.get_member(payload.user_id)
+    if not member: return
+    role = guild.get_role(row[0])
+    if role:
+        try:
+            await member.add_roles(role, reason="Reaction role")
+        except discord.Forbidden:
+            pass
+
+
+@bot.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    if payload.user_id == bot.user.id: return
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT role_id FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?",
+            (payload.guild_id, payload.message_id, str(payload.emoji))
+        ) as c:
+            row = await c.fetchone()
+    if not row: return
+    guild = bot.get_guild(payload.guild_id)
+    if not guild: return
+    member = guild.get_member(payload.user_id)
+    if not member: return
+    role = guild.get_role(row[0])
+    if role:
+        try:
+            await member.remove_roles(role, reason="Reaction role removed")
+        except discord.Forbidden:
+            pass
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ALBION REGISTRATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="register", description="Привязать Albion Online ник к Discord аккаунту")
+@app_commands.describe(player="Ник в Albion Online")
+async def register_albion(interaction: discord.Interaction, player: str):
+    await interaction.response.defer()
+    try:
+        async with aiohttp.ClientSession() as s:
+            pid, pname = await albion_find_player(s, player)
+        if not pid:
+            return await interaction.followup.send(f"❌ Игрок **{player}** не найден.", ephemeral=True)
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO albion_registration (guild_id,user_id,player_name,player_id,registered_at)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                    player_name=excluded.player_name, player_id=excluded.player_id,
+                    registered_at=excluded.registered_at
+            """, (interaction.guild_id, interaction.user.id, pname, pid, now))
+            await db.commit()
+        e = discord.Embed(color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+        e.set_author(name=f"Registered — {pname}", icon_url=interaction.user.display_avatar.url)
+        e.add_field(name="Discord", value=interaction.user.mention, inline=True)
+        e.add_field(name="Albion",  value=f"**{pname}**",           inline=True)
+        e.description = "Теперь `/stats` без аргументов покажет твою статистику."
+        await interaction.followup.send(embed=e)
+    except Exception as ex:
+        await interaction.followup.send(f"❌ {ex}", ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ALBION WATCH
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="watch", description="Отслеживать активность Albion игрока [Premium]")
+@app_commands.describe(
+    action="add / remove / list",
+    player="Ник игрока",
+    channel="Канал для алертов"
+)
+async def albion_watch_cmd(interaction: discord.Interaction,
+                            action: str,
+                            player: str = "",
+                            channel: discord.TextChannel = None):
+    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+
+    gid = interaction.guild_id
+
+    if action == "add":
+        if not player:
+            return await interaction.response.send_message("❌ Укажи игрока.", ephemeral=True)
+        ch = channel or interaction.channel
+        await interaction.response.defer()
+        async with aiohttp.ClientSession() as s:
+            pid, pname = await albion_find_player(s, player)
+        if not pid:
+            return await interaction.followup.send(f"❌ Игрок **{player}** не найден.", ephemeral=True)
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO albion_watch (guild_id,user_id,channel_id,player_name,player_id,created_at) VALUES (?,?,?,?,?,?)",
+                (gid, interaction.user.id, ch.id, pname, pid, now)
+            )
+            await db.commit()
+        e = discord.Embed(color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+        e.set_author(name=f"Watching — {pname}")
+        e.add_field(name="Player",  value=f"**{pname}**",  inline=True)
+        e.add_field(name="Channel", value=ch.mention,      inline=True)
+        e.description = "Бот будет оповещать о новых убийствах и смертях каждый час."
+        await interaction.followup.send(embed=e)
+
+    elif action == "remove":
+        if not player:
+            return await interaction.response.send_message("❌ Укажи игрока.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM albion_watch WHERE guild_id=? AND player_name=?",
+                (gid, player)
+            )
+            await db.commit()
+        await interaction.response.send_message(f"✅ Слежка за **{player}** удалена.", ephemeral=True)
+
+    elif action == "list":
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT player_name,channel_id FROM albion_watch WHERE guild_id=?", (gid,)
+            ) as c:
+                rows = await c.fetchall()
+        e = discord.Embed(color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+        e.set_author(name="Albion Watch List")
+        if not rows:
+            e.description = "Нет отслеживаемых игроков."
+        for pname, cid in rows:
+            ch_obj = interaction.guild.get_channel(cid)
+            e.add_field(name=pname, value=ch_obj.mention if ch_obj else str(cid), inline=True)
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  INVITE STATS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="invstats", description="Статистика и лидерборд инвайтов")
+async def invstats(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно право Manage Server.", ephemeral=True)
+    gid = interaction.guild_id
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Топ по количеству приглашённых
+        async with db.execute("""
+            SELECT inviter_id, inviter_name, COUNT(*) as total
+            FROM invite_log
+            WHERE guild_id=? AND inviter_id > 0
+            GROUP BY inviter_id
+            ORDER BY total DESC
+            LIMIT 10
+        """, (gid,)) as c:
+            top_rows = await c.fetchall()
+
+        # Самый используемый инвайт
+        async with db.execute("""
+            SELECT invite_code, COUNT(*) as uses, inviter_name
+            FROM invite_log
+            WHERE guild_id=? AND invite_code IS NOT NULL
+            GROUP BY invite_code
+            ORDER BY uses DESC
+            LIMIT 5
+        """, (gid,)) as c:
+            code_rows = await c.fetchall()
+
+        # Всего вошло
+        async with db.execute(
+            "SELECT COUNT(*) FROM invite_log WHERE guild_id=?", (gid,)
+        ) as c:
+            total = (await c.fetchone())[0]
+
+    e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+    e.set_author(name="Invite Stats")
+    e.add_field(name="Total joined via invites", value=f"**{total}**", inline=True)
+
+    if top_rows:
+        lines = []
+        medals = ["🥇","🥈","🥉"] + [f"{i}." for i in range(4, 11)]
+        for i, (uid, uname, total_inv) in enumerate(top_rows):
+            m = interaction.guild.get_member(uid)
+            name = m.display_name if m else uname
+            lines.append(f"{medals[i]} **{name}** — {total_inv} invites")
+        e.add_field(name="Top inviters", value="\n".join(lines), inline=False)
+
+    if code_rows:
+        lines = [f"`{code}` — {uses} uses ({inv})" for code, uses, inv in code_rows]
+        e.add_field(name="Top invite codes", value="\n".join(lines), inline=False)
+
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ALBION WATCH BACKGROUND LOOP
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def albion_watch_loop(bot_instance):
+    """Проверяет новые убийства/смерти для отслеживаемых игроков — раз в час"""
+    await bot_instance.wait_until_ready()
+    while not bot_instance.is_closed():
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT id,guild_id,channel_id,player_name,player_id,last_check FROM albion_watch"
+                ) as c:
+                    watches = await c.fetchall()
+
+            for wid, guild_id, channel_id, pname, pid, last_check in watches:
+                try:
+                    async with aiohttp.ClientSession() as s:
+                        async with s.get(f"{ALBION_BASE}/players/{pid}/kills?limit=5") as r:
+                            kills = await r.json() if r.status == 200 else []
+                        async with s.get(f"{ALBION_BASE}/players/{pid}/deaths?limit=5") as r:
+                            deaths = await r.json() if r.status == 200 else []
+
+                    now_iso = datetime.datetime.utcnow().isoformat()
+                    new_kills = [k for k in kills
+                                 if k.get("TimeStamp","") > (last_check or "")]
+                    new_deaths = [d for d in deaths
+                                  if d.get("TimeStamp","") > (last_check or "")]
+
+                    if new_kills or new_deaths:
+                        ch = bot_instance.get_channel(channel_id)
+                        if ch:
+                            e = discord.Embed(color=0x00E5FF, timestamp=datetime.datetime.utcnow())
+                            e.set_author(name=f"Albion Watch — {pname}")
+                            if new_kills:
+                                lines = [
+                                    f"⚔️ Killed **{k.get('Victim',{}).get('Name','?')}** · {k.get('TotalVictimKillFame',0):,} fame"
+                                    for k in new_kills[:3]
+                                ]
+                                e.add_field(name=f"Kills ({len(new_kills)})", value="\n".join(lines), inline=False)
+                            if new_deaths:
+                                lines = [
+                                    f"💀 Died to **{d.get('Killer',{}).get('Name','?')}** · {d.get('TotalVictimKillFame',0):,} fame"
+                                    for d in new_deaths[:3]
+                                ]
+                                e.add_field(name=f"Deaths ({len(new_deaths)})", value="\n".join(lines), inline=False)
+                            await ch.send(embed=e)
+
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute(
+                            "UPDATE albion_watch SET last_check=? WHERE id=?", (now_iso, wid)
+                        )
+                        await db.commit()
+                except Exception:
+                    pass
+
+        except Exception as ex:
+            print(f"[ALBION WATCH] Error: {ex}")
+
+        await asyncio.sleep(3600)  # раз в час
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  STYLOMETRY ENGINE — Распознавание твинков по стилю письма
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+import unicodedata as _ud
+
+MIN_MSGS_FOR_COMPARE = 40
+TWIN_THRESHOLD       = 72
+SAVE_EVERY           = 10
+MAX_COMPARE_USERS    = 200
+
+_style_cache: dict = {}
+
+_STOP_WORDS = {
+    "и","в","не","на","что","я","с","как","а","то","он","но","за","по",
+    "к","же","из","у","от","да","ну","так","это","все","ещё","уже","ты",
+    "the","a","an","is","are","was","were","i","you","he","she","it","we",
+    "they","in","on","at","to","of","and","or","but","not","this","that"
+}
+
+_COMMON_RU = {
+    "привет","пока","как","дела","хорошо","плохо","нет","да","ладно",
+    "окей","ок","спасибо","пожалуйста","конечно","понял","понятно",
+    "вообще","короче","кстати","кароч","блин","слушай","смотри","думаю",
+    "сейчас","потом","завтра","сегодня","всё","ничего","много","мало",
+    "можно","нельзя","надо","нужно","хочу","буду","могу","пойду","знаю"
+}
+
+
+def _has_emoji(text: str) -> bool:
+    """Проверяет наличие emoji в тексте"""
+    for ch in text:
+        cat = _ud.category(ch)
+        cp  = ord(ch)
+        if cat in ("So", "Sm") or 0x1F300 <= cp <= 0x1FAFF:
+            return True
+    return False
+
+
+class StyleProfile:
+    def __init__(self):
+        self.msg_count       = 0
+        self.total_word_len  = 0.0
+        self.total_msg_len   = 0
+        self.punct_msgs      = 0
+        self.caps_msgs       = 0
+        self.emoji_msgs      = 0
+        self.word_freq: dict = {}
+        self.sentence_enders: dict = {}
+        self.active_hours: dict    = {}
+
+    def update(self, text: str, hour: int):
+        if not text or len(text) < 2:
+            return
+        self.msg_count += 1
+        words = text.lower().split()
+        if not words:
+            return
+        wlens = [len(w.strip(".,!?;:\"'()[]")) for w in words if len(w) > 1]
+        if wlens:
+            self.total_word_len += sum(wlens) / len(wlens)
+        self.total_msg_len += len(text)
+        last = text.rstrip()[-1] if text.rstrip() else ""
+        if last in ".!?":
+            self.punct_msgs += 1
+            self.sentence_enders[last] = self.sentence_enders.get(last, 0) + 1
+        else:
+            self.sentence_enders["none"] = self.sentence_enders.get("none", 0) + 1
+        letters = [c for c in text if c.isalpha()]
+        if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.6:
+            self.caps_msgs += 1
+        if _has_emoji(text):
+            self.emoji_msgs += 1
+        import re as _re2
+        for word in words:
+            w = _re2.sub(r"[^а-яёa-z]", "", word.lower())
+            if len(w) >= 3 and w not in _STOP_WORDS:
+                self.word_freq[w] = self.word_freq.get(w, 0) + 1
+        self.active_hours[str(hour)] = self.active_hours.get(str(hour), 0) + 1
+
+    def get_typos(self) -> set:
+        return {w for w, cnt in self.word_freq.items()
+                if cnt <= 2 and len(w) >= 4 and w not in _COMMON_RU}
+
+    def get_top_words(self, n: int = 30) -> set:
+        return {w for w, _ in sorted(self.word_freq.items(), key=lambda x: x[1], reverse=True)[:n]}
+
+    def to_dict(self) -> dict:
+        n = max(self.msg_count, 1)
+        return {
+            "msg_count":       self.msg_count,
+            "avg_word_len":    round(self.total_word_len / n, 3),
+            "avg_msg_len":     round(self.total_msg_len  / n, 1),
+            "punct_ratio":     round(self.punct_msgs / n, 3),
+            "caps_ratio":      round(self.caps_msgs  / n, 3),
+            "emoji_ratio":     round(self.emoji_msgs / n, 3),
+            "no_punct_ratio":  round(1 - self.punct_msgs / n, 3),
+            "common_words":    json.dumps(list(self.get_top_words(30))),
+            "common_typos":    json.dumps(list(self.get_typos())),
+            "sentence_enders": json.dumps(self.sentence_enders),
+            "active_hours":    json.dumps(self.active_hours),
+        }
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b: return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _scalar_sim(a: float, b: float, tol: float) -> float:
+    if tol == 0: return 1.0 if a == b else 0.0
+    return max(0.0, 1.0 - abs(a - b) / tol)
+
+
+def compare_profiles(p1: dict, p2: dict):
+    score = 0.0; total = 0.0; reasons = []
+
+    def add(w, sim, label):
+        nonlocal score, total
+        total += w; score += w * sim
+        if sim >= 0.7: reasons.append(f"{label} ({sim:.0%})")
+
+    add(10,  _scalar_sim(p1["avg_word_len"],   p2["avg_word_len"],   0.5),  "Длина слов")
+    add(10,  _scalar_sim(p1["avg_msg_len"],    p2["avg_msg_len"],    20),   "Длина сообщений")
+    add(15,  _scalar_sim(p1["no_punct_ratio"], p2["no_punct_ratio"], 0.15), "Отсутствие пунктуации")
+    add(10,  _scalar_sim(p1["caps_ratio"],     p2["caps_ratio"],     0.1),  "Использование caps")
+    add(10,  _scalar_sim(p1["emoji_ratio"],    p2["emoji_ratio"],    0.1),  "Использование emoji")
+
+    try:
+        w1 = set(json.loads(p1.get("common_words", "[]")))
+        w2 = set(json.loads(p2.get("common_words", "[]")))
+        add(20, _jaccard(w1, w2), "Общий словарный запас")
+    except Exception:
+        pass
+
+    try:
+        t1 = set(json.loads(p1.get("common_typos", "[]")))
+        t2 = set(json.loads(p2.get("common_typos", "[]")))
+        if t1 and t2:
+            sim = _jaccard(t1, t2)
+            common = t1 & t2
+            if len(common) >= 3:
+                sim = min(1.0, sim * 1.3)
+                reasons.append("Одинаковые опечатки: " + ", ".join(list(common)[:5]))
+            add(30, sim, "Совпадение опечаток")
+    except Exception:
+        pass
+
+    try:
+        e1 = json.loads(p1.get("sentence_enders", "{}"))
+        e2 = json.loads(p2.get("sentence_enders", "{}"))
+        keys = set(e1) | set(e2)
+        if keys:
+            s1 = sum(e1.values()) or 1; s2 = sum(e2.values()) or 1
+            diff = sum(abs(e1.get(k,0)/s1 - e2.get(k,0)/s2) for k in keys)
+            add(15, max(0.0, 1.0 - diff), "Паттерн пунктуации")
+    except Exception:
+        pass
+
+    try:
+        h1 = json.loads(p1.get("active_hours", "{}"))
+        h2 = json.loads(p2.get("active_hours", "{}"))
+        top1 = set(sorted(h1, key=h1.get, reverse=True)[:3])
+        top2 = set(sorted(h2, key=h2.get, reverse=True)[:3])
+        add(10, len(top1 & top2) / 3, "Одинаковые активные часы")
+    except Exception:
+        pass
+
+    return round(score / total * 100, 1) if total > 0 else 0.0, reasons
+
+
+async def update_style_profile(guild_id: int, user_id: int, message: discord.Message):
+    key = (guild_id, user_id)
+    if key not in _style_cache:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,emoji_ratio,"
+                "no_punct_ratio,common_words,common_typos,sentence_enders,active_hours "
+                "FROM style_profiles WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)
+            ) as c:
+                row = await c.fetchone()
+        sp = StyleProfile()
+        if row:
+            sp.msg_count       = row[0]
+            sp.total_word_len  = row[1] * row[0]
+            sp.total_msg_len   = int(row[2] * row[0])
+            sp.punct_msgs      = int(row[3] * row[0])
+            sp.caps_msgs       = int(row[4] * row[0])
+            sp.emoji_msgs      = int(row[5] * row[0])
+            try:
+                for w in json.loads(row[7] or "[]"): sp.word_freq[w] = sp.word_freq.get(w, 0) + 2
+                for w in json.loads(row[8] or "[]"): sp.word_freq[w] = sp.word_freq.get(w, 0) + 1
+                sp.sentence_enders = json.loads(row[9] or "{}")
+                sp.active_hours    = json.loads(row[10] or "{}")
+            except Exception:
+                pass
+        _style_cache[key] = sp
+
+    sp = _style_cache[key]
+    sp.update(message.content, datetime.datetime.utcnow().hour)
+
+    if sp.msg_count % SAVE_EVERY == 0:
+        await _save_style_profile(guild_id, user_id, sp)
+
+    if sp.msg_count == MIN_MSGS_FOR_COMPARE:
+        asyncio.create_task(_run_twin_check(message.guild, user_id, sp))
+
+
+async def _save_style_profile(guild_id: int, user_id: int, sp: StyleProfile):
+    d   = sp.to_dict()
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO style_profiles
+                (guild_id,user_id,msg_count,avg_word_len,avg_msg_len,
+                 punct_ratio,caps_ratio,emoji_ratio,no_punct_ratio,
+                 common_words,common_typos,sentence_enders,active_hours,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                msg_count=excluded.msg_count, avg_word_len=excluded.avg_word_len,
+                avg_msg_len=excluded.avg_msg_len, punct_ratio=excluded.punct_ratio,
+                caps_ratio=excluded.caps_ratio, emoji_ratio=excluded.emoji_ratio,
+                no_punct_ratio=excluded.no_punct_ratio, common_words=excluded.common_words,
+                common_typos=excluded.common_typos, sentence_enders=excluded.sentence_enders,
+                active_hours=excluded.active_hours, updated_at=excluded.updated_at
+        """, (guild_id, user_id,
+              d["msg_count"], d["avg_word_len"], d["avg_msg_len"],
+              d["punct_ratio"], d["caps_ratio"], d["emoji_ratio"], d["no_punct_ratio"],
+              d["common_words"], d["common_typos"], d["sentence_enders"], d["active_hours"], now))
+        await db.commit()
+
+
+async def _run_twin_check(guild: discord.Guild, target_uid: int, target_sp: StyleProfile):
+    gid = guild.id
+    tp  = target_sp.to_dict()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT user_id,msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,
+                   emoji_ratio,no_punct_ratio,common_words,common_typos,sentence_enders,active_hours
+            FROM style_profiles
+            WHERE guild_id=? AND user_id!=? AND msg_count>=? LIMIT ?
+        """, (gid, target_uid, MIN_MSGS_FOR_COMPARE, MAX_COMPARE_USERS)) as c:
+            rows = await c.fetchall()
+
+    cols = ["user_id","msg_count","avg_word_len","avg_msg_len","punct_ratio","caps_ratio",
+            "emoji_ratio","no_punct_ratio","common_words","common_typos","sentence_enders","active_hours"]
+
+    best_score = 0.0; best_uid = None; best_reasons = []
+    for row in rows:
+        p   = dict(zip(cols, row))
+        uid = p["user_id"]
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT id FROM twin_links
+                WHERE guild_id=? AND ((user_a=? AND user_b=?) OR (user_a=? AND user_b=?))
+                  AND (confirmed=1 OR false_positive=1)
+            """, (gid, target_uid, uid, uid, target_uid)) as c:
+                if await c.fetchone(): continue
+        score, reasons = compare_profiles(tp, p)
+        if score > best_score:
+            best_score = score; best_uid = uid; best_reasons = reasons
+
+    if best_score >= TWIN_THRESHOLD and best_uid:
+        await _create_twin_alert(guild, target_uid, best_uid, best_score, best_reasons)
+
+
+async def _create_twin_alert(guild: discord.Guild, user_a: int, user_b: int,
+                              score: float, reasons: list):
+    gid = guild.id
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            INSERT INTO twin_links (guild_id,user_a,user_b,similarity,reasons,detected_at)
+            VALUES (?,?,?,?,?,?)
+            ON CONFLICT DO NOTHING
+        """, (gid, min(user_a,user_b), max(user_a,user_b), score, json.dumps(reasons), now))
+        await db.commit()
+        link_id = cur.lastrowid or 0
+
+    ch = await get_log_ch(guild)
+    if not ch: return
+
+    m_a = guild.get_member(user_a); m_b = guild.get_member(user_b)
+    na  = m_a.display_name if m_a else str(user_a)
+    nb  = m_b.display_name if m_b else str(user_b)
+
+    color = 0xED4245 if score >= 85 else 0xFEE75C
+    e = discord.Embed(color=color, timestamp=datetime.datetime.utcnow())
+    e.set_author(name="Возможный твинк-аккаунт")
+    e.add_field(name="Участник A", value=f"{m_a.mention if m_a else user_a} (`{na}`)", inline=True)
+    e.add_field(name="Участник B", value=f"{m_b.mention if m_b else user_b} (`{nb}`)", inline=True)
+    e.add_field(name="Схожесть",   value=f"**{score}/100**",                           inline=True)
+    if reasons:
+        e.add_field(name="Совпадающие признаки",
+                    value="\n".join(f"• {r}" for r in reasons[:6]), inline=False)
+    e.add_field(name="Это предположение, не доказательство",
+                value="Подтверди или отклони ниже:", inline=False)
+    e.set_footer(text=f"Link ID: #{link_id} · Witness Stylometry")
+
+    await ch.send(embed=e, view=TwinConfirmView(link_id, user_a, user_b))
+
+
+class TwinConfirmView(discord.ui.View):
+    def __init__(self, link_id, user_a, user_b):
+        super().__init__(timeout=None)
+        self.link_id = link_id
+        self.user_a  = user_a
+        self.user_b  = user_b
+
+    @discord.ui.button(label="Подтвердить твинк", style=discord.ButtonStyle.danger)
+    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("Нет прав.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE twin_links SET confirmed=1,confirmed_by=? WHERE id=?",
+                             (interaction.user.id, self.link_id))
+            await db.commit()
+        for item in self.children: item.disabled = True
+        await interaction.response.edit_message(
+            content=f"Подтверждено как твинк · {interaction.user.mention}", view=self)
+
+    @discord.ui.button(label="Ложное срабатывание", style=discord.ButtonStyle.secondary)
+    async def fp_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.manage_messages:
+            return await interaction.response.send_message("Нет прав.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE twin_links SET false_positive=1,confirmed_by=? WHERE id=?",
+                             (interaction.user.id, self.link_id))
+            await db.commit()
+        for item in self.children: item.disabled = True
+        await interaction.response.edit_message(
+            content=f"Отклонено как ложное · {interaction.user.mention}", view=self)
+
+    @discord.ui.button(label="Подробнее", style=discord.ButtonStyle.primary)
+    async def details_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        gid = interaction.guild_id
+        e   = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+        e.set_author(name="Детальное сравнение профилей")
+        for uid in [self.user_a, self.user_b]:
+            m  = interaction.guild.get_member(uid)
+            nm = m.display_name if m else str(uid)
+            sp = _style_cache.get((gid, uid))
+            if sp:
+                d = sp.to_dict()
+                e.add_field(name=nm, value=(
+                    f"Сообщений: **{d['msg_count']}**\n"
+                    f"Ср. длина: **{d['avg_msg_len']:.0f}**\n"
+                    f"Без пунктуации: **{d['no_punct_ratio']:.0%}**\n"
+                    f"Опечатки: `{'`, `'.join(list(sp.get_typos())[:4]) or '—'}`"
+                ), inline=True)
+            else:
+                e.add_field(name=nm, value="Нет данных в кэше", inline=True)
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+@bot.tree.command(name="twincheck",
+                  description="Сравнить двух участников по стилю письма")
+@app_commands.describe(member1="Первый участник", member2="Второй участник")
+async def twincheck_cmd(interaction: discord.Interaction,
+                        member1: discord.Member, member2: discord.Member):
+    if not interaction.user.guild_permissions.manage_messages:
+        return await interaction.response.send_message("Нет прав.", ephemeral=True)
+    if member1.id == member2.id:
+        return await interaction.response.send_message("Укажи двух разных участников.", ephemeral=True)
+    gid = interaction.guild_id
+
+    profiles = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        for uid in [member1.id, member2.id]:
+            async with db.execute(
+                "SELECT msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,"
+                "emoji_ratio,no_punct_ratio,common_words,common_typos,sentence_enders,active_hours "
+                "FROM style_profiles WHERE guild_id=? AND user_id=?", (gid, uid)
+            ) as c:
+                row = await c.fetchone()
+            if row:
+                cols = ["msg_count","avg_word_len","avg_msg_len","punct_ratio","caps_ratio",
+                        "emoji_ratio","no_punct_ratio","common_words","common_typos",
+                        "sentence_enders","active_hours"]
+                profiles[uid] = dict(zip(cols, row))
+    for uid in [member1.id, member2.id]:
+        sp = _style_cache.get((gid, uid))
+        if sp and uid not in profiles:
+            profiles[uid] = sp.to_dict()
+
+    e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+    e.set_author(name=f"Twincheck — {member1.display_name} vs {member2.display_name}")
+
+    missing = [m.display_name for m in [member1, member2]
+               if m.id not in profiles or profiles[m.id].get("msg_count", 0) < MIN_MSGS_FOR_COMPARE]
+    if missing:
+        e.color  = 0xFEE75C
+        e.description = (
+            f"Недостаточно данных: **{', '.join(missing)}**\n"
+            f"Нужно минимум **{MIN_MSGS_FOR_COMPARE}** сообщений."
+        )
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+
+    score, reasons = compare_profiles(profiles[member1.id], profiles[member2.id])
+    color = 0xED4245 if score >= TWIN_THRESHOLD else 0xFEE75C if score >= 50 else 0x57F287
+    verdict = (
+        "Высокая вероятность твинка" if score >= TWIN_THRESHOLD else
+        "Умеренное сходство"         if score >= 50 else
+        "Разные стили письма"
+    )
+    e.color = color
+    e.add_field(name="Схожесть", value=f"**{score}/100**", inline=True)
+    e.add_field(name="Вердикт",  value=verdict,             inline=True)
+    p1 = profiles[member1.id]; p2 = profiles[member2.id]
+    e.add_field(name=member1.display_name, value=(
+        f"Сообщений: **{p1['msg_count']}**\n"
+        f"Ср. длина: **{p1['avg_msg_len']:.0f}**\n"
+        f"Без пунктуации: **{p1['no_punct_ratio']:.0%}**"
+    ), inline=True)
+    e.add_field(name=member2.display_name, value=(
+        f"Сообщений: **{p2['msg_count']}**\n"
+        f"Ср. длина: **{p2['avg_msg_len']:.0f}**\n"
+        f"Без пунктуации: **{p2['no_punct_ratio']:.0%}**"
+    ), inline=True)
+    if reasons:
+        e.add_field(name="Совпадающие признаки",
+                    value="\n".join(f"• {r}" for r in reasons), inline=False)
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+@bot.tree.command(name="twinlinks",
+                  description="Список найденных твинк-связей")
+@app_commands.describe(status="all / confirmed / pending / false_positive")
+async def twinlinks_cmd(interaction: discord.Interaction, status: str = "pending"):
+    if not interaction.user.guild_permissions.manage_messages:
+        return await interaction.response.send_message("Нет прав.", ephemeral=True)
+    gid = interaction.guild_id
+    where = {"all":"","confirmed":"AND confirmed=1",
+             "pending":"AND confirmed=0 AND false_positive=0",
+             "false_positive":"AND false_positive=1"}.get(status, "AND confirmed=0 AND false_positive=0")
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"SELECT id,user_a,user_b,similarity,reasons,confirmed,false_positive,detected_at "
+            f"FROM twin_links WHERE guild_id=? {where} ORDER BY similarity DESC LIMIT 20",
+            (gid,)
+        ) as c:
+            rows = await c.fetchall()
+    e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+    e.set_author(name=f"Twin Links — {status}")
+    if not rows:
+        e.description = "Нет записей."
+    else:
+        for lid, ua, ub, sim, r_json, conf, fp, det in rows:
+            ma = interaction.guild.get_member(ua); mb = interaction.guild.get_member(ub)
+            na = ma.display_name if ma else str(ua)
+            nb = mb.display_name if mb else str(ub)
+            icon = "Подтверждён" if conf else ("Ложное" if fp else "Ожидает")
+            try: rs = ", ".join(json.loads(r_json)[:3])
+            except Exception: rs = "—"
+            e.add_field(name=f"#{lid} · {na} ↔ {nb} · {sim:.0f}/100 · {icon}",
+                        value=f"{rs}\n*{det[:10]}*", inline=False)
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+@bot.tree.command(name="styleprofile",
+                  description="Стилометрический профиль участника")
+@app_commands.describe(member="Участник (пусто = ты)")
+async def styleprofile_cmd(interaction: discord.Interaction,
+                           member: discord.Member = None):
+    target = member or interaction.user
+    gid    = interaction.guild_id
+    if member and member != interaction.user and not interaction.user.guild_permissions.manage_messages:
+        return await interaction.response.send_message("Нет прав.", ephemeral=True)
+
+    sp = _style_cache.get((gid, target.id))
+    row_data = None
+    if not sp:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT msg_count,avg_msg_len,avg_word_len,no_punct_ratio,caps_ratio,"
+                "emoji_ratio,common_typos,active_hours FROM style_profiles "
+                "WHERE guild_id=? AND user_id=?", (gid, target.id)
+            ) as c:
+                row_data = await c.fetchone()
+
+    e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
+    e.set_author(name=f"Style Profile — {target.display_name}",
+                 icon_url=target.display_avatar.url)
+    e.set_thumbnail(url=target.display_avatar.url)
+
+    if sp:
+        d = sp.to_dict()
+        mc = d["msg_count"]
+        e.add_field(name="Сообщений",       value=f"**{mc}**",                  inline=True)
+        e.add_field(name="Ср. длина",        value=f"**{d['avg_msg_len']:.0f}**", inline=True)
+        e.add_field(name="Без пунктуации",   value=f"**{d['no_punct_ratio']:.0%}**", inline=True)
+        e.add_field(name="Caps",             value=f"**{d['caps_ratio']:.0%}**",  inline=True)
+        e.add_field(name="Emoji",            value=f"**{d['emoji_ratio']:.0%}**", inline=True)
+        hours  = sp.active_hours
+        peak   = max(hours, key=hours.get) if hours else "?"
+        e.add_field(name="Пик активности",   value=f"**{peak}:00 UTC**",          inline=True)
+        typos  = list(sp.get_typos())[:5]
+        if typos:
+            e.add_field(name="Характерные слова", value="`" + "`, `".join(typos) + "`", inline=False)
+        ready = min(mc / MIN_MSGS_FOR_COMPARE * 100, 100)
+        e.add_field(name="Готовность профиля",
+                    value=f"**{ready:.0f}%** (нужно {MIN_MSGS_FOR_COMPARE} сообщений)", inline=False)
+    elif row_data:
+        mc,aml,awl,npr,cr,er,typos_json,hours_json = row_data
+        try: typos = json.loads(typos_json)[:5]
+        except Exception: typos = []
+        try:
+            hrs  = json.loads(hours_json)
+            peak = max(hrs, key=hrs.get) if hrs else "?"
+        except Exception: peak = "?"
+        e.add_field(name="Сообщений",       value=f"**{mc}**",       inline=True)
+        e.add_field(name="Ср. длина",        value=f"**{aml:.0f}**",  inline=True)
+        e.add_field(name="Без пунктуации",   value=f"**{npr:.0%}**",  inline=True)
+        e.add_field(name="Caps",             value=f"**{cr:.0%}**",   inline=True)
+        e.add_field(name="Emoji",            value=f"**{er:.0%}**",   inline=True)
+        e.add_field(name="Пик активности",   value=f"**{peak}:00 UTC**", inline=True)
+        if typos:
+            e.add_field(name="Характерные слова", value="`" + "`, `".join(typos) + "`", inline=False)
+        ready = min(mc / MIN_MSGS_FOR_COMPARE * 100, 100)
+        e.add_field(name="Готовность профиля",
+                    value=f"**{ready:.0f}%** (нужно {MIN_MSGS_FOR_COMPARE} сообщений)", inline=False)
+    else:
+        e.description = (
+            f"Нет данных для **{target.display_name}**.\n"
+            f"Нужно минимум **{MIN_MSGS_FOR_COMPARE}** сообщений в канале."
+        )
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 
 if __name__ == "__main__":
