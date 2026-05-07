@@ -2486,10 +2486,8 @@ async def translate(interaction: discord.Interaction, text: str, to: str = "en")
 
 # ─── FREE GAME COMMANDS ───────────────────────────────────────
 
-@bot.tree.command(name="stats")
-@app_commands.describe(player="Ник игрока")
-@cooldown(5)
-async def albion_fetch(session, url: str) -> dict | list | None:
+
+async def albion_fetch(session, url: str):
     """Обёртка для Albion API запросов с семафором и таймаутом"""
     global _albion_api_semaphore
     if not _albion_api_semaphore:
@@ -2506,6 +2504,9 @@ async def albion_fetch(session, url: str) -> dict | list | None:
         return None
 
 
+@bot.tree.command(name="stats")
+@app_commands.describe(player="Ник игрока")
+@cooldown(5)
 async def stats(interaction: discord.Interaction, player: str):
     await interaction.response.defer()
     try:
