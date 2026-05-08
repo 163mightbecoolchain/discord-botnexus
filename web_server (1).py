@@ -507,6 +507,57 @@ async def api_twins(request):
         return web.json_response([])
 
 
+
+@require_auth
+async def api_channels(request):
+    """Список каналов сервера для dropdown"""
+    guild_id = int(request.match_info['guild_id'])
+    s = request['session']
+    bot = request.app['bot']
+    bot_guild = bot.get_guild(guild_id)
+    if not bot_guild:
+        return web.json_response([], status=200)
+    member = bot_guild.get_member(int(s['user_id']))
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    channels = [
+        {'id': str(c.id), 'name': c.name, 'type': str(c.type)}
+        for c in sorted(bot_guild.channels, key=lambda x: x.position)
+        if str(c.type) in ('text', 'category')
+    ]
+    roles = [
+        {'id': str(r.id), 'name': r.name}
+        for r in bot_guild.roles[1:]  # убираем @everyone
+    ]
+    return web.json_response({'channels': channels, 'roles': roles})
+
+
+@require_auth
+async def api_security_save(request):
+    """Сохраняет настройки security toggles"""
+    guild_id = int(request.match_info['guild_id'])
+    s = request['session']
+    bot = request.app['bot']
+    bot_guild = bot.get_guild(guild_id)
+    if not bot_guild:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = bot_guild.get_member(int(s['user_id']))
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    try:
+        data = await request.json()
+        settings_json = json.dumps(data)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO security_settings (guild_id, settings)
+                VALUES (?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET settings=excluded.settings
+            """, (guild_id, settings_json))
+            await db.commit()
+        return web.json_response({'ok': True})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
 # ── App factory ───────────────────────────────────────────────
 
 @web.middleware
@@ -554,6 +605,8 @@ def create_app(bot) -> web.Application:
     app.router.add_get('/api/guild/{guild_id}/modlog',            api_modlog)
     app.router.add_get('/api/guild/{guild_id}/invites',           api_invites)
     app.router.add_get('/api/guild/{guild_id}/twins',             api_twins)
+    app.router.add_get('/api/guild/{guild_id}/channels',          api_channels)
+    app.router.add_post('/api/guild/{guild_id}/security',         api_security_save)
 
     return app
 
