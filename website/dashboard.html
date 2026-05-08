@@ -302,7 +302,7 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
     </div>
     <div class="topbar-right">
       <a href="__INVITE_URL__" class="btn btn-accent btn-sm" target="_blank">➕ Add to Server</a>
-      <a href="__BOT_API_URL__/logout" class="btn btn-outline btn-sm">Logout</a>
+      <a href="#" onclick="logout()" class="btn btn-outline btn-sm">Logout</a>
     </div>
   </header>
 
@@ -866,12 +866,51 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
 const API = '__BOT_API_URL__';
 let currentGuild = null;
 let userData = null;
+let authToken = null;
+
+// ── Auth helpers ──────────────────────────────────────────────
+function getToken(){
+  return authToken || localStorage.getItem('ws_token');
+}
+
+function authHeaders(){
+  const t = getToken();
+  return t ? {'Authorization': 'Bearer '+t, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
+}
+
+async function apiFetch(path, opts={}){
+  const t = getToken();
+  const headers = opts.headers || {};
+  if(t) headers['Authorization'] = 'Bearer '+t;
+  return fetch(API+path, {...opts, headers, credentials:'include'});
+}
 
 // ── Init ──────────────────────────────────────────────────────
+function logout(){
+  localStorage.removeItem('ws_token');
+  authToken = null;
+  window.location.href = '__BOT_API_URL__/logout';
+}
+
 async function init(){
+  // Читаем токен из URL если есть (после OAuth2 redirect)
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  if(urlToken){
+    authToken = urlToken;
+    localStorage.setItem('ws_token', urlToken);
+    // Убираем токен из URL
+    window.history.replaceState({}, '', '/dashboard');
+  } else {
+    authToken = localStorage.getItem('ws_token');
+  }
+
   try{
-    const r = await fetch(API+'/api/me', {credentials:'include'});
-    if(!r.ok){ showPage('login'); return; }
+    const r = await apiFetch('/api/me');
+    if(!r.ok){
+      localStorage.removeItem('ws_token');
+      showPage('login'); return;
+    }
     userData = await r.json();
     document.getElementById('userName').textContent = userData.username;
     document.getElementById('userTag').textContent = '#'+userData.discriminator;
@@ -889,7 +928,7 @@ async function init(){
 
 async function loadStats(){
   try{
-    const r = await fetch(API+'/api/stats', {credentials:'include'});
+    const r = await apiFetch('/api/stats');
     const d = await r.json();
     document.getElementById('ov-ping').textContent = d.latency ? d.latency+'ms' : '—';
     document.getElementById('ov-guilds').textContent = d.user_guilds ?? '—';
@@ -921,7 +960,7 @@ function showPage(name){
 async function loadGuilds(){
   const list = document.getElementById('guildList');
   try{
-    const r = await fetch(API+'/api/guilds', {credentials:'include'});
+    const r = await apiFetch('/api/guilds');
     const guilds = await r.json();
     if(!guilds.length){
       list.innerHTML = `<div class="empty" style="grid-column:1/-1">
@@ -968,7 +1007,7 @@ async function loadGeneralSettings(){
   document.getElementById('generalContent').style.display='block';
   try{
     // Загружаем настройки
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`);
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`);
     const s = await r.json();
     document.getElementById('cfg-lang').value = s.lang ?? 'ru';
     const tickTog = document.getElementById('tog-tickets');
@@ -981,7 +1020,7 @@ async function loadGeneralSettings(){
 async function loadChannels(){
   if(!currentGuild) return;
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/channels`);
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/channels`);
     const d = await r.json();
     const textChannels = (d.channels||[]).filter(c=>c.type==='text');
     const selects = ['cfg-log-channel','cfg-ticket-cat','cfg-birthday-ch','cfg-suggestion-ch'];
@@ -1005,9 +1044,8 @@ async function saveSettings(){
     tickets_enabled: document.getElementById('tog-tickets').classList.contains('on') ? 1 : 0,
   };
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      credentials:'include', body: JSON.stringify(payload)
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`, {
+      method:'POST', body: JSON.stringify(payload)
     });
     if(r.ok) showToast('✓ Settings saved');
     else showToast('Failed to save', true);
@@ -1023,7 +1061,7 @@ function toggleSetting(key){
 async function loadModlog(){
   if(!currentGuild) return;
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/modlog`);
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/modlog`);
     const rows = await r.json();
     const tbody = document.getElementById('modlogTable');
     if(!rows.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No actions yet</td></tr>'; return; }
@@ -1043,7 +1081,7 @@ async function loadModlog(){
 async function loadInvites(){
   if(!currentGuild) return;
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/invites`);
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites`);
     const rows = await r.json();
     const tbody = document.getElementById('inviteTable');
     if(!rows.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No invite data</td></tr>'; return; }
@@ -1062,7 +1100,7 @@ async function loadInvites(){
 async function loadTwins(){
   if(!currentGuild) return;
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/twins`);
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/twins`);
     const rows = await r.json();
     const tbody = document.getElementById('twinsTable');
     if(!rows.length) return;
@@ -1088,7 +1126,7 @@ async function saveSecurity(){
     if(el) payload[id] = el.classList.contains('on');
   });
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/security`,{
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/security`,{
       method:'POST', headers:{'Content-Type':'application/json'},
       credentials:'include', body:JSON.stringify(payload)
     });
@@ -1103,9 +1141,8 @@ async function saveQuarantine(){
   const age    = document.getElementById('cfg-quarantine-age')?.value;
   const hours  = document.getElementById('cfg-quarantine-hours')?.value;
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`,{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      credentials:'include',
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`,{
+      method:'POST',
       body: JSON.stringify({quarantine_role:role, quarantine_age:age, quarantine_hours:hours})
     });
     if(r.ok) showToast('✓ Quarantine saved');
@@ -1122,9 +1159,8 @@ async function saveWelcome(){
     goodbye_msg:     document.getElementById('cfg-goodbye-msg')?.value,
   };
   try{
-    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`,{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      credentials:'include', body: JSON.stringify(payload)
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`,{
+      method:'POST', body: JSON.stringify(payload)
     });
     if(r.ok) showToast('✓ Welcome saved');
     else showToast('Failed', true);
