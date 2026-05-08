@@ -344,23 +344,46 @@ async def api_guild_settings_get(request):
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+            # guild_settings
             async with db.execute(
                 "SELECT * FROM guild_settings WHERE guild_id=?", (guild_id,)
             ) as c:
                 row = await c.fetchone()
-                if row:
-                    cols = [d[0] for d in c.description]
-                    return web.json_response(dict(zip(cols, row)))
+                gs = dict(zip([d[0] for d in c.description], row)) if row else {}
 
-            # Получаем security settings
+            # security_settings — лог-канал и настройки безопасности
             async with db.execute(
-                "SELECT settings FROM security_settings WHERE guild_id=?", (guild_id,)
+                "SELECT log_channel, settings FROM security_settings WHERE guild_id=?",
+                (guild_id,)
             ) as c:
                 sec_row = await c.fetchone()
 
-        result = {'guild_id': guild_id, 'lang': 'ru', 'tickets_enabled': 1}
-        if sec_row:
-            result['security'] = json.loads(sec_row[0] or '{}')
+            # punishment_settings
+            async with db.execute(
+                "SELECT * FROM punishment_settings WHERE guild_id=?", (guild_id,)
+            ) as c:
+                prow = await c.fetchone()
+                ps = dict(zip([d[0] for d in c.description], prow)) if prow else {}
+
+        result = {
+            'guild_id':         guild_id,
+            'lang':             gs.get('lang', 'ru'),
+            'tickets_enabled':  gs.get('tickets_enabled', 1),
+            'lockdown':         gs.get('lockdown', 0),
+            'starboard_channel': gs.get('starboard_channel', 0),
+            'starboard_threshold': gs.get('starboard_threshold', 3),
+            'suggestion_channel': gs.get('suggestion_channel', 0),
+            'ticket_category':  gs.get('ticket_category', 0),
+            'birthday_channel': gs.get('birthday_channel', 0),
+            # Security
+            'log_channel':      sec_row[0] if sec_row else 0,
+            'security':         json.loads(sec_row[1] or '{}') if sec_row else {},
+            # Punishments
+            'warn2_action':     ps.get('warn2_action', 'mute_1h'),
+            'warn3_action':     ps.get('warn3_action', 'mute_24h'),
+            'warn4_action':     ps.get('warn4_action', 'kick'),
+            'warn5_action':     ps.get('warn5_action', 'ban'),
+        }
         return web.json_response(result)
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
