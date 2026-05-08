@@ -231,9 +231,10 @@ async def handle_callback(request):
 
     if WEBSITE_URL:
         # Cross-domain: передаём токен через URL параметр
-        # Сайт сохранит его в localStorage
         import urllib.parse
-        redirect_url = f"{WEBSITE_URL}/dashboard?token={urllib.parse.quote(token)}"
+        # Убеждаемся что WEBSITE_URL начинается с https://
+        base = WEBSITE_URL if WEBSITE_URL.startswith('http') else f'https://{WEBSITE_URL}'
+        redirect_url = f"{base}/dashboard?token={urllib.parse.quote(token)}"
         raise web.HTTPFound(redirect_url)
     else:
         # Тот же домен: cookie работает нормально
@@ -574,9 +575,8 @@ async def api_security_save(request):
 @web.middleware
 async def cors_middleware(request: web.Request, handler):
     """CORS — разрешает запросы с сайта на отдельном домене"""
-    # Preflight OPTIONS запрос
     if request.method == "OPTIONS":
-        resp = web.Response()
+        resp = web.Response(status=200)
     else:
         try:
             resp = await handler(request)
@@ -584,13 +584,22 @@ async def cors_middleware(request: web.Request, handler):
             raise
 
     origin = request.headers.get("Origin", "")
-    allowed = [SITE_URL, WEBSITE_URL] if WEBSITE_URL else [SITE_URL]
 
-    if origin in allowed or not origin:
+    # Разрешаем Railway домены и заданные URL
+    allowed_origins = [SITE_URL, WEBSITE_URL]
+    is_allowed = (
+        not origin or
+        origin in allowed_origins or
+        origin.endswith('.railway.app') or
+        origin.endswith('.up.railway.app')
+    )
+
+    if is_allowed:
         resp.headers["Access-Control-Allow-Origin"]      = origin or "*"
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Allow-Methods"]     = "GET, POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"]     = "Content-Type, Cookie"
+        resp.headers["Access-Control-Allow-Headers"]     = "Content-Type, Authorization, Cookie"
+        resp.headers["Access-Control-Max-Age"]           = "86400"
 
     return resp
 
@@ -606,6 +615,7 @@ def create_app(bot) -> web.Application:
     app.router.add_get('/callback',    handle_callback)
     app.router.add_get('/logout',      handle_logout)
     app.router.add_get('/health',      api_stats)
+    app.router.add_route('OPTIONS', '/api/{tail:.*}', lambda r: web.Response(status=200))
 
     # API
     app.router.add_get('/api/stats',                              api_stats)
