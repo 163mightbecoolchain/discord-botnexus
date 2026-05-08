@@ -601,6 +601,10 @@ async def cors_middleware(request: web.Request, handler):
         resp.headers["Access-Control-Allow-Headers"]     = "Content-Type, Authorization, Cookie"
         resp.headers["Access-Control-Max-Age"]           = "86400"
 
+    # Убираем CSP который блокирует eval (нужен для динамического JS)
+    if 'Content-Security-Policy' in resp.headers:
+        del resp.headers['Content-Security-Policy']
+
     return resp
 
 
