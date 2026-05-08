@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Witness</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080B10;--surface:#0E1318;--surface2:#131920;
+  --border:#1C2330;--border2:#242d3d;
+  --accent:#00E5FF;--accent2:#FF6B35;--gold:#FFD166;
+  --text:#E8EDF5;--muted:#5A6478;--muted2:#8896aa;
+  --success:#57F287;--danger:#ED4245;--warning:#FEE75C;
+  --premium:#00E5FF;--security:#FF6B35;--free:#57F287;
+  --sidebar:220px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;display:flex;min-height:100vh}
+
+/* ── SIDEBAR ── */
+.sidebar{
+  width:var(--sidebar);min-height:100vh;
+  background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  position:fixed;left:0;top:0;
+  z-index:50;
+}
+.sidebar-logo{
+  padding:1.5rem;border-bottom:1px solid var(--border);
+  font-size:1.2rem;font-weight:800;color:var(--accent);
+  display:flex;align-items:center;gap:.5rem;
+  text-decoration:none;
+}
+.sidebar-logo span{color:var(--text)}
+.sidebar-section{padding:.75rem 1rem .25rem;font-size:.65rem;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--muted);
+  font-family:'Space Mono',monospace;}
+.sidebar-nav{flex:1;padding:.5rem 0}
+.nav-item{
+  display:flex;align-items:center;gap:.75rem;
+  padding:.65rem 1.5rem;color:var(--muted);
+  text-decoration:none;font-size:.9rem;font-weight:600;
+  transition:all .15s;cursor:pointer;
+  border-left:2px solid transparent;
+}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.03);border-left-color:var(--border2)}
+.nav-item.active{color:var(--accent);background:rgba(0,229,255,.06);border-left-color:var(--accent)}
+.nav-item .icon{width:18px;text-align:center;font-size:1rem}
+.sidebar-user{
+  padding:1rem 1.5rem;border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:.75rem;
+}
+.user-avatar{width:32px;height:32px;border-radius:50%;background:var(--border2)}
+.user-name{font-size:.85rem;font-weight:600}
+.user-tag{font-size:.75rem;color:var(--muted);font-family:'Space Mono',monospace}
+
+/* ── MAIN ── */
+.main{margin-left:var(--sidebar);flex:1;display:flex;flex-direction:column}
+.topbar{
+  height:60px;background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 2rem;position:sticky;top:0;z-index:40;
+}
+.topbar-left{display:flex;align-items:center;gap:1rem}
+.breadcrumb{display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:var(--muted)}
+.breadcrumb .sep{color:var(--border2)}
+.breadcrumb .current{color:var(--text);font-weight:600}
+.guild-selector{
+  display:flex;align-items:center;gap:.5rem;
+  background:var(--surface2);border:1px solid var(--border);
+  padding:.4rem .75rem;border-radius:8px;cursor:pointer;
+  font-size:.85rem;font-weight:600;transition:border-color .2s;
+}
+.guild-selector:hover{border-color:var(--accent)}
+.guild-icon{width:22px;height:22px;border-radius:50%;background:var(--border2)}
+.topbar-right{display:flex;align-items:center;gap:1rem}
+.btn{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.5rem 1rem;border-radius:6px;font-family:'Syne',sans-serif;
+  font-weight:700;font-size:.85rem;text-decoration:none;
+  transition:all .15s;cursor:pointer;border:none;
+}
+.btn-sm{padding:.35rem .75rem;font-size:.8rem}
+.btn-accent{background:var(--accent);color:#000}
+.btn-accent:hover{background:#00c8e0}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--muted)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.content{padding:2rem;flex:1}
+
+/* ── GUILD SWITCHER ── */
+#guildList{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+  gap:1rem;padding:2rem;
+}
+.guild-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:1.5rem;cursor:pointer;
+  transition:all .2s;display:flex;flex-direction:column;align-items:center;
+  gap:.75rem;text-align:center;
+}
+.guild-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.guild-card.active-server{border-color:var(--accent);background:rgba(0,229,255,.04)}
+.guild-card-icon{
+  width:56px;height:56px;border-radius:16px;
+  background:var(--border2);display:flex;align-items:center;justify-content:center;
+  font-size:1.5rem;overflow:hidden;
+}
+.guild-card-icon img{width:100%;height:100%;object-fit:cover}
+.guild-card-name{font-weight:700;font-size:.95rem}
+.guild-card-members{color:var(--muted);font-size:.8rem;font-family:'Space Mono',monospace}
+.guild-card-plan{
+  font-size:.7rem;padding:.2rem .6rem;border-radius:4px;
+  font-family:'Space Mono',monospace;font-weight:700;
+}
+
+/* ── SETTINGS PANELS ── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+.panel-header{
+  padding:1rem 1.5rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.panel-title{font-size:1rem;font-weight:700}
+.panel-desc{color:var(--muted);font-size:.8rem;margin-top:.1rem}
+.panel-body{padding:1.5rem}
+.form-row{
+  display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;
+  margin-bottom:1.5rem;
+}
+.form-row.full{grid-template-columns:1fr}
+.form-group label{
+  display:block;font-size:.8rem;font-weight:700;
+  color:var(--muted2);margin-bottom:.5rem;letter-spacing:.05em;text-transform:uppercase;
+}
+.form-control{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);padding:.6rem .9rem;border-radius:6px;
+  font-family:'Syne',sans-serif;font-size:.9rem;
+  transition:border-color .2s;outline:none;
+}
+.form-control:focus{border-color:var(--accent)}
+.form-control select{width:100%}
+select.form-control{appearance:none;cursor:pointer}
+.toggle-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:.9rem 0;border-bottom:1px solid var(--border);
+}
+.toggle-row:last-child{border-bottom:none}
+.toggle-info{}
+.toggle-label{font-size:.9rem;font-weight:600}
+.toggle-sub{font-size:.8rem;color:var(--muted);margin-top:.2rem}
+.toggle{
+  position:relative;width:42px;height:24px;
+  background:var(--border2);border-radius:100px;
+  cursor:pointer;transition:background .2s;flex-shrink:0;
+}
+.toggle.on{background:var(--accent)}
+.toggle::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:18px;height:18px;border-radius:50%;background:#fff;
+  transition:transform .2s;
+}
+.toggle.on::after{transform:translateX(18px)}
+
+/* ── STATS CARDS ── */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem}
+.stat-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:1.25rem;
+}
+.stat-card-label{font-size:.75rem;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.1em;font-family:'Space Mono',monospace;}
+.stat-card-value{font-size:2rem;font-weight:800;margin-top:.4rem;
+  font-family:'Space Mono',monospace;color:var(--accent);}
+.stat-card-sub{font-size:.8rem;color:var(--muted);margin-top:.25rem}
+
+/* ── MODLOG TABLE ── */
+.table-container{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;padding:.75rem 1rem;color:var(--muted);
+  font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;
+  border-bottom:1px solid var(--border);font-family:'Space Mono',monospace;}
+td{padding:.75rem 1rem;border-bottom:1px solid var(--border);color:var(--muted2)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
+.badge{
+  display:inline-block;font-size:.7rem;padding:.2rem .6rem;
+  border-radius:4px;font-family:'Space Mono',monospace;font-weight:700;
+}
+.badge-warn{background:rgba(254,231,92,.1);color:var(--warning)}
+.badge-ban{background:rgba(237,66,69,.1);color:var(--danger)}
+.badge-kick{background:rgba(255,107,53,.1);color:var(--accent2)}
+.badge-mute{background:rgba(0,229,255,.1);color:var(--accent)}
+
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:4rem 2rem;color:var(--muted)}
+.empty-icon{font-size:3rem;margin-bottom:1rem;display:block}
+.empty-title{font-size:1.1rem;font-weight:700;color:var(--text);margin-bottom:.5rem}
+.empty-desc{font-size:.9rem;line-height:1.6}
+
+/* ── TABS ── */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.5rem}
+.tab{
+  padding:.75rem 1.25rem;font-size:.85rem;font-weight:600;color:var(--muted);
+  cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;
+  margin-bottom:-1px;
+}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── NOTICE ── */
+.notice{
+  background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.2);
+  border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem;
+  display:flex;align-items:center;gap:.75rem;font-size:.9rem;
+}
+.notice.warn{background:rgba(254,231,92,.06);border-color:rgba(254,231,92,.2)}
+.notice.danger{background:rgba(237,66,69,.06);border-color:rgba(237,66,69,.2)}
+
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%)}
+  .main{margin-left:0}
+  .stats-row{grid-template-columns:1fr 1fr}
+  .form-row{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <a href="/" class="sidebar-logo">👁 <span>Witness</span></a>
+
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">Overview</div>
+    <a class="nav-item active" onclick="showPage('overview')">
+      <span class="icon">📊</span> Overview
+    </a>
+    <a class="nav-item" onclick="showPage('servers')">
+      <span class="icon">🏠</span> My Servers
+    </a>
+
+    <div class="sidebar-section">Server Settings</div>
+    <a class="nav-item" onclick="showPage('general')">
+      <span class="icon">⚙️</span> General
+    </a>
+    <a class="nav-item" onclick="showPage('security')">
+      <span class="icon">🛡️</span> Security
+    </a>
+    <a class="nav-item" onclick="showPage('logging')">
+      <span class="icon">📋</span> Logging
+    </a>
+    <a class="nav-item" onclick="showPage('moderation')">
+      <span class="icon">🔨</span> Moderation
+    </a>
+    <a class="nav-item" onclick="showPage('welcome')">
+      <span class="icon">👋</span> Welcome
+    </a>
+
+    <div class="sidebar-section">Tools</div>
+    <a class="nav-item" onclick="showPage('modlog')">
+      <span class="icon">📜</span> Mod Log
+    </a>
+    <a class="nav-item" onclick="showPage('invites')">
+      <span class="icon">🔗</span> Invites
+    </a>
+    <a class="nav-item" onclick="showPage('twins')">
+      <span class="icon">🧬</span> Twin Detection
+    </a>
+
+    <div class="sidebar-section">Subscription</div>
+    <a class="nav-item" onclick="showPage('billing')">
+      <span class="icon">💳</span> Billing
+    </a>
+  </nav>
+
+  <div class="sidebar-user" id="sidebarUser">
+    <div class="user-avatar" id="userAvatar"></div>
+    <div>
+      <div class="user-name" id="userName">Loading...</div>
+      <div class="user-tag" id="userTag">#0000</div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="guild-selector" onclick="showPage('servers')">
+        <div class="guild-icon" id="topbarIcon"></div>
+        <span id="topbarName">Select Server</span>
+        <span style="color:var(--muted)">▾</span>
+      </div>
+      <div class="breadcrumb">
+        <span class="sep">/</span>
+        <span class="current" id="breadcrumbPage">Overview</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a href="__INVITE_URL__" class="btn btn-accent btn-sm" target="_blank">➕ Add to Server</a>
+      <a href="/logout" class="btn btn-outline btn-sm">Logout</a>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- ── NOT LOGGED IN ── -->
+    <div id="page-login" style="display:none">
+      <div class="empty">
+        <span class="empty-icon">🔐</span>
+        <div class="empty-title">Login required</div>
+        <div class="empty-desc">Connect your Discord account to manage your servers.</div>
+        <a href="/login" class="btn btn-discord" style="margin-top:1.5rem">
+          Login with Discord
+        </a>
+      </div>
+    </div>
+
+    <!-- ── OVERVIEW ── -->
+    <div id="page-overview">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-card-label">Bot Latency</div>
+          <div class="stat-card-value" id="ov-ping">—</div>
+          <div class="stat-card-sub">milliseconds</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Your Servers</div>
+          <div class="stat-card-value" id="ov-guilds">—</div>
+          <div class="stat-card-sub">with Witness</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Commands</div>
+          <div class="stat-card-value">75</div>
+          <div class="stat-card-sub">available</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Status</div>
+          <div class="stat-card-value" style="color:var(--success);font-size:1.2rem" id="ov-status">● Online</div>
+          <div class="stat-card-sub">all systems</div>
+        </div>
+      </div>
+
+      <div class="notice">
+        👁 <span>Select a server from <b>My Servers</b> to configure it.</span>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Quick Actions</div>
+            <div class="panel-desc">Common tasks for your servers</div>
+          </div>
+        </div>
+        <div class="panel-body" style="display:flex;gap:1rem;flex-wrap:wrap">
+          <a href="__INVITE_URL__" class="btn btn-accent" target="_blank">➕ Add to new server</a>
+          <button class="btn btn-outline" onclick="showPage('servers')">🏠 Manage servers</button>
+          <a href="__SUPPORT_URL__" class="btn btn-outline" target="_blank">💬 Support</a>
+          <a href="https://top.gg/bot/__BOT_ID__/vote" class="btn btn-outline" target="_blank">⬆️ Vote on top.gg</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MY SERVERS ── -->
+    <div id="page-servers" style="display:none">
+      <h2 style="font-size:1.5rem;font-weight:800;margin-bottom:1.5rem">My Servers</h2>
+      <div id="guildList">
+        <div class="empty" style="grid-column:1/-1">
+          <span class="empty-icon">⏳</span>
+          <div class="empty-title">Loading servers...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── GENERAL SETTINGS ── -->
+    <div id="page-general" style="display:none">
+      <div id="noServerSelected" class="notice warn">
+        ⚠️ <span>Select a server from <b>My Servers</b> first.</span>
+      </div>
+      <div id="generalContent" style="display:none">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">General Settings</div>
+              <div class="panel-desc">Basic bot configuration for this server</div>
+            </div>
+            <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save Changes</button>
+          </div>
+          <div class="panel-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Bot Language</label>
+                <select class="form-control" id="cfg-lang">
+                  <option value="ru">🇷🇺 Russian</option>
+                  <option value="en">🇬🇧 English</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Log Channel</label>
+                <select class="form-control" id="cfg-log-channel">
+                  <option value="">None</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Ticket Category</label>
+                <select class="form-control" id="cfg-ticket-cat">
+                  <option value="">None</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Birthday Channel</label>
+                <select class="form-control" id="cfg-birthday-ch">
+                  <option value="">None</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row full">
+              <div class="form-group">
+                <label>Suggestion Channel</label>
+                <select class="form-control" id="cfg-suggestion-ch">
+                  <option value="">None</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="margin-top:1.5rem">
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <div class="toggle-label">Ticket System</div>
+                  <div class="toggle-sub">Allow members to open support tickets</div>
+                </div>
+                <div class="toggle" id="tog-tickets" onclick="toggleSetting('tickets')"></div>
+              </div>
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <div class="toggle-label">Birthday Announcements</div>
+                  <div class="toggle-sub">Announce member birthdays in the birthday channel</div>
+                </div>
+                <div class="toggle" id="tog-birthday" onclick="toggleSetting('birthday')"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SECURITY SETTINGS ── -->
+    <div id="page-security" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Security Modules</div>
+            <div class="panel-desc">Toggle individual logging and protection features</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save</button>
+        </div>
+        <div class="panel-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">📥 Member Join/Leave</div>
+              <div class="toggle-sub">Log when members join and leave</div>
+            </div>
+            <div class="toggle on" id="sec-join" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">🗑️ Message Delete</div>
+              <div class="toggle-sub">Log deleted messages with content</div>
+            </div>
+            <div class="toggle on" id="sec-msg_delete" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">✏️ Message Edit</div>
+              <div class="toggle-sub">Log edited messages with before/after</div>
+            </div>
+            <div class="toggle on" id="sec-msg_edit" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">🔒 Role Changes</div>
+              <div class="toggle-sub">Log role additions and removals</div>
+            </div>
+            <div class="toggle on" id="sec-role_change" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">✏️ Nickname Changes</div>
+              <div class="toggle-sub">Log nickname modifications</div>
+            </div>
+            <div class="toggle on" id="sec-nick_change" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">🔊 Voice Activity</div>
+              <div class="toggle-sub">Log voice channel joins/leaves/moves</div>
+            </div>
+            <div class="toggle on" id="sec-voice" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">🔗 Invites</div>
+              <div class="toggle-sub">Track invite usage and creation</div>
+            </div>
+            <div class="toggle on" id="sec-invites" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">🚨 Anti-Raid</div>
+              <div class="toggle-sub">Auto-kick on 8+ joins in 10 seconds</div>
+            </div>
+            <div class="toggle on" id="sec-anti_raid" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">📵 Anti-Spam</div>
+              <div class="toggle-sub">Auto-timeout on 6+ messages in 5 seconds</div>
+            </div>
+            <div class="toggle on" id="sec-anti_spam" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">⚠️ Suspicious Accounts</div>
+              <div class="toggle-sub">Alert when accounts under 7 days old join</div>
+            </div>
+            <div class="toggle on" id="sec-suspicious" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MOD LOG ── -->
+    <div id="page-modlog" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Moderation Log</div>
+            <div class="panel-desc">Recent moderation actions on this server</div>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Member</th>
+                <th>Moderator</th>
+                <th>Reason</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="modlogTable">
+              <tr><td colspan="5"><div class="empty"><span class="empty-icon">📜</span><div class="empty-title">No actions yet</div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── INVITES ── -->
+    <div id="page-invites" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Invite Tracking</div>
+            <div class="panel-desc">See who invited who, with notes</div>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Code</th><th>Created by</th><th>Uses</th><th>Last used</th><th>Note</th></tr>
+            </thead>
+            <tbody id="inviteTable">
+              <tr><td colspan="5"><div class="empty"><span class="empty-icon">🔗</span><div class="empty-title">No invite data</div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TWIN DETECTION ── -->
+    <div id="page-twins" style="display:none">
+      <div class="notice">
+        🧬 <span>Twin detection automatically runs when members reach 40+ messages. Alerts appear in your log channel.</span>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Detected Twin Links</div>
+            <div class="panel-desc">Possible alt accounts detected by stylometry analysis</div>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Member A</th><th>Member B</th><th>Similarity</th><th>Status</th><th>Detected</th></tr>
+            </thead>
+            <tbody id="twinsTable">
+              <tr><td colspan="5"><div class="empty"><span class="empty-icon">🧬</span><div class="empty-title">No twin links detected yet</div><div class="empty-desc">The system needs 40+ messages per member to analyze.</div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── BILLING ── -->
+    <div id="page-billing" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Subscription</div>
+            <div class="panel-desc">Manage your server plan</div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1.5rem">
+              <div style="font-size:.75rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace">Free</div>
+              <div style="font-size:2rem;font-weight:800;margin:.5rem 0;font-family:'Space Mono',monospace">€0</div>
+              <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">Albion · Games · Basic Security</p>
+              <button class="btn btn-outline" style="width:100%" disabled>Current Plan</button>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--accent);border-radius:10px;padding:1.5rem;position:relative">
+              <div style="font-size:.75rem;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace">Premium</div>
+              <div style="font-size:2rem;font-weight:800;margin:.5rem 0;font-family:'Space Mono',monospace">€2<span style="font-size:.9rem;color:var(--muted)">.99/mo</span></div>
+              <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">AI · Black Market · Craft · Giveaway</p>
+              <a href="https://buy.stripe.com/__PREMIUM_LINK__" class="btn btn-accent" style="width:100%;justify-content:center" target="_blank">Upgrade</a>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--security);border-radius:10px;padding:1.5rem">
+              <div style="font-size:.75rem;color:var(--security);letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace">Security</div>
+              <div style="font-size:2rem;font-weight:800;margin:.5rem 0;font-family:'Space Mono',monospace">€4<span style="font-size:.9rem;color:var(--muted)">.99/mo</span></div>
+              <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">Everything + Advanced -q commands</p>
+              <a href="https://buy.stripe.com/__SECURITY_LINK__" class="btn" style="width:100%;justify-content:center;background:var(--security);color:#fff" target="_blank">Upgrade</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<script>
+const API = '';
+let currentGuild = null;
+let userData = null;
+
+// ── Init ──────────────────────────────────────────────────────
+async function init(){
+  try{
+    const r = await fetch(API+'/api/me');
+    if(!r.ok){ showPage('login'); return; }
+    userData = await r.json();
+    document.getElementById('userName').textContent = userData.username;
+    document.getElementById('userTag').textContent = '#'+userData.discriminator;
+    if(userData.avatar){
+      const av = document.getElementById('userAvatar');
+      av.style.backgroundImage = `url(https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png)`;
+      av.style.backgroundSize = 'cover';
+    }
+    loadStats();
+    showPage('overview');
+  }catch(e){
+    showPage('login');
+  }
+}
+
+async function loadStats(){
+  try{
+    const r = await fetch(API+'/api/stats');
+    const d = await r.json();
+    document.getElementById('ov-ping').textContent = d.latency ? d.latency+'ms' : '—';
+    document.getElementById('ov-guilds').textContent = d.user_guilds ?? '—';
+  }catch(e){}
+}
+
+// ── Page routing ─────────────────────────────────────────────
+const pages = ['login','overview','servers','general','security','logging',
+               'moderation','welcome','modlog','invites','twins','billing'];
+
+function showPage(name){
+  pages.forEach(p=>{
+    const el = document.getElementById('page-'+p);
+    if(el) el.style.display = p===name ? 'block' : 'none';
+  });
+  document.getElementById('breadcrumbPage').textContent =
+    name.charAt(0).toUpperCase()+name.slice(1).replace(/-/g,' ');
+  document.querySelectorAll('.nav-item').forEach(el=>{
+    el.classList.toggle('active', el.getAttribute('onclick')?.includes(name));
+  });
+  if(name==='servers') loadGuilds();
+  if(name==='modlog')  loadModlog();
+  if(name==='invites') loadInvites();
+  if(name==='twins')   loadTwins();
+  if(name==='general' && currentGuild) loadGeneralSettings();
+}
+
+// ── Guild list ────────────────────────────────────────────────
+async function loadGuilds(){
+  const list = document.getElementById('guildList');
+  try{
+    const r = await fetch(API+'/api/guilds');
+    const guilds = await r.json();
+    if(!guilds.length){
+      list.innerHTML = `<div class="empty" style="grid-column:1/-1">
+        <span class="empty-icon">🤖</span>
+        <div class="empty-title">No servers found</div>
+        <div class="empty-desc">Add Witness to a server first.</div>
+        <a href="__INVITE_URL__" class="btn btn-accent" style="margin-top:1rem" target="_blank">Add to Server</a>
+      </div>`;
+      return;
+    }
+    list.innerHTML = guilds.map(g=>{
+      const icon = g.icon
+        ? `<img src="https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png" alt="">`
+        : g.name.charAt(0);
+      const planColor = {0:'var(--free)',1:'var(--premium)',2:'var(--security)'}[g.tier??0];
+      const planLabel = {0:'FREE',1:'PREMIUM',2:'SECURITY'}[g.tier??0];
+      return `<div class="guild-card ${currentGuild?.id===g.id?'active-server':''}" onclick="selectGuild(${JSON.stringify(g).replace(/"/g,'&quot;')})">
+        <div class="guild-card-icon">${icon}</div>
+        <div class="guild-card-name">${g.name}</div>
+        <div class="guild-card-members">${g.member_count?.toLocaleString()??'?'} members</div>
+        <span class="guild-card-plan" style="background:${planColor}18;color:${planColor}">${planLabel}</span>
+      </div>`;
+    }).join('');
+  }catch(e){
+    list.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-title">Failed to load servers</div></div>`;
+  }
+}
+
+function selectGuild(guild){
+  currentGuild = guild;
+  document.getElementById('topbarName').textContent = guild.name;
+  if(guild.icon){
+    const el = document.getElementById('topbarIcon');
+    el.style.backgroundImage = `url(https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png)`;
+    el.style.backgroundSize = 'cover';
+  }
+  showPage('general');
+}
+
+// ── General settings ──────────────────────────────────────────
+async function loadGeneralSettings(){
+  if(!currentGuild) return;
+  document.getElementById('noServerSelected').style.display='none';
+  document.getElementById('generalContent').style.display='block';
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`);
+    const s = await r.json();
+    document.getElementById('cfg-lang').value = s.lang ?? 'ru';
+    const tickTog = document.getElementById('tog-tickets');
+    if(s.tickets_enabled) tickTog.classList.add('on'); else tickTog.classList.remove('on');
+  }catch(e){}
+}
+
+async function saveSettings(){
+  if(!currentGuild) return;
+  const payload = {
+    lang: document.getElementById('cfg-lang').value,
+    tickets_enabled: document.getElementById('tog-tickets').classList.contains('on') ? 1 : 0,
+  };
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(r.ok) showToast('✓ Settings saved');
+    else showToast('Failed to save', true);
+  }catch(e){ showToast('Error', true) }
+}
+
+function toggleSetting(key){
+  const el = document.getElementById('tog-'+key);
+  if(el) el.classList.toggle('on');
+}
+
+// ── Mod log ───────────────────────────────────────────────────
+async function loadModlog(){
+  if(!currentGuild) return;
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/modlog`);
+    const rows = await r.json();
+    const tbody = document.getElementById('modlogTable');
+    if(!rows.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No actions yet</td></tr>'; return; }
+    const badgeClass = {WARN:'badge-warn',BAN:'badge-ban',KICK:'badge-kick',MUTE:'badge-mute',TEMPBAN:'badge-ban'};
+    tbody.innerHTML = rows.map(row=>`
+      <tr>
+        <td><span class="badge ${badgeClass[row.action]??''}">${row.action}</span></td>
+        <td>${row.user_name ?? row.user_id}</td>
+        <td>${row.mod_name ?? row.mod_id}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${row.reason||'—'}</td>
+        <td>${row.created_at?.slice(0,10)??'—'}</td>
+      </tr>`).join('');
+  }catch(e){}
+}
+
+// ── Invites ───────────────────────────────────────────────────
+async function loadInvites(){
+  if(!currentGuild) return;
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/invites`);
+    const rows = await r.json();
+    const tbody = document.getElementById('inviteTable');
+    if(!rows.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No invite data</td></tr>'; return; }
+    tbody.innerHTML = rows.map(row=>`
+      <tr>
+        <td style="font-family:'Space Mono',monospace;color:var(--accent)">${row.invite_code}</td>
+        <td>${row.inviter_name||'—'}</td>
+        <td>${row.uses||0}</td>
+        <td>${row.last_used?.slice(0,10)||'—'}</td>
+        <td>${row.note||'<span style="color:var(--muted)">—</span>'}</td>
+      </tr>`).join('');
+  }catch(e){}
+}
+
+// ── Twins ─────────────────────────────────────────────────────
+async function loadTwins(){
+  if(!currentGuild) return;
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/twins`);
+    const rows = await r.json();
+    const tbody = document.getElementById('twinsTable');
+    if(!rows.length) return;
+    const statusLabel = {0:'⏳ Pending',1:'✅ Confirmed',2:'❌ False positive'};
+    tbody.innerHTML = rows.map(row=>`
+      <tr>
+        <td>${row.user_a_name??row.user_a}</td>
+        <td>${row.user_b_name??row.user_b}</td>
+        <td style="font-family:'Space Mono',monospace;color:${row.similarity>=72?'var(--danger)':'var(--warning)'}">${row.similarity?.toFixed(1)}/100</td>
+        <td>${statusLabel[row.confirmed*1+(row.false_positive*2)]??'⏳ Pending'}</td>
+        <td>${row.detected_at?.slice(0,10)??'—'}</td>
+      </tr>`).join('');
+  }catch(e){}
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function showToast(msg, err=false){
+  const t = document.createElement('div');
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position:'fixed',bottom:'2rem',right:'2rem',
+    background: err ? 'var(--danger)' : 'var(--success)',
+    color:'#000',padding:'.75rem 1.25rem',borderRadius:'8px',
+    fontWeight:'700',fontSize:'.9rem',zIndex:'9999',
+    animation:'fadeUp .3s ease',
+  });
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3000);
+}
+
+init();
+</script>
+</body>
+</html>
