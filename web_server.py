@@ -598,37 +598,45 @@ async def api_security_save(request):
 @web.middleware
 async def cors_middleware(request: web.Request, handler):
     """CORS — разрешает запросы с сайта на отдельном домене"""
-    if request.method == "OPTIONS":
-        resp = web.Response(status=200)
-    else:
-        try:
-            resp = await handler(request)
-        except web.HTTPException as e:
-            raise
-
     origin = request.headers.get("Origin", "")
 
-    # Разрешаем Railway домены и заданные URL
-    allowed_origins = [SITE_URL, WEBSITE_URL]
+    # Preflight OPTIONS — отвечаем сразу
+    if request.method == "OPTIONS":
+        resp = web.Response(status=200)
+        _add_cors(resp, origin)
+        return resp
+
+    # Обрабатываем запрос — перехватываем ВСЕ исключения включая HTTPException
+    try:
+        resp = await handler(request)
+    except web.HTTPException as e:
+        # Добавляем CORS к redirect/error responses
+        _add_cors(e, origin)
+        raise
+    except Exception as e:
+        resp = web.json_response({'error': str(e)}, status=500)
+
+    _add_cors(resp, origin)
+    return resp
+
+
+def _add_cors(resp, origin: str):
+    """Добавляет CORS заголовки к любому response"""
     is_allowed = (
         not origin or
-        origin in allowed_origins or
         origin.endswith('.railway.app') or
-        origin.endswith('.up.railway.app')
+        origin.endswith('.up.railway.app') or
+        origin in [SITE_URL, WEBSITE_URL]
     )
-
-    if is_allowed:
-        resp.headers["Access-Control-Allow-Origin"]      = origin or "*"
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        resp.headers["Access-Control-Allow-Methods"]     = "GET, POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"]     = "Content-Type, Authorization, Cookie"
-        resp.headers["Access-Control-Max-Age"]           = "86400"
-
-    # Убираем CSP который блокирует eval (нужен для динамического JS)
-    if 'Content-Security-Policy' in resp.headers:
-        del resp.headers['Content-Security-Policy']
-
-    return resp
+    if is_allowed and origin:
+        try:
+            resp.headers["Access-Control-Allow-Origin"]      = origin
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            resp.headers["Access-Control-Allow-Methods"]     = "GET, POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"]     = "Content-Type, Authorization"
+            resp.headers["Access-Control-Max-Age"]           = "86400"
+        except Exception:
+            pass
 
 
 def create_app(bot) -> web.Application:
