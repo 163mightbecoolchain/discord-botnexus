@@ -1,18 +1,31 @@
 """
 Witness Website Server
-Зависимости: только aiohttp — aiofiles не нужен.
 """
 import os
 from aiohttp import web
 
 BOT_API_URL = os.getenv("BOT_API_URL", "")
+BOT_ID      = os.getenv("BOT_ID", "")
 PORT        = int(os.getenv("PORT", 8080))
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+
+INVITE_URL  = (
+    f"https://discord.com/api/oauth2/authorize"
+    f"?client_id={BOT_ID}&permissions=8&scope=bot%20applications.commands"
+    if BOT_ID else "#"
+)
+SUPPORT_URL = os.getenv("SUPPORT_URL", "https://discord.gg/witness")
 
 
 def read_file(filename: str) -> str:
     with open(os.path.join(BASE_DIR, filename), encoding="utf-8") as f:
-        return f.read().replace("__BOT_API_URL__", BOT_API_URL)
+        html = f.read()
+    # Подставляем все переменные
+    html = html.replace("__BOT_API_URL__", BOT_API_URL)
+    html = html.replace("__INVITE_URL__",  INVITE_URL)
+    html = html.replace("__SUPPORT_URL__", SUPPORT_URL)
+    html = html.replace("__BOT_ID__",      BOT_ID)
+    return html
 
 
 async def handle_index(request):
@@ -38,4 +51,6 @@ app.router.add_get("/health",    handle_health)
 if __name__ == "__main__":
     print(f"✅ Witness Website → port {PORT}")
     print(f"   BOT_API_URL: {BOT_API_URL or '⚠️  not set'}")
+    print(f"   BOT_ID:      {BOT_ID or '⚠️  not set'}")
+    print(f"   INVITE_URL:  {INVITE_URL}")
     web.run_app(app, host="0.0.0.0", port=PORT)
