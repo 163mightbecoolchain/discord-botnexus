@@ -20,7 +20,6 @@ SUPPORT_URL = os.getenv("SUPPORT_URL", "https://discord.gg/witness")
 def read_file(filename: str) -> str:
     with open(os.path.join(BASE_DIR, filename), encoding="utf-8") as f:
         html = f.read()
-    # Подставляем все переменные
     html = html.replace("__BOT_API_URL__", BOT_API_URL)
     html = html.replace("__INVITE_URL__",  INVITE_URL)
     html = html.replace("__SUPPORT_URL__", SUPPORT_URL)
@@ -28,11 +27,30 @@ def read_file(filename: str) -> str:
     return html
 
 
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    f"connect-src 'self' {BOT_API_URL} https://discord.com https://cdn.discordapp.com; "
+    "img-src 'self' data: https://cdn.discordapp.com https://render.albiononline.com; "
+    "frame-ancestors 'none';"
+)
+
+
+async def html_response(filename: str) -> web.Response:
+    resp = web.Response(text=read_file(filename), content_type="text/html")
+    resp.headers["Content-Security-Policy"] = CSP
+    resp.headers["X-Frame-Options"]         = "DENY"
+    resp.headers["X-Content-Type-Options"]  = "nosniff"
+    return resp
+
+
 async def handle_index(request):
-    return web.Response(text=read_file("index.html"), content_type="text/html")
+    return await html_response("index.html")
 
 async def handle_dashboard(request):
-    return web.Response(text=read_file("dashboard.html"), content_type="text/html")
+    return await html_response("dashboard.html")
 
 async def handle_login(request):
     if not BOT_API_URL:
@@ -52,5 +70,4 @@ if __name__ == "__main__":
     print(f"✅ Witness Website → port {PORT}")
     print(f"   BOT_API_URL: {BOT_API_URL or '⚠️  not set'}")
     print(f"   BOT_ID:      {BOT_ID or '⚠️  not set'}")
-    print(f"   INVITE_URL:  {INVITE_URL}")
     web.run_app(app, host="0.0.0.0", port=PORT)
