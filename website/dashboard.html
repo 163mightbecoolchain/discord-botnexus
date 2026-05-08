@@ -1006,15 +1006,76 @@ async function loadGeneralSettings(){
   document.getElementById('noServerSelected').style.display='none';
   document.getElementById('generalContent').style.display='block';
   try{
-    // Загружаем настройки
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`);
-    const s = await r.json();
+    // Загружаем настройки и каналы параллельно
+    const [sr, cr] = await Promise.all([
+      apiFetch(`/api/guild/${currentGuild.id}/settings`),
+      apiFetch(`/api/guild/${currentGuild.id}/channels`)
+    ]);
+    const s  = await sr.json();
+    const ch = await cr.json();
+
+    // Заполняем каналы в dropdown
+    const textCh = (ch.channels||[]).filter(c=>c.type==='text');
+    const selIds = ['cfg-log-channel','cfg-ticket-cat','cfg-birthday-ch',
+                    'cfg-suggestion-ch','cfg-log-channel-log','cfg-starboard-ch',
+                    'cfg-welcome-ch','cfg-goodbye-ch'];
+    selIds.forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.innerHTML = '<option value="">None</option>' +
+        textCh.map(c=>`<option value="${c.id}">#${c.name}</option>`).join('');
+    });
+
+    // Roles для quarantine и autorole
+    const roles = ch.roles || [];
+    ['cfg-quarantine-role','cfg-autorole'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.innerHTML = '<option value="">None</option>' +
+        roles.map(r=>`<option value="${r.id}">@${r.name}</option>`).join('');
+    });
+    window._serverRoles = roles;
+
+    // Применяем настройки
     document.getElementById('cfg-lang').value = s.lang ?? 'ru';
+
+    // Tickets toggle
     const tickTog = document.getElementById('tog-tickets');
-    if(s.tickets_enabled) tickTog.classList.add('on'); else tickTog.classList.remove('on');
-    // Загружаем каналы в dropdown
-    await loadChannels();
-  }catch(e){ console.error(e) }
+    if(tickTog){ s.tickets_enabled ? tickTog.classList.add('on') : tickTog.classList.remove('on'); }
+
+    // Log channel — выбираем текущий
+    if(s.log_channel){
+      ['cfg-log-channel','cfg-log-channel-log'].forEach(id=>{
+        const el = document.getElementById(id);
+        if(el) el.value = String(s.log_channel);
+      });
+    }
+
+    // Punishment actions
+    ['warn2','warn3','warn4','warn5'].forEach(w=>{
+      const el = document.getElementById('cfg-'+w);
+      if(el && s[w+'_action']) el.value = s[w+'_action'];
+    });
+
+    // Security toggles
+    const sec = s.security || {};
+    Object.entries(sec).forEach(([key, val])=>{
+      const el = document.getElementById('sec-'+key);
+      if(el){ val ? el.classList.add('on') : el.classList.remove('on'); }
+    });
+
+    // Остальные каналы
+    if(s.suggestion_channel) setSelect('cfg-suggestion-ch', s.suggestion_channel);
+    if(s.birthday_channel)   setSelect('cfg-birthday-ch',   s.birthday_channel);
+    if(s.ticket_category)    setSelect('cfg-ticket-cat',     s.ticket_category);
+    if(s.starboard_channel)  setSelect('cfg-starboard-ch',   s.starboard_channel);
+
+  }catch(e){ console.error('Settings load error:', e) }
+}
+
+function setSelect(id, value){
+  const el = document.getElementById(id);
+  if(el && value) el.value = String(value);
 }
 
 async function loadChannels(){
