@@ -302,7 +302,7 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
     </div>
     <div class="topbar-right">
       <a href="__INVITE_URL__" class="btn btn-accent btn-sm" target="_blank">➕ Add to Server</a>
-      <a href="/logout" class="btn btn-outline btn-sm">Logout</a>
+      <a href="__BOT_API_URL__/logout" class="btn btn-outline btn-sm">Logout</a>
     </div>
   </header>
 
@@ -314,7 +314,7 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
         <span class="empty-icon">🔐</span>
         <div class="empty-title">Login required</div>
         <div class="empty-desc">Connect your Discord account to manage your servers.</div>
-        <a href="/login" class="btn btn-discord" style="margin-top:1.5rem">
+        <a href="__BOT_API_URL__/login" class="btn btn-discord" style="margin-top:1.5rem">
           Login with Discord
         </a>
       </div>
@@ -458,7 +458,7 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
             <div class="panel-title">Security Modules</div>
             <div class="panel-desc">Toggle individual logging and protection features</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save</button>
+          <button class="btn btn-accent btn-sm" onclick="saveSecurity()">Save</button>
         </div>
         <div class="panel-body">
           <div class="toggle-row">
@@ -585,6 +585,221 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
       </div>
     </div>
 
+    <!-- ── LOGGING ── -->
+    <div id="page-logging" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Log Channel</div>
+            <div class="panel-desc">Where to send event logs</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save</button>
+        </div>
+        <div class="panel-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Log Channel</label>
+              <select class="form-control" id="cfg-log-channel-log">
+                <option value="">None — logging disabled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Starboard Channel</label>
+              <select class="form-control" id="cfg-starboard-ch">
+                <option value="">None</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Log bot commands</div>
+              <div class="toggle-sub">Log when slash commands are used</div>
+            </div>
+            <div class="toggle" id="tog-log-cmds" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Log voice activity</div>
+              <div class="toggle-sub">Join/leave/move in voice channels</div>
+            </div>
+            <div class="toggle on" id="tog-log-voice" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MODERATION ── -->
+    <div id="page-moderation" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Moderation Settings</div>
+            <div class="panel-desc">Configure warn thresholds and auto-actions</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save</button>
+        </div>
+        <div class="panel-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Warn 2 → Action</label>
+              <select class="form-control" id="cfg-warn2">
+                <option value="mute_1h">Mute 1 hour</option>
+                <option value="mute_24h">Mute 24 hours</option>
+                <option value="kick">Kick</option>
+                <option value="ban">Ban</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Warn 3 → Action</label>
+              <select class="form-control" id="cfg-warn3">
+                <option value="mute_1h">Mute 1 hour</option>
+                <option value="mute_24h" selected>Mute 24 hours</option>
+                <option value="kick">Kick</option>
+                <option value="ban">Ban</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Warn 4 → Action</label>
+              <select class="form-control" id="cfg-warn4">
+                <option value="mute_1h">Mute 1 hour</option>
+                <option value="mute_24h">Mute 24 hours</option>
+                <option value="kick" selected>Kick</option>
+                <option value="ban">Ban</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Warn 5 → Action</label>
+              <select class="form-control" id="cfg-warn5">
+                <option value="mute_1h">Mute 1 hour</option>
+                <option value="mute_24h">Mute 24 hours</option>
+                <option value="kick">Kick</option>
+                <option value="ban" selected>Ban</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">DM on warn</div>
+              <div class="toggle-sub">Send member a DM when they receive a warning</div>
+            </div>
+            <div class="toggle on" id="tog-warn-dm" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Auto-tempban after 5 warns</div>
+              <div class="toggle-sub">Automatically tempban for 7 days on 5th warning</div>
+            </div>
+            <div class="toggle" id="tog-autoban" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Punishment API -->
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Quarantine</div>
+            <div class="panel-desc">Auto-role for new accounts</div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Quarantine Role</label>
+              <select class="form-control" id="cfg-quarantine-role">
+                <option value="">None — disabled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Min account age (days)</label>
+              <input type="number" class="form-control" id="cfg-quarantine-age" value="7" min="1" max="30">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Quarantine duration (hours)</label>
+              <input type="number" class="form-control" id="cfg-quarantine-hours" value="24" min="1" max="720">
+            </div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="saveQuarantine()">Save Quarantine</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── WELCOME ── -->
+    <div id="page-welcome" style="display:none">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Welcome & Goodbye Messages</div>
+            <div class="panel-desc">Greet new members and say goodbye</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="saveWelcome()">Save</button>
+        </div>
+        <div class="panel-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Welcome Channel</label>
+              <select class="form-control" id="cfg-welcome-ch">
+                <option value="">None — disabled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Goodbye Channel</label>
+              <select class="form-control" id="cfg-goodbye-ch">
+                <option value="">None — disabled</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row full">
+            <div class="form-group">
+              <label>Welcome Message</label>
+              <input type="text" class="form-control" id="cfg-welcome-msg"
+                placeholder="Welcome {user} to {server}! You are member #{count}">
+              <div style="font-size:.75rem;color:var(--muted);margin-top:.4rem">
+                Variables: <code style="color:var(--accent)">{user}</code> {server} {count} {id}
+              </div>
+            </div>
+          </div>
+          <div class="form-row full">
+            <div class="form-group">
+              <label>Goodbye Message</label>
+              <input type="text" class="form-control" id="cfg-goodbye-msg"
+                placeholder="{user} has left the server.">
+            </div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Show member avatar in welcome</div>
+              <div class="toggle-sub">Embed member avatar in welcome message</div>
+            </div>
+            <div class="toggle on" id="tog-welcome-avatar" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Auto-role on join</div>
+              <div class="toggle-sub">Automatically assign a role when member joins</div>
+            </div>
+            <div class="toggle" id="tog-autorole" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="form-row" id="autorole-row" style="margin-top:1rem;display:none">
+            <div class="form-group">
+              <label>Auto-role</label>
+              <select class="form-control" id="cfg-autorole">
+                <option value="">Select role</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── TWIN DETECTION ── -->
     <div id="page-twins" style="display:none">
       <div class="notice">
@@ -648,14 +863,14 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
 </div><!-- /main -->
 
 <script>
-const API = '';
+const API = '__BOT_API_URL__';
 let currentGuild = null;
 let userData = null;
 
 // ── Init ──────────────────────────────────────────────────────
 async function init(){
   try{
-    const r = await fetch(API+'/api/me');
+    const r = await fetch(API+'/api/me', {credentials:'include'});
     if(!r.ok){ showPage('login'); return; }
     userData = await r.json();
     document.getElementById('userName').textContent = userData.username;
@@ -674,7 +889,7 @@ async function init(){
 
 async function loadStats(){
   try{
-    const r = await fetch(API+'/api/stats');
+    const r = await fetch(API+'/api/stats', {credentials:'include'});
     const d = await r.json();
     document.getElementById('ov-ping').textContent = d.latency ? d.latency+'ms' : '—';
     document.getElementById('ov-guilds').textContent = d.user_guilds ?? '—';
@@ -706,7 +921,7 @@ function showPage(name){
 async function loadGuilds(){
   const list = document.getElementById('guildList');
   try{
-    const r = await fetch(API+'/api/guilds');
+    const r = await fetch(API+'/api/guilds', {credentials:'include'});
     const guilds = await r.json();
     if(!guilds.length){
       list.innerHTML = `<div class="empty" style="grid-column:1/-1">
@@ -752,12 +967,35 @@ async function loadGeneralSettings(){
   document.getElementById('noServerSelected').style.display='none';
   document.getElementById('generalContent').style.display='block';
   try{
+    // Загружаем настройки
     const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`);
     const s = await r.json();
     document.getElementById('cfg-lang').value = s.lang ?? 'ru';
     const tickTog = document.getElementById('tog-tickets');
     if(s.tickets_enabled) tickTog.classList.add('on'); else tickTog.classList.remove('on');
-  }catch(e){}
+    // Загружаем каналы в dropdown
+    await loadChannels();
+  }catch(e){ console.error(e) }
+}
+
+async function loadChannels(){
+  if(!currentGuild) return;
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/channels`);
+    const d = await r.json();
+    const textChannels = (d.channels||[]).filter(c=>c.type==='text');
+    const selects = ['cfg-log-channel','cfg-ticket-cat','cfg-birthday-ch','cfg-suggestion-ch'];
+    selects.forEach(id=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      const cur = el.value;
+      el.innerHTML = '<option value="">None</option>' +
+        textChannels.map(c=>`<option value="${c.id}">#${c.name}</option>`).join('');
+      if(cur) el.value = cur;
+    });
+    // Roles для reaction roles и quarantine
+    window._serverRoles = d.roles || [];
+  }catch(e){ console.error('channels load error', e) }
 }
 
 async function saveSettings(){
@@ -769,7 +1007,7 @@ async function saveSettings(){
   try{
     const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
+      credentials:'include', body: JSON.stringify(payload)
     });
     if(r.ok) showToast('✓ Settings saved');
     else showToast('Failed to save', true);
@@ -839,6 +1077,67 @@ async function loadTwins(){
       </tr>`).join('');
   }catch(e){}
 }
+
+async function saveSecurity(){
+  if(!currentGuild) return;
+  const toggleIds = ['join','msg_delete','msg_edit','role_change','nick_change',
+                     'voice','invites','anti_raid','anti_spam','suspicious'];
+  const payload = {};
+  toggleIds.forEach(id=>{
+    const el = document.getElementById('sec-'+id);
+    if(el) payload[id] = el.classList.contains('on');
+  });
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/security`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials:'include', body:JSON.stringify(payload)
+    });
+    if(r.ok) showToast('✓ Security settings saved');
+    else showToast('Failed to save', true);
+  }catch(e){ showToast('Error', true) }
+}
+
+async function saveQuarantine(){
+  if(!currentGuild) return;
+  const role   = document.getElementById('cfg-quarantine-role')?.value;
+  const age    = document.getElementById('cfg-quarantine-age')?.value;
+  const hours  = document.getElementById('cfg-quarantine-hours')?.value;
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body: JSON.stringify({quarantine_role:role, quarantine_age:age, quarantine_hours:hours})
+    });
+    if(r.ok) showToast('✓ Quarantine saved');
+    else showToast('Failed', true);
+  }catch(e){ showToast('Error', true) }
+}
+
+async function saveWelcome(){
+  if(!currentGuild) return;
+  const payload = {
+    welcome_channel: document.getElementById('cfg-welcome-ch')?.value,
+    goodbye_channel: document.getElementById('cfg-goodbye-ch')?.value,
+    welcome_msg:     document.getElementById('cfg-welcome-msg')?.value,
+    goodbye_msg:     document.getElementById('cfg-goodbye-msg')?.value,
+  };
+  try{
+    const r = await fetch(API+`/api/guild/${currentGuild.id}/settings`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials:'include', body: JSON.stringify(payload)
+    });
+    if(r.ok) showToast('✓ Welcome saved');
+    else showToast('Failed', true);
+  }catch(e){ showToast('Error', true) }
+}
+
+// Auto-role toggle show/hide
+document.addEventListener('click', e=>{
+  if(e.target.id==='tog-autorole'){
+    const row = document.getElementById('autorole-row');
+    if(row) row.style.display = e.target.classList.contains('on') ? 'grid' : 'none';
+  }
+});
 
 // ── Toast ─────────────────────────────────────────────────────
 function showToast(msg, err=false){
