@@ -98,6 +98,12 @@ def verify_session(token: str) -> dict | None:
 
 
 def get_session(request: web.Request) -> dict | None:
+    # Сначала проверяем Bearer токен (для cross-domain сайта)
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+        return verify_session(token)
+    # Fallback — cookie (для same-domain)
     token = request.cookies.get('ws_session')
     if not token:
         return None
@@ -223,13 +229,18 @@ async def handle_callback(request):
     }
     token = sign_session(session_data)
 
-    response = web.HTTPFound(
-        f"{WEBSITE_URL}/dashboard" if WEBSITE_URL else "/dashboard"
-    )
-    response.set_cookie('ws_session', token, max_age=7*86400, httponly=True,
-                        samesite='None' if WEBSITE_URL else 'Lax',
-                        secure=bool(WEBSITE_URL), path='/')
-    raise response
+    if WEBSITE_URL:
+        # Cross-domain: передаём токен через URL параметр
+        # Сайт сохранит его в localStorage
+        import urllib.parse
+        redirect_url = f"{WEBSITE_URL}/dashboard?token={urllib.parse.quote(token)}"
+        raise web.HTTPFound(redirect_url)
+    else:
+        # Тот же домен: cookie работает нормально
+        response = web.HTTPFound("/dashboard")
+        response.set_cookie('ws_session', token, max_age=7*86400,
+                           httponly=True, samesite='Lax', path='/')
+        raise response
 
 
 async def handle_logout(request):
