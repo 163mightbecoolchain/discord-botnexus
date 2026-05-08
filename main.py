@@ -45,6 +45,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
+import aiofiles
 import aiosqlite
 import os, asyncio, random, time, json, datetime
 from datetime import timedelta
@@ -653,24 +654,26 @@ def t(guild_id: int, key: str, **kwargs) -> str:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def health_check_server():
-    """Простой HTTP сервер для Railway health check"""
-    from aiohttp import web
-
-    async def handle(request):
-        guilds = len(bot.guilds) if bot.is_ready() else 0
-        return web.Response(
-            text=f"OK|guilds={guilds}|latency={round(bot.latency*1000)}ms",
-            status=200
-        )
-
-    app = web.Application()
-    app.router.add_get("/", handle)
-    app.router.add_get("/health", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
-    await site.start()
-    print(f"✅ Health check server started on port {os.getenv('PORT', 8080)}")
+    """Запускает полноценный веб-сервер (лендинг + дашборд + API + health check)"""
+    try:
+        from web_server import start_web_server
+        await start_web_server(bot)
+    except ImportError:
+        # Fallback — простой health check если web_server.py не найден
+        from aiohttp import web
+        async def handle(request):
+            return web.Response(
+                text=f"OK|guilds={len(bot.guilds)}|latency={round(bot.latency*1000)}ms",
+                status=200
+            )
+        app = web.Application()
+        app.router.add_get("/", handle)
+        app.router.add_get("/health", handle)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+        await site.start()
+        print(f"⚠️  web_server.py not found — using minimal health check")
 
 
 async def db_init():
