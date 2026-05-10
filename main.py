@@ -1593,10 +1593,43 @@ async def on_message_delete(message):
     e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
     e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
     e.add_field(name=t(gid8, "text"),    value=message.content[:1020] or "*(attachment)*",                inline=False)
+
+    # Если к сообщению была прикреплена ветка — добавляем ссылку
+    if message.guild:
+        try:
+            thread = message.guild.get_thread(message.id)
+            if thread:
+                e.add_field(
+                    name="🧵 Thread",
+                    value=f"{thread.mention} — [перейти]({thread.jump_url})\n"
+                          f"Сообщений в ветке: **{thread.message_count}**",
+                    inline=False
+                )
+        except Exception:
+            pass
+        # Discord также хранит thread в flags/channel если message.thread
+        if hasattr(message, 'thread') and message.thread:
+            thread = message.thread
+            try:
+                e.add_field(
+                    name="🧵 Thread",
+                    value=f"{thread.mention} — [перейти]({thread.jump_url})\n"
+                          f"Сообщений в ветке: **{thread.message_count}**",
+                    inline=False
+                )
+            except Exception:
+                pass
+
     await ch.send(embed=e)
 
 @bot.event
 async def on_message_edit(before, after):
+    # P3: Считаем редактирования для fingerprint
+    if before.author and not before.author.bot and before.guild:
+        key = (before.guild.id, before.author.id)
+        sp = _style_cache.get(key)
+        if sp:
+            sp.edit_count = getattr(sp, 'edit_count', 0) + 1
     if before.author.bot or not before.guild or before.content == after.content: return
     ch = await sec_check(before.guild, "msg_edit")
     if not ch: return
@@ -5404,13 +5437,22 @@ async def albion_watch_loop(bot_instance):
 
 import unicodedata as _ud
 
-MIN_MSGS_FOR_COMPARE = 100
-TWIN_THRESHOLD       = 75
+MIN_MSGS_FOR_COMPARE = 100   # минимум сообщений для сравнения
+MIN_DAYS_FOR_COMPARE = 3     # минимум дней активности
+TWIN_THRESHOLD       = 80    # порог алерта (было 75)
+TWIN_ALERT_MIN       = 65    # нижняя граница для "мягкого" алерта
 SAVE_EVERY           = 10
 MAX_COMPARE_USERS    = 200
 
-_style_cache: dict = {}
-_style_dirty: set  = set()  # профили требующие сохранения в БД
+_style_cache: dict  = {}
+_style_dirty: set   = set()   # профили требующие сохранения в БД
+
+# Server vocabulary filter — топ слова каждого сервера (обновляется раз в сутки)
+# Исключаем из сравнения чтобы не триггерить на контекстных словах ("альбион", "рейд")
+_server_vocab: dict = {}       # {guild_id: set of common words}
+_server_vocab_ts: dict = {}    # {guild_id: last_updated timestamp}
+SERVER_VOCAB_TTL = 86400       # обновляем раз в сутки
+SERVER_VOCAB_SIZE = 100        # топ N слов исключаем
 
 _STOP_WORDS = {
     "и","в","не","на","что","я","с","как","а","то","он","но","за","по",
@@ -5440,19 +5482,32 @@ def _has_emoji(text: str) -> bool:
 
 class StyleProfile:
     def __init__(self):
-        self.msg_count       = 0
-        self.total_word_len  = 0.0
-        self.total_msg_len   = 0
-        self.punct_msgs      = 0
-        self.caps_msgs       = 0
-        self.emoji_msgs      = 0
-        self.word_freq: dict = {}
+        self.msg_count         = 0
+        self.total_word_len    = 0.0
+        self.total_msg_len     = 0
+        self.punct_msgs        = 0
+        self.caps_msgs         = 0
+        self.emoji_msgs        = 0
+        self.edit_count        = 0
+        self.word_freq: dict   = {}
+        self.bigram_freq: dict = {}
         self.sentence_enders: dict = {}
+        self.active_blocks: dict   = {}
         self.active_hours: dict    = {}
+        self.timing_delays: list   = []
+        self._last_msg_ts: float   = 0.0
+        self.unique_words: set     = set()
+        self.first_seen: str       = ""
+        self.last_seen: str        = ""
 
-    def update(self, text: str, hour: int):
+    def update(self, text: str, hour: int, timestamp: float = 0.0):
+        import re as _re2
         if not text or len(text) < 2:
             return
+        now_iso = datetime.datetime.utcnow().isoformat()
+        if not self.first_seen:
+            self.first_seen = now_iso
+        self.last_seen = now_iso
         self.msg_count += 1
         words = text.lower().split()
         if not words:
@@ -5472,36 +5527,87 @@ class StyleProfile:
             self.caps_msgs += 1
         if _has_emoji(text):
             self.emoji_msgs += 1
-        import re as _re2
         for word in words:
             w = _re2.sub(r"[^а-яёa-z]", "", word.lower())
             if len(w) >= 3 and w not in _STOP_WORDS:
                 self.word_freq[w] = self.word_freq.get(w, 0) + 1
+                self.unique_words.add(w)
+        clean = _re2.sub(r"[^а-яёa-z]", "", text.lower())
+        for i in range(len(clean) - 1):
+            bg = clean[i:i+2]
+            self.bigram_freq[bg] = self.bigram_freq.get(bg, 0) + 1
+        block = str(hour // 3)
+        self.active_blocks[block] = self.active_blocks.get(block, 0) + 1
         self.active_hours[str(hour)] = self.active_hours.get(str(hour), 0) + 1
+        if timestamp and self._last_msg_ts:
+            delay = timestamp - self._last_msg_ts
+            if 2 <= delay <= 3600:
+                self.timing_delays.append(round(delay, 1))
+                if len(self.timing_delays) > 200:
+                    self.timing_delays = self.timing_delays[-200:]
+        if timestamp:
+            self._last_msg_ts = timestamp
 
     def get_typos(self) -> set:
         return {w for w, cnt in self.word_freq.items()
                 if cnt <= 2 and len(w) >= 4 and w not in _COMMON_RU}
 
     def get_top_words(self, n: int = 30) -> set:
-        return {w for w, _ in sorted(self.word_freq.items(), key=lambda x: x[1], reverse=True)[:n]}
+        return {w for w, _ in sorted(self.word_freq.items(),
+                                      key=lambda x: x[1], reverse=True)[:n]}
+
+    def get_top_bigrams(self, n: int = 20) -> set:
+        return {bg for bg, cnt in sorted(self.bigram_freq.items(),
+                                          key=lambda x: x[1], reverse=True)[:n]
+                if cnt >= 3}
+
+    def get_ttr(self) -> float:
+        total = sum(self.word_freq.values())
+        return round(len(self.unique_words) / total, 3) if total else 0.0
+
+    def get_median_timing(self) -> float:
+        if len(self.timing_delays) < 5:
+            return 0.0
+        s = sorted(self.timing_delays)
+        return s[len(s) // 2]
+
+    def get_days_active(self) -> int:
+        if not self.first_seen:
+            return 0
+        try:
+            first = datetime.datetime.fromisoformat(self.first_seen[:19])
+            return (datetime.datetime.utcnow() - first).days
+        except Exception:
+            return 0
+
+    def get_profile_maturity(self) -> float:
+        msg_f  = min(self.msg_count / MIN_MSGS_FOR_COMPARE, 1.0)
+        days_f = min(self.get_days_active() / max(MIN_DAYS_FOR_COMPARE, 1), 1.0)
+        return round(msg_f * 0.6 + days_f * 0.4, 3)
 
     def to_dict(self) -> dict:
         n = max(self.msg_count, 1)
         return {
-            "msg_count":       self.msg_count,
-            "avg_word_len":    round(self.total_word_len / n, 3),
-            "avg_msg_len":     round(self.total_msg_len  / n, 1),
-            "punct_ratio":     round(self.punct_msgs / n, 3),
-            "caps_ratio":      round(self.caps_msgs  / n, 3),
-            "emoji_ratio":     round(self.emoji_msgs / n, 3),
-            "no_punct_ratio":  round(1 - self.punct_msgs / n, 3),
-            "common_words":    json.dumps(list(self.get_top_words(30))),
-            "common_typos":    json.dumps(list(self.get_typos())),
-            "sentence_enders": json.dumps(self.sentence_enders),
-            "active_hours":    json.dumps(self.active_hours),
+            "msg_count":        self.msg_count,
+            "avg_word_len":     round(self.total_word_len / n, 3),
+            "avg_msg_len":      round(self.total_msg_len  / n, 1),
+            "punct_ratio":      round(self.punct_msgs / n, 3),
+            "caps_ratio":       round(self.caps_msgs  / n, 3),
+            "emoji_ratio":      round(self.emoji_msgs / n, 3),
+            "no_punct_ratio":   round(1 - self.punct_msgs / n, 3),
+            "common_words":     json.dumps(list(self.get_top_words(30))),
+            "common_typos":     json.dumps(list(self.get_typos())),
+            "top_bigrams":      json.dumps(list(self.get_top_bigrams(20))),
+            "ttr":              self.get_ttr(),
+            "median_timing":    self.get_median_timing(),
+            "sentence_enders":  json.dumps(self.sentence_enders),
+            "active_hours":     json.dumps(self.active_hours),
+            "active_blocks":    json.dumps(self.active_blocks),
+            "first_seen":       self.first_seen,
+            "last_seen":        self.last_seen,
+            "days_active":      self.get_days_active(),
+            "profile_maturity": self.get_profile_maturity(),
         }
-
 
 def _jaccard(a: set, b: set) -> float:
     if not a or not b: return 0.0
@@ -5513,40 +5619,108 @@ def _scalar_sim(a: float, b: float, tol: float) -> float:
     return max(0.0, 1.0 - abs(a - b) / tol)
 
 
-def compare_profiles(p1: dict, p2: dict):
-    score = 0.0; total = 0.0; reasons = []
-
-    def add(w, sim, label):
-        nonlocal score, total
-        total += w; score += w * sim
-        if sim >= 0.7: reasons.append(f"{label} ({sim:.0%})")
-
-    add(10,  _scalar_sim(p1["avg_word_len"],   p2["avg_word_len"],   0.5),  "Длина слов")
-    add(10,  _scalar_sim(p1["avg_msg_len"],    p2["avg_msg_len"],    20),   "Длина сообщений")
-    add(15,  _scalar_sim(p1["no_punct_ratio"], p2["no_punct_ratio"], 0.15), "Отсутствие пунктуации")
-    add(10,  _scalar_sim(p1["caps_ratio"],     p2["caps_ratio"],     0.1),  "Использование caps")
-    add(10,  _scalar_sim(p1["emoji_ratio"],    p2["emoji_ratio"],    0.1),  "Использование emoji")
-
+async def get_server_vocab(guild_id: int) -> set:
+    """Возвращает топ-слова сервера для фильтрации из сравнения"""
+    now = time.time()
+    if (_server_vocab_ts.get(guild_id, 0) + SERVER_VOCAB_TTL > now and
+            guild_id in _server_vocab):
+        return _server_vocab[guild_id]
+    # Считаем топ слова по всем профилям сервера
     try:
-        w1 = set(json.loads(p1.get("common_words", "[]")))
-        w2 = set(json.loads(p2.get("common_words", "[]")))
-        add(20, _jaccard(w1, w2), "Общий словарный запас")
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT common_words FROM style_profiles WHERE guild_id=?",
+                (guild_id,)
+            ) as c:
+                rows = await c.fetchall()
+        word_counts: dict = {}
+        for (wjson,) in rows:
+            try:
+                for w in json.loads(wjson or "[]"):
+                    word_counts[w] = word_counts.get(w, 0) + 1
+            except Exception:
+                pass
+        # Топ SERVER_VOCAB_SIZE слов = общие для сервера = не уникальные
+        vocab = {w for w, _ in sorted(word_counts.items(),
+                                       key=lambda x: x[1], reverse=True)[:SERVER_VOCAB_SIZE]}
+        _server_vocab[guild_id]    = vocab
+        _server_vocab_ts[guild_id] = now
+        return vocab
+    except Exception:
+        return set()
+
+
+def compare_profiles(p1: dict, p2: dict,
+                     server_vocab: set = None) -> tuple:
+    """
+    Сравнивает два профиля, возвращает (score 0-100, confidence 0-1, reasons)
+
+    Улучшения vs оригинал:
+    - Server vocab filter — убирает общие слова сервера из сравнения
+    - Character bigrams — более уникальны чем слова
+    - Type-token ratio — богатство словаря
+    - Inter-message timing — скорость печати
+    - 3-часовые блоки вместо часов
+    - Confidence score = raw_score × min(maturity1, maturity2)
+    - Age bonus: новый аккаунт + высокий score = опаснее
+    """
+    score = 0.0; total = 0.0; reasons = []
+    vocab_filter = server_vocab or set()
+
+    def add(w, sim, label, threshold=0.7):
+        nonlocal score, total
+        total += w
+        score += w * sim
+        if sim >= threshold:
+            reasons.append(f"{label} ({sim:.0%})")
+
+    # ── Базовые метрики (снижен вес — менее надёжны) ─────────
+    add(8,  _scalar_sim(p1["avg_word_len"],   p2["avg_word_len"],   0.5),  "Длина слов")
+    add(8,  _scalar_sim(p1["avg_msg_len"],    p2["avg_msg_len"],    20),   "Длина сообщений")
+    add(12, _scalar_sim(p1["no_punct_ratio"], p2["no_punct_ratio"], 0.15), "Отсутствие пунктуации")
+    add(8,  _scalar_sim(p1["caps_ratio"],     p2["caps_ratio"],     0.1),  "Использование caps")
+    add(8,  _scalar_sim(p1["emoji_ratio"],    p2["emoji_ratio"],    0.1),  "Использование emoji")
+
+    # ── P2: Type-token ratio (богатство словаря) ─────────────
+    ttr1 = p1.get("ttr", 0); ttr2 = p2.get("ttr", 0)
+    if ttr1 and ttr2:
+        add(10, _scalar_sim(ttr1, ttr2, 0.15), "Богатство словаря")
+
+    # ── Слова (с фильтром серверного словаря) ────────────────
+    try:
+        w1 = set(json.loads(p1.get("common_words", "[]"))) - vocab_filter
+        w2 = set(json.loads(p2.get("common_words", "[]"))) - vocab_filter
+        if w1 and w2:
+            add(15, _jaccard(w1, w2), "Общий словарный запас")
     except Exception:
         pass
 
+    # ── Опечатки (самый сильный признак — вес 30) ────────────
     try:
-        t1 = set(json.loads(p1.get("common_typos", "[]")))
-        t2 = set(json.loads(p2.get("common_typos", "[]")))
+        t1 = set(json.loads(p1.get("common_typos", "[]"))) - vocab_filter
+        t2 = set(json.loads(p2.get("common_typos", "[]"))) - vocab_filter
         if t1 and t2:
             sim = _jaccard(t1, t2)
-            common = t1 & t2
-            if len(common) >= 3:
-                sim = min(1.0, sim * 1.3)
-                reasons.append("Одинаковые опечатки: " + ", ".join(list(common)[:5]))
+            common_t = t1 & t2
+            if len(common_t) >= 2:
+                # Бонус за конкретные совпадающие опечатки
+                sim = min(1.0, sim * (1.2 + len(common_t) * 0.05))
+                reasons.append("Одинаковые опечатки: " +
+                                ", ".join(f"`{w}`" for w in list(common_t)[:6]))
             add(30, sim, "Совпадение опечаток")
     except Exception:
         pass
 
+    # ── P2: Биграммы символов ────────────────────────────────
+    try:
+        b1 = set(json.loads(p1.get("top_bigrams", "[]")))
+        b2 = set(json.loads(p2.get("top_bigrams", "[]")))
+        if b1 and b2:
+            add(15, _jaccard(b1, b2), "Паттерны букв")
+    except Exception:
+        pass
+
+    # ── Паттерн окончаний предложений ────────────────────────
     try:
         e1 = json.loads(p1.get("sentence_enders", "{}"))
         e2 = json.loads(p2.get("sentence_enders", "{}"))
@@ -5554,20 +5728,42 @@ def compare_profiles(p1: dict, p2: dict):
         if keys:
             s1 = sum(e1.values()) or 1; s2 = sum(e2.values()) or 1
             diff = sum(abs(e1.get(k,0)/s1 - e2.get(k,0)/s2) for k in keys)
-            add(15, max(0.0, 1.0 - diff), "Паттерн пунктуации")
+            add(12, max(0.0, 1.0 - diff), "Паттерн пунктуации")
     except Exception:
         pass
 
+    # ── P2: Активность по 3-часовым блокам ───────────────────
     try:
-        h1 = json.loads(p1.get("active_hours", "{}"))
-        h2 = json.loads(p2.get("active_hours", "{}"))
-        top1 = set(sorted(h1, key=h1.get, reverse=True)[:3])
-        top2 = set(sorted(h2, key=h2.get, reverse=True)[:3])
-        add(10, len(top1 & top2) / 3, "Одинаковые активные часы")
+        ab1 = json.loads(p1.get("active_blocks", "{}") or
+                         p1.get("active_hours", "{}"))
+        ab2 = json.loads(p2.get("active_blocks", "{}") or
+                         p2.get("active_hours", "{}"))
+        if ab1 and ab2:
+            # Топ-2 активных блока
+            top1 = set(sorted(ab1, key=ab1.get, reverse=True)[:2])
+            top2 = set(sorted(ab2, key=ab2.get, reverse=True)[:2])
+            add(8, len(top1 & top2) / 2, "Активные часы")
     except Exception:
         pass
 
-    return round(score / total * 100, 1) if total > 0 else 0.0, reasons
+    # ── P2: Inter-message timing ─────────────────────────────
+    t1_med = p1.get("median_timing", 0)
+    t2_med = p2.get("median_timing", 0)
+    if t1_med and t2_med:
+        # Скорость печати: допуск ±30% от медианы
+        tolerance = max(t1_med, t2_med) * 0.3
+        add(12, _scalar_sim(t1_med, t2_med, tolerance), "Скорость печати")
+
+    # ── Итоговый score ────────────────────────────────────────
+    raw = round(score / total * 100, 1) if total > 0 else 0.0
+
+    # P1: Confidence = score × min(maturity) — ненадёжные профили дают меньше уверенности
+    mat1 = p1.get("profile_maturity", 1.0)
+    mat2 = p2.get("profile_maturity", 1.0)
+    confidence = min(mat1, mat2)
+    final = round(raw * (0.6 + 0.4 * confidence), 1)
+
+    return final, confidence, reasons
 
 
 async def update_style_profile(guild_id: int, user_id: int, message: discord.Message):
@@ -5599,13 +5795,21 @@ async def update_style_profile(guild_id: int, user_id: int, message: discord.Mes
         _style_cache[key] = sp
 
     sp = _style_cache[key]
-    sp.update(message.content, datetime.datetime.utcnow().hour)
+    sp.update(message.content,
+              datetime.datetime.utcnow().hour,
+              message.created_at.timestamp() if message.created_at else 0.0)
 
     if sp.msg_count % SAVE_EVERY == 0:
-        await _save_style_profile(guild_id, user_id, sp)
+        _style_dirty.add(key)
 
+    # P1: Запускаем сравнение когда достигнуто MIN_MSGS и MIN_DAYS
     if sp.msg_count == MIN_MSGS_FOR_COMPARE:
-        asyncio.create_task(_run_twin_check(message.guild, user_id, sp))
+        if sp.get_days_active() >= MIN_DAYS_FOR_COMPARE:
+            asyncio.create_task(_run_twin_check(message.guild, user_id, sp))
+    # P3: Периодически пересравниваем каждые 50 новых сообщений
+    elif sp.msg_count > MIN_MSGS_FOR_COMPARE and sp.msg_count % 50 == 0:
+        if sp.get_days_active() >= MIN_DAYS_FOR_COMPARE:
+            asyncio.create_task(_run_twin_check(message.guild, user_id, sp))
 
 
 async def _save_style_profile(guild_id: int, user_id: int, sp: StyleProfile):
@@ -5633,41 +5837,102 @@ async def _save_style_profile(guild_id: int, user_id: int, sp: StyleProfile):
 
 
 async def _run_twin_check(guild: discord.Guild, target_uid: int, target_sp: StyleProfile):
+    """Сравнивает профиль со всеми остальными на сервере"""
     gid = guild.id
     tp  = target_sp.to_dict()
+
+    # P1: Server vocabulary filter — получаем общие слова сервера
+    server_vocab = await get_server_vocab(gid)
+
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT user_id,msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,
-                   emoji_ratio,no_punct_ratio,common_words,common_typos,sentence_enders,active_hours
+            SELECT user_id, msg_count, avg_word_len, avg_msg_len, punct_ratio, caps_ratio,
+                   emoji_ratio, no_punct_ratio, common_words, common_typos, sentence_enders,
+                   active_hours,
+                   COALESCE(top_bigrams, '[]') as top_bigrams,
+                   COALESCE(ttr, 0) as ttr,
+                   COALESCE(median_timing, 0) as median_timing,
+                   COALESCE(active_blocks, '{}') as active_blocks,
+                   COALESCE(first_seen, '') as first_seen,
+                   COALESCE(profile_maturity, 0) as profile_maturity
             FROM style_profiles
             WHERE guild_id=? AND user_id!=? AND msg_count>=? LIMIT ?
         """, (gid, target_uid, MIN_MSGS_FOR_COMPARE, MAX_COMPARE_USERS)) as c:
             rows = await c.fetchall()
+            if rows:
+                cols = [d[0] for d in c.description]
+            else:
+                return
 
-    cols = ["user_id","msg_count","avg_word_len","avg_msg_len","punct_ratio","caps_ratio",
-            "emoji_ratio","no_punct_ratio","common_words","common_typos","sentence_enders","active_hours"]
+    best_score      = 0.0
+    best_confidence = 0.0
+    best_uid        = None
+    best_reasons    = []
 
-    best_score = 0.0; best_uid = None; best_reasons = []
     for row in rows:
         p   = dict(zip(cols, row))
         uid = p["user_id"]
+
+        # P3: Пропускаем уже подтверждённые пары и ложные срабатывания
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("""
                 SELECT id FROM twin_links
                 WHERE guild_id=? AND ((user_a=? AND user_b=?) OR (user_a=? AND user_b=?))
                   AND (confirmed=1 OR false_positive=1)
             """, (gid, target_uid, uid, uid, target_uid)) as c:
-                if await c.fetchone(): continue
-        score, reasons = compare_profiles(tp, p)
-        if score > best_score:
-            best_score = score; best_uid = uid; best_reasons = reasons
+                if await c.fetchone():
+                    continue
 
-    if best_score >= TWIN_THRESHOLD and best_uid:
-        await _create_twin_alert(guild, target_uid, best_uid, best_score, best_reasons)
+        score, confidence, reasons = compare_profiles(tp, p, server_vocab)
+
+        if score > best_score:
+            best_score      = score
+            best_confidence = confidence
+            best_uid        = uid
+            best_reasons    = reasons
+
+    if not best_uid:
+        return
+
+    # P3: Age bonus — если новый аккаунт повышаем итоговый score
+    member = guild.get_member(target_uid)
+    if member:
+        acc_age = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
+        if acc_age < 7 and best_score >= 55:
+            best_score = min(100, best_score * 1.15)
+            best_reasons.append(f"Новый аккаунт ({acc_age} дней)")
+
+    if best_score >= TWIN_THRESHOLD:
+        await _create_twin_alert(guild, target_uid, best_uid,
+                                  best_score, best_confidence, best_reasons)
+    elif best_score >= TWIN_ALERT_MIN:
+        # Мягкий алерт — только в лог без кнопок
+        await _soft_twin_alert(guild, target_uid, best_uid,
+                                best_score, best_confidence, best_reasons)
+
+
+async def _soft_twin_alert(guild: discord.Guild, user_a: int, user_b: int,
+                            score: float, confidence: float, reasons: list):
+    """Мягкий алерт без кнопок — просто информация для модераторов"""
+    ch = await get_log_ch(guild)
+    if not ch:
+        return
+    m_a = guild.get_member(user_a); m_b = guild.get_member(user_b)
+    na  = m_a.display_name if m_a else str(user_a)
+    nb  = m_b.display_name if m_b else str(user_b)
+    e = discord.Embed(color=0xFEE75C, timestamp=datetime.datetime.utcnow())
+    e.set_author(name="Возможное сходство стилей (слабый сигнал)")
+    e.add_field(name="Участники", value=f"{na} ↔ {nb}", inline=True)
+    e.add_field(name="Score",     value=f"**{score:.1f}/100**", inline=True)
+    e.add_field(name="Уверенность", value=f"**{confidence:.0%}**", inline=True)
+    if reasons:
+        e.add_field(name="Признаки", value="\n".join(f"• {r}" for r in reasons[:4]), inline=False)
+    e.set_footer(text="Недостаточно для автоматического алерта — наблюдение")
+    await ch.send(embed=e)
 
 
 async def _create_twin_alert(guild: discord.Guild, user_a: int, user_b: int,
-                              score: float, reasons: list):
+                              score: float, confidence: float, reasons: list):
     gid = guild.id
     now = datetime.datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
@@ -5675,7 +5940,8 @@ async def _create_twin_alert(guild: discord.Guild, user_a: int, user_b: int,
             INSERT INTO twin_links (guild_id,user_a,user_b,similarity,reasons,detected_at)
             VALUES (?,?,?,?,?,?)
             ON CONFLICT DO NOTHING
-        """, (gid, min(user_a,user_b), max(user_a,user_b), score, json.dumps(reasons), now))
+        """, (gid, min(user_a,user_b), max(user_a,user_b), score,
+              json.dumps(reasons + [f"Confidence: {confidence:.0%}"]), now))
         await db.commit()
         link_id = cur.lastrowid or 0
 
@@ -5689,9 +5955,10 @@ async def _create_twin_alert(guild: discord.Guild, user_a: int, user_b: int,
     color = 0xED4245 if score >= 85 else 0xFEE75C
     e = discord.Embed(color=color, timestamp=datetime.datetime.utcnow())
     e.set_author(name="Возможный твинк-аккаунт")
-    e.add_field(name="Участник A", value=f"{m_a.mention if m_a else user_a} (`{na}`)", inline=True)
-    e.add_field(name="Участник B", value=f"{m_b.mention if m_b else user_b} (`{nb}`)", inline=True)
-    e.add_field(name="Схожесть",   value=f"**{score}/100**",                           inline=True)
+    e.add_field(name="Участник A",  value=f"{m_a.mention if m_a else user_a} (`{na}`)", inline=True)
+    e.add_field(name="Участник B",  value=f"{m_b.mention if m_b else user_b} (`{nb}`)", inline=True)
+    e.add_field(name="Score",       value=f"**{score:.1f}/100**",                        inline=True)
+    e.add_field(name="Уверенность", value=f"**{confidence:.0%}**",                      inline=True)
     if reasons:
         e.add_field(name="Совпадающие признаки",
                     value="\n".join(f"• {r}" for r in reasons[:6]), inline=False)
@@ -5786,11 +6053,14 @@ class TwinConfirmView(discord.ui.View):
             sp = _style_cache.get((gid, uid))
             if sp:
                 d = sp.to_dict()
+                typos = list(sp.get_typos())[:4]
                 e.add_field(name=nm, value=(
-                    f"Сообщений: **{d['msg_count']}**\n"
-                    f"Ср. длина: **{d['avg_msg_len']:.0f}**\n"
+                    f"Сообщений: **{d['msg_count']}** ({d.get('days_active',0)} дн.)\n"
+                    f"Ср. длина: **{d['avg_msg_len']:.0f}** симв.\n"
                     f"Без пунктуации: **{d['no_punct_ratio']:.0%}**\n"
-                    f"Опечатки: `{'`, `'.join(list(sp.get_typos())[:4]) or '—'}`"
+                    f"TTR: **{d.get('ttr',0):.2f}**\n"
+                    f"Тайминг: **{d.get('median_timing',0):.0f}с**\n"
+                    f"Опечатки: `{'`, `'.join(typos) if typos else '—'}`"
                 ), inline=True)
             else:
                 e.add_field(name=nm, value="Нет данных в кэше", inline=True)
@@ -5840,7 +6110,7 @@ async def twincheck_cmd(interaction: discord.Interaction,
         )
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
-    score, reasons = compare_profiles(profiles[member1.id], profiles[member2.id])
+    score, confidence, reasons = compare_profiles(profiles[member1.id], profiles[member2.id])
     color = 0xED4245 if score >= TWIN_THRESHOLD else 0xFEE75C if score >= 50 else 0x57F287
     verdict = (
         "Высокая вероятность твинка" if score >= TWIN_THRESHOLD else
@@ -5848,8 +6118,9 @@ async def twincheck_cmd(interaction: discord.Interaction,
         "Разные стили письма"
     )
     e.color = color
-    e.add_field(name="Схожесть", value=f"**{score}/100**", inline=True)
-    e.add_field(name="Вердикт",  value=verdict,             inline=True)
+    e.add_field(name="Схожесть",    value=f"**{score}/100**",         inline=True)
+    e.add_field(name="Уверенность", value=f"**{confidence:.0%}**",    inline=True)
+    e.add_field(name="Вердикт",     value=verdict,                    inline=True)
     p1 = profiles[member1.id]; p2 = profiles[member2.id]
     e.add_field(name=member1.display_name, value=(
         f"Сообщений: **{p1['msg_count']}**\n"
