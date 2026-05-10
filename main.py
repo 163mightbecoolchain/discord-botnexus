@@ -362,6 +362,65 @@ async def memory_cleanup_loop(bot_instance):
                 _style_dirty.discard(key)
             if saved:
                 print(f"[CLEANUP] Saved {saved} style profiles to DB")
+
+            # ── Очистка старых данных (раз в сутки) ─────────────
+            if not hasattr(bot, '_last_db_cleanup') or                time.time() - bot._last_db_cleanup > 86400:
+                bot._last_db_cleanup = time.time()
+                try:
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        # invite_log > 90 дней (кроме записей с заметками)
+                        await db.execute("""
+                            DELETE FROM invite_log
+                            WHERE (note IS NULL OR note = '')
+                              AND joined_at < datetime('now', '-90 days')
+                        """)
+                        # modlog: AUTO_ действия > 180 дней
+                        await db.execute("""
+                            DELETE FROM modlog
+                            WHERE action LIKE 'AUTO_%'
+                              AND created_at < datetime('now', '-180 days')
+                        """)
+                        # quarantine: завершённые > 30 дней
+                        await db.execute("""
+                            DELETE FROM quarantine
+                            WHERE released = 1
+                              AND quarantined_at < datetime('now', '-30 days')
+                        """)
+                        # temp_bans: разбаненные > 30 дней
+                        await db.execute("""
+                            DELETE FROM temp_bans
+                            WHERE unbanned = 1
+                              AND unban_at < datetime('now', '-30 days')
+                        """)
+                        # tickets: закрытые > 60 дней
+                        await db.execute("""
+                            DELETE FROM tickets
+                            WHERE status = 'closed'
+                              AND created_at < datetime('now', '-60 days')
+                        """)
+                        # twin_links: ложные срабатывания > 90 дней
+                        await db.execute("""
+                            DELETE FROM twin_links
+                            WHERE false_positive = 1
+                              AND detected_at < datetime('now', '-90 days')
+                        """)
+                        # reminders: выполненные > 7 дней
+                        await db.execute("""
+                            DELETE FROM reminders
+                            WHERE done = 1
+                              AND remind_at < datetime('now', '-7 days')
+                        """)
+                        await db.commit()
+                        # VACUUM — освобождаем удалённые страницы
+                        # Делаем раз в неделю (тяжёлая операция)
+                        if not hasattr(bot, '_last_vacuum') or                            time.time() - bot._last_vacuum > 604800:
+                            bot._last_vacuum = time.time()
+                            await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                            await db.execute("VACUUM")
+                            print("[CLEANUP] VACUUM complete")
+                    print("[CLEANUP] DB cleanup complete")
+                except Exception as ex:
+                    print(f"[CLEANUP] Error: {ex}")
             if stale_cd or stale_sp or stale_rd:
                 print(f"[CLEANUP] Cleared: {len(stale_cd)} cooldowns, "
                       f"{len(stale_sp)} spam, {len(stale_rd)} raid entries")
@@ -1070,6 +1129,52 @@ def fmt_item(item_id):
     if not item_id: return "—"
     parts = item_id.replace("@"," ✦").split("_")
     return " ".join(p for p in parts if not (p.startswith("T") and p[1:].isdigit())).title() or item_id
+
+# ── Storage compression helpers ──────────────────────────────
+import zlib as _zlib
+
+def _compress(data) -> bytes:
+    raw = json.dumps(data, separators=(',', ':')).encode()
+    return _zlib.compress(raw, level=6)
+
+def _decompress(blob) -> object:
+    if blob is None: return None
+    if isinstance(blob, (bytes, bytearray)):
+        if len(blob) == 0: return []
+        try: return json.loads(_zlib.decompress(blob))
+        except Exception:
+            try: return json.loads(blob)
+            except Exception: return []
+    if isinstance(blob, str):
+        try: return json.loads(blob)
+        except Exception: return {}
+    return blob
+
+def _pack_hours(hours_dict: dict) -> bytes:
+    return bytes([min(255, int(hours_dict.get(str(h), 0))) for h in range(24)])
+
+def _unpack_hours(blob) -> dict:
+    if isinstance(blob, (bytes, bytearray)) and len(blob) == 24:
+        return {str(i): int(blob[i]) for i in range(24) if blob[i] > 0}
+    if isinstance(blob, str):
+        try: return json.loads(blob)
+        except Exception: return {}
+    return {}
+
+def _pack_enders(d: dict) -> str:
+    return f"{d.get('.',0)},{d.get('!',0)},{d.get('?',0)},{d.get('none',0)}"
+
+def _unpack_enders(s) -> dict:
+    if isinstance(s, str) and ',' in s and not s.startswith('{'):
+        try:
+            p = s.split(',')
+            if len(p) == 4:
+                return {'.': int(p[0]), '!': int(p[1]), '?': int(p[2]), 'none': int(p[3])}
+        except Exception: pass
+    if isinstance(s, str):
+        try: return json.loads(s)
+        except Exception: return {}
+    return s if isinstance(s, dict) else {}
 
 # ── Invite cache — инициализируем сразу на уровне бота ───────
 # Ключ: "guild_id:invite_code" → uses (int)
@@ -5536,15 +5641,30 @@ class StyleProfile:
         for i in range(len(clean) - 1):
             bg = clean[i:i+2]
             self.bigram_freq[bg] = self.bigram_freq.get(bg, 0) + 1
+        # Обрезаем bigram_freq до топ-100 каждые 50 сообщений
+        if self.msg_count % 50 == 0 and len(self.bigram_freq) > 100:
+            top_bg = sorted(self.bigram_freq.items(), key=lambda x: x[1], reverse=True)[:100]
+            self.bigram_freq = dict(top_bg)
+        # Обрезаем word_freq до топ-200 (экономия памяти и места на диске)
+        if self.msg_count % 50 == 0 and len(self.word_freq) > 200:
+            top_wf = sorted(self.word_freq.items(), key=lambda x: x[1], reverse=True)[:200]
+            self.word_freq = dict(top_wf)
+            self.unique_words = set(self.word_freq.keys())
         block = str(hour // 3)
         self.active_blocks[block] = self.active_blocks.get(block, 0) + 1
         self.active_hours[str(hour)] = self.active_hours.get(str(hour), 0) + 1
         if timestamp and self._last_msg_ts:
             delay = timestamp - self._last_msg_ts
             if 2 <= delay <= 3600:
-                self.timing_delays.append(round(delay, 1))
-                if len(self.timing_delays) > 200:
-                    self.timing_delays = self.timing_delays[-200:]
+                # Reservoir sampling — храним только 50 задержек вместо 200
+                # Экономия: ~900 байт на участника
+                if len(self.timing_delays) < 50:
+                    self.timing_delays.append(round(delay, 1))
+                else:
+                    import random
+                    idx = random.randint(0, len(self.timing_delays))
+                    if idx < 50:
+                        self.timing_delays[idx] = round(delay, 1)
         if timestamp:
             self._last_msg_ts = timestamp
 
@@ -5552,11 +5672,11 @@ class StyleProfile:
         return {w for w, cnt in self.word_freq.items()
                 if cnt <= 2 and len(w) >= 4 and w not in _COMMON_RU}
 
-    def get_top_words(self, n: int = 30) -> set:
+    def get_top_words(self, n: int = 20) -> set:  # было 30 — экономия ~100 байт
         return {w for w, _ in sorted(self.word_freq.items(),
                                       key=lambda x: x[1], reverse=True)[:n]}
 
-    def get_top_bigrams(self, n: int = 20) -> set:
+    def get_top_bigrams(self, n: int = 15) -> set:  # было 20 — экономия ~80 байт
         return {bg for bg, cnt in sorted(self.bigram_freq.items(),
                                           key=lambda x: x[1], reverse=True)[:n]
                 if cnt >= 3}
@@ -5586,6 +5706,7 @@ class StyleProfile:
         return round(msg_f * 0.6 + days_f * 0.4, 3)
 
     def to_dict(self) -> dict:
+        """Возвращает профиль для сравнения (распакованные данные)"""
         n = max(self.msg_count, 1)
         return {
             "msg_count":        self.msg_count,
@@ -5595,9 +5716,9 @@ class StyleProfile:
             "caps_ratio":       round(self.caps_msgs  / n, 3),
             "emoji_ratio":      round(self.emoji_msgs / n, 3),
             "no_punct_ratio":   round(1 - self.punct_msgs / n, 3),
-            "common_words":     json.dumps(list(self.get_top_words(30))),
+            "common_words":     json.dumps(list(self.get_top_words(20))),
             "common_typos":     json.dumps(list(self.get_typos())),
-            "top_bigrams":      json.dumps(list(self.get_top_bigrams(20))),
+            "top_bigrams":      json.dumps(list(self.get_top_bigrams(15))),
             "ttr":              self.get_ttr(),
             "median_timing":    self.get_median_timing(),
             "sentence_enders":  json.dumps(self.sentence_enders),
@@ -5606,6 +5727,34 @@ class StyleProfile:
             "first_seen":       self.first_seen,
             "last_seen":        self.last_seen,
             "days_active":      self.get_days_active(),
+            "profile_maturity": self.get_profile_maturity(),
+        }
+
+    def to_storage(self) -> dict:
+        """Возвращает профиль для сохранения в БД (сжатые данные)"""
+        n = max(self.msg_count, 1)
+        return {
+            "msg_count":        self.msg_count,
+            "avg_word_len":     round(self.total_word_len / n, 3),
+            "avg_msg_len":      round(self.total_msg_len  / n, 1),
+            "punct_ratio":      round(self.punct_msgs / n, 3),
+            "caps_ratio":       round(self.caps_msgs  / n, 3),
+            "emoji_ratio":      round(self.emoji_msgs / n, 3),
+            "no_punct_ratio":   round(1 - self.punct_msgs / n, 3),
+            # Сжатые BLOB поля (zlib) — экономия ~73%
+            "common_words":     _compress(list(self.get_top_words(20))),
+            "common_typos":     _compress(list(self.get_typos())),
+            "top_bigrams":      _compress(list(self.get_top_bigrams(15))),
+            "timing_delays":    _compress(self.timing_delays),
+            # Packed форматы
+            "sentence_enders":  _pack_enders(self.sentence_enders),
+            "active_hours":     _pack_hours(self.active_hours),
+            "active_blocks":    _pack_hours({str(int(k)*3): v
+                                             for k, v in self.active_blocks.items()}),
+            "ttr":              self.get_ttr(),
+            "median_timing":    self.get_median_timing(),
+            "first_seen":       self.first_seen,
+            "last_seen":        self.last_seen,
             "profile_maturity": self.get_profile_maturity(),
         }
 
@@ -5786,10 +5935,19 @@ async def update_style_profile(guild_id: int, user_id: int, message: discord.Mes
             sp.caps_msgs       = int(row[4] * row[0])
             sp.emoji_msgs      = int(row[5] * row[0])
             try:
-                for w in json.loads(row[7] or "[]"): sp.word_freq[w] = sp.word_freq.get(w, 0) + 2
-                for w in json.loads(row[8] or "[]"): sp.word_freq[w] = sp.word_freq.get(w, 0) + 1
-                sp.sentence_enders = json.loads(row[9] or "{}")
-                sp.active_hours    = json.loads(row[10] or "{}")
+                # Декомпрессия — поддерживает оба формата (старый JSON и новый zlib)
+                for w in (_decompress(row[7]) or []):
+                    sp.word_freq[w]     = sp.word_freq.get(w, 0) + 2
+                for w in (_decompress(row[8]) or []):
+                    sp.word_freq[w]     = sp.word_freq.get(w, 0) + 1
+                for bg in (_decompress(row[12]) or []):
+                    sp.bigram_freq[bg]  = sp.bigram_freq.get(bg, 0) + 1
+                sp.timing_delays   = _decompress(row[13]) or []
+                sp.sentence_enders = _unpack_enders(row[9])
+                sp.active_hours    = _unpack_hours(row[10])
+                sp.unique_words    = set(sp.word_freq.keys())
+                if row[16]:
+                    sp.first_seen  = row[16]
             except Exception:
                 pass
         _style_cache[key] = sp
@@ -5813,7 +5971,7 @@ async def update_style_profile(guild_id: int, user_id: int, message: discord.Mes
 
 
 async def _save_style_profile(guild_id: int, user_id: int, sp: StyleProfile):
-    d   = sp.to_dict()
+    d   = sp.to_storage()   # сжатые данные для БД
     now = datetime.datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -5870,7 +6028,7 @@ async def _run_twin_check(guild: discord.Guild, target_uid: int, target_sp: Styl
     best_reasons    = []
 
     for row in rows:
-        p   = dict(zip(cols, row))
+        p   = _decompress_row(row, cols)
         uid = p["user_id"]
 
         # P3: Пропускаем уже подтверждённые пары и ложные срабатывания
