@@ -935,6 +935,15 @@ async def db_init():
                 confirmed_by    INTEGER DEFAULT 0);
             CREATE INDEX IF NOT EXISTS idx_twin_links
                 ON twin_links(guild_id, user_a, user_b);
+
+            -- Лог таймаутов для лидерборда
+            CREATE TABLE IF NOT EXISTS mute_log (
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                total_seconds INTEGER DEFAULT 0,
+                mute_count  INTEGER DEFAULT 0,
+                last_muted  TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, user_id));
         """)
         await db.commit()
 
@@ -1686,6 +1695,32 @@ async def on_member_update(before, after):
                 e.set_author(name=t(gid7, "unmuted"))
                 e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
             await ch.send(embed=e)
+
+@bot.event
+async def on_member_update(before, after):
+    """Отслеживаем таймауты для лидерборда мутов"""
+    if before.guild is None:
+        return
+
+    # Таймаут только что наложен (before=None, after=datetime)
+    if before.timed_out_until is None and after.timed_out_until is not None:
+        duration = (after.timed_out_until.replace(tzinfo=None) -
+                    datetime.datetime.utcnow()).total_seconds()
+        if duration > 0:
+            gid = after.guild.id
+            uid = after.id
+            now = datetime.datetime.utcnow().isoformat()
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("""
+                    INSERT INTO mute_log (guild_id, user_id, total_seconds, mute_count, last_muted)
+                    VALUES (?, ?, ?, 1, ?)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        total_seconds = total_seconds + excluded.total_seconds,
+                        mute_count    = mute_count + 1,
+                        last_muted    = excluded.last_muted
+                """, (gid, uid, int(duration), now))
+                await db.commit()
+
 
 @bot.event
 async def on_message_delete(message):
@@ -2476,6 +2511,62 @@ async def leaderboard(interaction: discord.Interaction):
             lines.append(f"{medals[i]} **{name}** — {xp:,} XP · ур. {xp//100} `{b}`")
         e.description = "\n".join(lines)
     await interaction.response.send_message(embed=e)
+
+@bot.tree.command(name="muteboard", description="Лидерборд по времени в муте")
+@app_commands.describe(page="Страница (по умолчанию 1)")
+async def muteboard(interaction: discord.Interaction, page: int = 1):
+    gid = interaction.guild_id
+    offset = (page - 1) * 10
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT user_id, total_seconds, mute_count
+            FROM mute_log
+            WHERE guild_id=?
+            ORDER BY total_seconds DESC
+            LIMIT 10 OFFSET ?
+        """, (gid, offset)) as c:
+            rows = await c.fetchall()
+        async with db.execute(
+            "SELECT COUNT(*) FROM mute_log WHERE guild_id=?", (gid,)
+        ) as c:
+            total = (await c.fetchone())[0]
+
+    e = build_embed(C.DANGER)
+    e.set_author(name=f"Mute Leaderboard · Стр. {page}")
+
+    medals = ["🥇","🥈","🥉"] + [f"**{i}.**" for i in range(4, 11)]
+
+    if not rows:
+        e.description = "Никто ещё не получал таймаут на этом сервере. 🎉"
+    else:
+        lines = []
+        for i, (uid, secs, count) in enumerate(rows):
+            m = interaction.guild.get_member(uid)
+            name = m.display_name if m else str(uid)
+            # Форматируем длительность
+            minutes = secs // 60
+            hours   = minutes // 60
+            days    = hours // 24
+            months  = days // 30
+            if months >= 1:
+                dur = f"{months}мес {days % 30}д"
+            elif days >= 1:
+                dur = f"{days}д {hours % 24}ч"
+            elif hours >= 1:
+                dur = f"{hours}ч {minutes % 60}мин"
+            else:
+                dur = f"{minutes}мин"
+            lines.append(
+                f"{medals[i]} **{name}** — "
+                f"⏱ {dur} · {count} раз{'а' if count in (2,3,4) else ''}"
+            )
+        e.description = "\n".join(lines)
+
+    pages = (total + 9) // 10
+    e.set_footer(text=f"Witness · Страница {page}/{pages} · Всего {total} участников")
+    await interaction.response.send_message(embed=e)
+
 
 @bot.tree.command(name="coins")
 async def coins_cmd(interaction: discord.Interaction):
