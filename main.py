@@ -1426,50 +1426,7 @@ async def on_ready():
         type=discord.ActivityType.watching, name="/help | witnessbot.gg"))
 
 
-@bot.event
-async def on_app_command_error(interaction: discord.Interaction, error):
-    """Глобальный обработчик ошибок slash команд"""
-    # Разворачиваем CommandInvokeError
-    if isinstance(error, app_commands.CommandInvokeError):
-        error = error.original
 
-    # Cooldown
-    if isinstance(error, app_commands.CommandOnCooldown):
-        msg = f"Команда на кулдауне. Повтори через **{error.retry_after:.0f}с**."
-    # Нет прав у пользователя
-    elif isinstance(error, app_commands.MissingPermissions):
-        perms = ", ".join(error.missing_permissions)
-        msg = f"Не хватает прав: `{perms}`"
-    # Нет прав у бота
-    elif isinstance(error, app_commands.BotMissingPermissions):
-        perms = ", ".join(error.missing_permissions)
-        msg = f"У бота нет прав: `{perms}`. Выдай их в настройках сервера."
-    # Forbidden от Discord
-    elif isinstance(error, discord.Forbidden):
-        msg = "Нет доступа. Проверь права бота на этом сервере."
-    # Not Found
-    elif isinstance(error, discord.NotFound):
-        msg = "Объект не найден (канал, сообщение или участник удалён)."
-    # HTTP ошибка
-    elif isinstance(error, discord.HTTPException):
-        msg = f"Ошибка Discord API: {error.status} — {error.text[:100]}"
-    # Тайм-аут внешнего API
-    elif "ClientConnectorError" in type(error).__name__ or "TimeoutError" in type(error).__name__:
-        msg = "Внешний API недоступен. Попробуй позже."
-    # Остальные
-    else:
-        msg = f"Что-то пошло не так. Попробуй ещё раз."
-        print(f"[ERROR] /{interaction.command.name if interaction.command else '?'}: {error}")
-
-    try:
-        await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-    except discord.InteractionResponded:
-        try:
-            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
-        except Exception:
-            pass
-    except Exception:
-        pass
 
 @bot.event
 async def on_message(message):
@@ -1695,31 +1652,25 @@ async def on_member_update(before, after):
                 e.set_author(name=t(gid7, "unmuted"))
                 e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
             await ch.send(embed=e)
-
-@bot.event
-async def on_member_update(before, after):
-    """Отслеживаем таймауты для лидерборда мутов"""
-    if before.guild is None:
-        return
-
-    # Таймаут только что наложен (before=None, after=datetime)
-    if before.timed_out_until is None and after.timed_out_until is not None:
-        duration = (after.timed_out_until.replace(tzinfo=None) -
-                    datetime.datetime.utcnow()).total_seconds()
-        if duration > 0:
-            gid = after.guild.id
-            uid = after.id
-            now = datetime.datetime.utcnow().isoformat()
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("""
-                    INSERT INTO mute_log (guild_id, user_id, total_seconds, mute_count, last_muted)
-                    VALUES (?, ?, ?, 1, ?)
-                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                        total_seconds = total_seconds + excluded.total_seconds,
-                        mute_count    = mute_count + 1,
-                        last_muted    = excluded.last_muted
-                """, (gid, uid, int(duration), now))
-                await db.commit()
+        # mute_log — записываем для /muteboard
+        if (before.timed_out_until is None and after.timed_out_until is not None):
+            try:
+                duration = (after.timed_out_until.replace(tzinfo=None) -
+                            datetime.datetime.utcnow()).total_seconds()
+                if duration > 0:
+                    now = datetime.datetime.utcnow().isoformat()
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute("""
+                            INSERT INTO mute_log (guild_id, user_id, total_seconds, mute_count, last_muted)
+                            VALUES (?, ?, ?, 1, ?)
+                            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                                total_seconds = total_seconds + excluded.total_seconds,
+                                mute_count    = mute_count + 1,
+                                last_muted    = excluded.last_muted
+                        """, (after.guild.id, after.id, int(duration), now))
+                        await db.commit()
+            except Exception:
+                pass
 
 
 @bot.event
@@ -6332,15 +6283,28 @@ async def twincheck_cmd(interaction: discord.Interaction,
         for uid in [member1.id, member2.id]:
             async with db.execute(
                 "SELECT msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,"
-                "emoji_ratio,no_punct_ratio,common_words,common_typos,sentence_enders,active_hours "
+                "emoji_ratio,no_punct_ratio,common_words,common_typos,sentence_enders,"
+                "active_hours,COALESCE(top_bigrams,x'') as top_bigrams,"
+                "COALESCE(ttr,0) as ttr,COALESCE(median_timing,0) as median_timing,"
+                "COALESCE(active_blocks,x'') as active_blocks,"
+                "COALESCE(profile_maturity,0) as profile_maturity "
                 "FROM style_profiles WHERE guild_id=? AND user_id=?", (gid, uid)
             ) as c:
                 row = await c.fetchone()
             if row:
                 cols = ["msg_count","avg_word_len","avg_msg_len","punct_ratio","caps_ratio",
                         "emoji_ratio","no_punct_ratio","common_words","common_typos",
-                        "sentence_enders","active_hours"]
-                profiles[uid] = dict(zip(cols, row))
+                        "sentence_enders","active_hours","top_bigrams","ttr",
+                        "median_timing","active_blocks","profile_maturity"]
+                p = dict(zip(cols, row))
+                # Декомпрессия BLOB полей
+                p["common_words"]    = json.dumps(list(_decompress(p["common_words"])   or []))
+                p["common_typos"]    = json.dumps(list(_decompress(p["common_typos"])   or []))
+                p["top_bigrams"]     = json.dumps(list(_decompress(p["top_bigrams"])    or []))
+                p["sentence_enders"] = json.dumps(_unpack_enders(p["sentence_enders"]))
+                p["active_hours"]    = json.dumps(_unpack_hours(p["active_hours"]))
+                p["active_blocks"]   = json.dumps(_unpack_hours(p["active_blocks"]))
+                profiles[uid] = p
     for uid in [member1.id, member2.id]:
         sp = _style_cache.get((gid, uid))
         if sp and uid not in profiles:
@@ -6478,13 +6442,16 @@ async def styleprofile_cmd(interaction: discord.Interaction,
         e.add_field(name="Готовность профиля",
                     value=f"**{ready:.0f}%** (нужно {MIN_MSGS_FOR_COMPARE} сообщений)", inline=False)
     elif row_data:
-        mc,aml,awl,npr,cr,er,typos_json,hours_json = row_data
-        try: typos = json.loads(typos_json)[:5]
-        except Exception: typos = []
+        mc,aml,awl,npr,cr,er,typos_raw,hours_raw = row_data
         try:
-            hrs  = json.loads(hours_json)
+            typos = (_decompress(typos_raw) or [])[:5]
+        except Exception:
+            typos = []
+        try:
+            hrs  = _unpack_hours(hours_raw)
             peak = max(hrs, key=hrs.get) if hrs else "?"
-        except Exception: peak = "?"
+        except Exception:
+            peak = "?"
         e.add_field(name="Сообщений",       value=f"**{mc}**",       inline=True)
         e.add_field(name="Ср. длина",        value=f"**{aml:.0f}**",  inline=True)
         e.add_field(name="Без пунктуации",   value=f"**{npr:.0%}**",  inline=True)
