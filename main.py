@@ -967,6 +967,27 @@ async def db_init():
                 note          TEXT DEFAULT '',
                 added_at      TEXT DEFAULT '',
                 PRIMARY KEY (guild_id, user_id));
+            CREATE TABLE IF NOT EXISTS appeals (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id     INTEGER NOT NULL,
+                user_id      INTEGER NOT NULL,
+                username     TEXT DEFAULT '',
+                action_type  TEXT NOT NULL,         -- BAN / KICK / MUTE / WARN / TEMPBAN
+                action_ref   INTEGER DEFAULT 0,     -- ID связанной записи в modlog
+                original_reason TEXT DEFAULT '',
+                appeal_text  TEXT NOT NULL,
+                why_change   TEXT DEFAULT '',
+                status       TEXT DEFAULT 'pending', -- pending / accepted / rejected
+                reviewer_id  INTEGER DEFAULT 0,
+                reviewer_note TEXT DEFAULT '',
+                submitted_at TEXT NOT NULL,
+                reviewed_at  TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_appeals_guild_status
+                ON appeals(guild_id, status);
+            CREATE INDEX IF NOT EXISTS idx_appeals_user
+                ON appeals(guild_id, user_id);
+
 
             -- #21/22 Связь участник → пригласивший
             CREATE TABLE IF NOT EXISTS member_inviter (
@@ -2196,6 +2217,164 @@ async def invdel(interaction: discord.Interaction, code: str):
     except Exception as ex:
         await interaction.response.send_message(f"❌ Ошибка: {ex}", ephemeral=True)
 
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  APPEAL SYSTEM
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class AppealModal(discord.ui.Modal, title="Подать апелляцию"):
+    """Discord Modal для ввода апелляции"""
+    def __init__(self, guild_id: int, action_type: str, original_reason: str = ""):
+        super().__init__()
+        self.guild_id        = guild_id
+        self.action_type     = action_type
+        self.original_reason = original_reason
+
+    appeal_text = discord.ui.TextInput(
+        label="Почему ты считаешь наказание несправедливым?",
+        style=discord.TextStyle.long,
+        max_length=1500,
+        required=True,
+        placeholder="Опиши ситуацию со своей стороны..."
+    )
+    why_change = discord.ui.TextInput(
+        label="Что изменишь чтобы это не повторилось?",
+        style=discord.TextStyle.long,
+        max_length=500,
+        required=False,
+        placeholder="Необязательно, но улучшит шансы..."
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        now = datetime.datetime.utcnow().isoformat()
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                # Проверяем нет ли pending апелляции от этого юзера
+                async with db.execute(
+                    "SELECT id FROM appeals WHERE guild_id=? AND user_id=? AND status='pending'",
+                    (self.guild_id, interaction.user.id)
+                ) as c:
+                    existing = await c.fetchone()
+                if existing:
+                    return await interaction.response.send_message(
+                        "У тебя уже есть активная апелляция. Дождись решения.",
+                        ephemeral=True
+                    )
+                cur = await db.execute("""
+                    INSERT INTO appeals
+                        (guild_id, user_id, username, action_type, original_reason,
+                         appeal_text, why_change, submitted_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (self.guild_id, interaction.user.id, str(interaction.user),
+                      self.action_type, self.original_reason,
+                      str(self.appeal_text), str(self.why_change), now))
+                appeal_id = cur.lastrowid
+                await db.commit()
+
+            await interaction.response.send_message(
+                f"✅ Апелляция #{appeal_id} отправлена. Модераторы рассмотрят её и ответят.",
+                ephemeral=True
+            )
+
+            # Уведомляем модераторов в лог-канале
+            guild = bot.get_guild(self.guild_id)
+            if guild:
+                ch = await get_log_ch(guild)
+                if ch:
+                    e = build_embed(C.WARNING)
+                    e.set_author(name=f"📩 Новая апелляция #{appeal_id}")
+                    e.add_field(name="Участник",      value=f"{interaction.user.mention} (`{interaction.user}`)", inline=False)
+                    e.add_field(name="Тип наказания", value=self.action_type, inline=True)
+                    if self.original_reason:
+                        e.add_field(name="Изначальная причина", value=self.original_reason[:200], inline=False)
+                    e.add_field(name="Объяснение", value=str(self.appeal_text)[:1000], inline=False)
+                    if str(self.why_change).strip():
+                        e.add_field(name="Что изменит", value=str(self.why_change)[:500], inline=False)
+                    e.set_footer(text=f"/appeal accept {appeal_id} · /appeal reject {appeal_id} <причина>")
+                    await ch.send(embed=e)
+        except Exception as ex:
+            print(f"[APPEAL] Submit error: {ex}")
+            try:
+                await interaction.response.send_message(
+                    "Ошибка при отправке апелляции. Попробуй позже.", ephemeral=True
+                )
+            except Exception:
+                pass
+
+
+class AppealButtonView(discord.ui.View):
+    """View с кнопкой 'Подать апелляцию' для DM"""
+    def __init__(self, guild_id: int, action_type: str, original_reason: str = ""):
+        super().__init__(timeout=None)
+        self.guild_id        = guild_id
+        self.action_type     = action_type
+        self.original_reason = original_reason
+
+    @discord.ui.button(label="Подать апелляцию", style=discord.ButtonStyle.primary, emoji="📩")
+    async def appeal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = AppealModal(self.guild_id, self.action_type, self.original_reason)
+        await interaction.response.send_modal(modal)
+
+
+async def send_appeal_dm(member, guild, action_type: str, reason: str = ""):
+    """Отправляет DM участнику с кнопкой подать апелляцию"""
+    try:
+        e = build_embed(C.WARNING)
+        e.set_author(
+            name=f"Наказание на {guild.name}",
+            icon_url=guild.icon.url if guild.icon else None
+        )
+        action_labels = {
+            "BAN":     "🔨 Перманентный бан",
+            "TEMPBAN": "⏱ Временный бан",
+            "KICK":    "👢 Кик",
+            "MUTE":    "🔇 Мут (таймаут)",
+            "WARN":    "⚠️ Предупреждение",
+        }
+        e.add_field(name="Действие", value=action_labels.get(action_type, action_type), inline=True)
+        if reason:
+            e.add_field(name="Причина", value=reason[:500], inline=False)
+        e.add_field(
+            name="Не согласен?",
+            value="Нажми кнопку ниже чтобы подать апелляцию. Модераторы рассмотрят её.",
+            inline=False
+        )
+        view = AppealButtonView(guild.id, action_type, reason)
+        await member.send(embed=e, view=view)
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+
+async def notify_appeal_result(user_id: int, guild_id: int, appeal_id: int,
+                                 accepted: bool, reviewer_note: str = ""):
+    """Уведомляет участника о решении по апелляции"""
+    user = bot.get_user(user_id)
+    if not user:
+        try:
+            user = await bot.fetch_user(user_id)
+        except Exception:
+            return False
+    guild = bot.get_guild(guild_id)
+    guild_name = guild.name if guild else "сервере"
+    try:
+        if accepted:
+            e = build_embed(C.SUCCESS)
+            e.set_author(name=f"Апелляция #{appeal_id} принята")
+            e.description = f"Твоя апелляция на {guild_name} **принята**. Наказание снято."
+        else:
+            e = build_embed(C.DANGER)
+            e.set_author(name=f"Апелляция #{appeal_id} отклонена")
+            e.description = f"Твоя апелляция на {guild_name} **отклонена**."
+        if reviewer_note:
+            e.add_field(name="Комментарий модератора", value=reviewer_note[:500], inline=False)
+        await user.send(embed=e)
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+
 @bot.tree.command(name="warn", description="Выдать варн [Premium]")
 @app_commands.describe(member="Пользователь", reason="Причина")
 async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "Не указана"):
@@ -2212,7 +2391,7 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
     e.add_field(name="Варнов всего", value=f"**{len(warns)}/5**",    inline=True)
     e.add_field(name="Причина",      value=reason,                   inline=False)
     await interaction.response.send_message(embed=e)
-    # DM участнику
+    # DM участнику с кнопкой апелляции
     try:
         dm_e = build_embed(C.WARNING)
         dm_e.set_author(name=f"Предупреждение на {interaction.guild.name}",
@@ -2220,8 +2399,9 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
         dm_e.add_field(name="Причина",      value=reason,                        inline=False)
         dm_e.add_field(name="Варнов всего", value=f"**{len(warns)}/5**",         inline=True)
         dm_e.add_field(name="Модератор",    value=interaction.user.display_name, inline=True)
-        dm_e.set_footer(text="Если считаешь это несправедливым — обратись к администратору")
-        await member.send(embed=dm_e)
+        dm_e.set_footer(text="Не согласен? Нажми кнопку ниже чтобы подать апелляцию")
+        appeal_view = AppealButtonView(interaction.guild_id, "WARN", reason)
+        await member.send(embed=dm_e, view=appeal_view)
     except (discord.Forbidden, discord.HTTPException):
         pass  # DM закрыты
     # Записываем в modlog
@@ -2516,6 +2696,229 @@ async def leaderboard(interaction: discord.Interaction):
             lines.append(f"{medals[i]} **{name}** — {xp:,} XP · ур. {xp//100} `{b}`")
         e.description = "\n".join(lines)
     await interaction.response.send_message(embed=e)
+
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  /appeal команды
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="appeal", description="Подать апелляцию на наказание")
+@app_commands.describe(action="submit (подать) / list / view / accept / reject",
+                       appeal_id="ID апелляции (для view/accept/reject)",
+                       note="Комментарий (для accept/reject)")
+async def appeal_cmd(interaction: discord.Interaction,
+                     action: str = "submit",
+                     appeal_id: int = 0,
+                     note: str = ""):
+    gid = interaction.guild_id
+
+    # ── SUBMIT — открываем модал ───────────────────────────────
+    if action == "submit":
+        # Проверяем что у участника есть активное наказание
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT action, reason FROM modlog
+                WHERE guild_id=? AND user_id=?
+                  AND action IN ('BAN','KICK','MUTE','WARN','TEMPBAN','AUTO_MUTE','AUTO_KICK','AUTO_BAN')
+                ORDER BY id DESC LIMIT 1
+            """, (gid, interaction.user.id)) as c:
+                last = await c.fetchone()
+
+        action_type = last[0].replace("AUTO_", "") if last else "WARN"
+        reason      = last[1] if last and last[1] else ""
+
+        modal = AppealModal(gid, action_type, reason)
+        return await interaction.response.send_modal(modal)
+
+    # Остальные действия требуют прав модератора
+    if not interaction.user.guild_permissions.manage_messages:
+        return await interaction.response.send_message(
+            "❌ Нужно право `Manage Messages` для управления апелляциями.",
+            ephemeral=True
+        )
+
+    # ── LIST — список апелляций ────────────────────────────────
+    if action == "list":
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT id, user_id, username, action_type, status, submitted_at
+                FROM appeals WHERE guild_id=?
+                ORDER BY
+                    CASE status WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END,
+                    id DESC
+                LIMIT 25
+            """, (gid,)) as c:
+                rows = await c.fetchall()
+
+        e = build_embed(C.PRIMARY)
+        e.set_author(name=f"📋 Апелляции · {interaction.guild.name}")
+        if not rows:
+            e.description = "Апелляций пока нет."
+            return await interaction.response.send_message(embed=e, ephemeral=True)
+
+        icons = {"pending":"⏳","accepted":"✅","rejected":"❌"}
+        lines = []
+        for aid, uid, uname, atype, status, ts in rows:
+            ic = icons.get(status, "•")
+            lines.append(f"{ic} **#{aid}** · `{uname}` · {atype} · *{ts[:10]}*")
+        e.description = "\n".join(lines)
+        e.set_footer(text="/appeal view <id> — детали · /appeal accept <id> · /appeal reject <id>")
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+
+    # ── VIEW — детали апелляции ────────────────────────────────
+    if action == "view":
+        if not appeal_id:
+            return await interaction.response.send_message("Укажи `appeal_id`.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT user_id, username, action_type, original_reason,
+                       appeal_text, why_change, status, reviewer_id, reviewer_note,
+                       submitted_at, reviewed_at
+                FROM appeals WHERE id=? AND guild_id=?
+            """, (appeal_id, gid)) as c:
+                r = await c.fetchone()
+        if not r:
+            return await interaction.response.send_message("Апелляция не найдена.", ephemeral=True)
+
+        uid, uname, atype, orig_reason, atext, why, status, rev_id, rev_note, sub_at, rev_at = r
+        member = interaction.guild.get_member(uid)
+        color  = {"pending":C.WARNING,"accepted":C.SUCCESS,"rejected":C.DANGER}.get(status, C.PRIMARY)
+        e = build_embed(color)
+        e.set_author(name=f"Апелляция #{appeal_id} · {status}")
+        e.add_field(name="Участник", value=f"{member.mention if member else uname} (`{uname}`)", inline=True)
+        e.add_field(name="Наказание", value=atype, inline=True)
+        e.add_field(name="Подана",   value=sub_at[:10], inline=True)
+        if orig_reason:
+            e.add_field(name="Изначальная причина", value=orig_reason[:300], inline=False)
+        e.add_field(name="Объяснение от участника", value=atext[:1000], inline=False)
+        if why:
+            e.add_field(name="Что изменит", value=why[:500], inline=False)
+        if status != "pending":
+            reviewer = interaction.guild.get_member(rev_id)
+            e.add_field(
+                name="Рассмотрено",
+                value=f"{reviewer.mention if reviewer else rev_id} — *{rev_at[:10]}*",
+                inline=False
+            )
+            if rev_note:
+                e.add_field(name="Комментарий", value=rev_note[:500], inline=False)
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+
+    # ── ACCEPT — принять + снять наказание ─────────────────────
+    if action == "accept":
+        if not appeal_id:
+            return await interaction.response.send_message("Укажи `appeal_id`.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT user_id, action_type, status FROM appeals WHERE id=? AND guild_id=?",
+                (appeal_id, gid)
+            ) as c:
+                r = await c.fetchone()
+        if not r:
+            return await interaction.followup.send("Апелляция не найдена.", ephemeral=True)
+        uid, atype, status = r
+        if status != "pending":
+            return await interaction.followup.send(
+                f"Апелляция уже {status}.", ephemeral=True
+            )
+
+        # Автоматическое снятие наказания
+        unbanned_msg = ""
+        try:
+            if atype in ("BAN", "TEMPBAN"):
+                try:
+                    user = await bot.fetch_user(uid)
+                    await interaction.guild.unban(user, reason=f"Апелляция #{appeal_id} принята")
+                    unbanned_msg = " · разбанен"
+                    # Снимаем активный tempban
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute(
+                            "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=? AND unbanned=0",
+                            (gid, uid)
+                        )
+                        await db.commit()
+                except discord.NotFound:
+                    unbanned_msg = " · уже разбанен"
+                except discord.Forbidden:
+                    unbanned_msg = " · ⚠️ нет прав разбанить"
+            elif atype == "MUTE":
+                member = interaction.guild.get_member(uid)
+                if member and member.is_timed_out():
+                    try:
+                        await member.timeout(None, reason=f"Апелляция #{appeal_id}")
+                        unbanned_msg = " · мут снят"
+                    except discord.Forbidden:
+                        unbanned_msg = " · ⚠️ нет прав снять мут"
+            elif atype == "WARN":
+                # Снимаем последний варн
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("""
+                        DELETE FROM warnings WHERE id IN (
+                            SELECT id FROM warnings
+                            WHERE guild_id=? AND user_id=?
+                            ORDER BY id DESC LIMIT 1
+                        )
+                    """, (gid, uid))
+                    await db.commit()
+                unbanned_msg = " · варн снят"
+        except Exception as ex:
+            print(f"[APPEAL] Auto-unpunish error: {ex}")
+
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE appeals SET status='accepted', reviewer_id=?,
+                                    reviewer_note=?, reviewed_at=?
+                WHERE id=? AND guild_id=?
+            """, (interaction.user.id, note, now, appeal_id, gid))
+            await db.commit()
+
+        await notify_appeal_result(uid, gid, appeal_id, True, note)
+        await add_modlog(gid, uid, interaction.user.id, "APPEAL_ACCEPTED", f"#{appeal_id}: {note}")
+        await interaction.followup.send(
+            f"✅ Апелляция #{appeal_id} принята{unbanned_msg}.", ephemeral=True
+        )
+        return
+
+    # ── REJECT — отклонить ─────────────────────────────────────
+    if action == "reject":
+        if not appeal_id:
+            return await interaction.response.send_message("Укажи `appeal_id`.", ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT user_id, status FROM appeals WHERE id=? AND guild_id=?",
+                (appeal_id, gid)
+            ) as c:
+                r = await c.fetchone()
+        if not r:
+            return await interaction.response.send_message("Апелляция не найдена.", ephemeral=True)
+        uid, status = r
+        if status != "pending":
+            return await interaction.response.send_message(
+                f"Апелляция уже {status}.", ephemeral=True
+            )
+
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE appeals SET status='rejected', reviewer_id=?,
+                                    reviewer_note=?, reviewed_at=?
+                WHERE id=? AND guild_id=?
+            """, (interaction.user.id, note, now, appeal_id, gid))
+            await db.commit()
+
+        await notify_appeal_result(uid, gid, appeal_id, False, note)
+        await add_modlog(gid, uid, interaction.user.id, "APPEAL_REJECTED", f"#{appeal_id}: {note}")
+        return await interaction.response.send_message(
+            f"❌ Апелляция #{appeal_id} отклонена.", ephemeral=True
+        )
+
+    return await interaction.response.send_message(
+        "Действие: `submit`, `list`, `view`, `accept`, `reject`.", ephemeral=True
+    )
 
 @bot.tree.command(name="muteboard", description="Лидерборд по времени в муте")
 @app_commands.describe(page="Страница (по умолчанию 1)")
