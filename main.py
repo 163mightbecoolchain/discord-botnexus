@@ -936,6 +936,47 @@ async def db_init():
             CREATE INDEX IF NOT EXISTS idx_twin_links
                 ON twin_links(guild_id, user_a, user_b);
 
+            -- #20 Граф взаимодействий между участниками
+            CREATE TABLE IF NOT EXISTS interaction_graph (
+                guild_id    INTEGER NOT NULL,
+                user_a      INTEGER NOT NULL,
+                user_b      INTEGER NOT NULL,
+                mentions    INTEGER DEFAULT 0,
+                replies     INTEGER DEFAULT 0,
+                conflicts   INTEGER DEFAULT 0,
+                voice_overlap INTEGER DEFAULT 0,
+                last_seen   TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, user_a, user_b));
+
+            -- #48 Профили забаненных (для детекта ban evasion)
+            CREATE TABLE IF NOT EXISTS banned_profiles (
+                guild_id      INTEGER NOT NULL,
+                user_id       INTEGER NOT NULL,
+                username      TEXT DEFAULT '',
+                style_blob    BLOB,
+                msg_count     INTEGER DEFAULT 0,
+                banned_at     TEXT DEFAULT '',
+                ban_reason    TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, user_id));
+
+            -- #52 Watchlist стилей для наблюдения
+            CREATE TABLE IF NOT EXISTS style_watchlist (
+                guild_id      INTEGER NOT NULL,
+                user_id       INTEGER NOT NULL,
+                added_by      INTEGER DEFAULT 0,
+                note          TEXT DEFAULT '',
+                added_at      TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, user_id));
+
+            -- #21/22 Связь участник → пригласивший
+            CREATE TABLE IF NOT EXISTS member_inviter (
+                guild_id      INTEGER NOT NULL,
+                user_id       INTEGER NOT NULL,
+                inviter_id    INTEGER DEFAULT 0,
+                invite_code   TEXT DEFAULT '',
+                joined_at     TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, user_id));
+
             -- Лог таймаутов для лидерборда
             CREATE TABLE IF NOT EXISTS mute_log (
                 guild_id    INTEGER NOT NULL,
@@ -1583,6 +1624,13 @@ async def on_member_join(member):
             except discord.Forbidden:
                 pass
 
+    # ── Блок 4: Детект обхода бана (ban evasion) ───────────────
+    # Сравниваем стиль новичка с профилями забаненных
+    try:
+        await _check_ban_evasion(member)
+    except Exception as ex:
+        print(f"[BAN EVASION] Error: {ex}")
+
 @bot.event
 async def on_member_remove(member):
     ch = await sec_check(member.guild, "leaves")
@@ -1597,6 +1645,12 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_member_ban(guild, user):
+    # Блок 4: Сохраняем стиль-профиль забаненного для детекта обхода бана
+    try:
+        await save_banned_profile(guild.id, user.id, str(user.name))
+    except Exception:
+        pass
+
     ch = await sec_check(guild, "bans")
     if not ch: return
     gid3 = guild.id
@@ -5628,6 +5682,11 @@ def _has_emoji(text: str) -> bool:
 
 
 class StyleProfile:
+    """
+    Расширенный стилометрический профиль (50+ признаков).
+    Признаки сгруппированы: лексика, синтаксис, пунктуация, тайминг,
+    поведение, технические отпечатки.
+    """
     def __init__(self):
         self.msg_count         = 0
         self.total_word_len    = 0.0
@@ -5637,7 +5696,8 @@ class StyleProfile:
         self.emoji_msgs        = 0
         self.edit_count        = 0
         self.word_freq: dict   = {}
-        self.bigram_freq: dict = {}
+        self.bigram_freq: dict = {}        # биграммы символов
+        self.word_bigrams: dict = {}       # #1 биграммы слов ("ну короче")
         self.sentence_enders: dict = {}
         self.active_blocks: dict   = {}
         self.active_hours: dict    = {}
@@ -5646,8 +5706,40 @@ class StyleProfile:
         self.unique_words: set     = set()
         self.first_seen: str       = ""
         self.last_seen: str        = ""
+        # ── Новые признаки ──
+        self.total_sentences   = 0          # #3 для средней длины предложения
+        self.double_punct      = 0          # #3 "!!", "??", "..."
+        self.ellipsis_count    = 0          # #3 "..."
+        self.paren_count       = 0          # #3 ")))" "((("
+        self.cap_start_msgs    = 0          # #4 начинает с заглавной
+        self.lowercase_msgs    = 0          # #4 всё с маленькой
+        self.latin_in_ru       = 0          # #5 латинские буквы в русском
+        self.digits_as_num     = 0          # #7 "5" цифрами
+        self.digits_as_word    = 0          # #7 "пять" словами
+        self.newline_msgs      = 0          # #10 многострочные
+        self.space_before_punct = 0         # #3 пробел перед знаком
+        self.laugh_freq: dict  = {}         # #34/39 "ахах"/"лол"/"ору"
+        self.greeting_freq: dict = {}       # #34 "прив"/"хай"
+        self.filler_freq: dict = {}         # #38 "ну"/"типа"/"как бы"
+        self.agree_freq: dict  = {}         # #35 "да"/"ага"/"+"
+        self.emoji_specific: dict = {}      # #33 конкретные эмодзи
+        self.short_answers     = 0          # #40 односложные
+        self.reactions_given   = 0          # #14 поведение
+        self.channels_seen: set = set()     # #15 каналы
+        self.images_posted     = 0          # #28 кол-во картинок
+        self.links_posted      = 0          # #32 кол-во ссылок
+        self.link_domains: dict = {}        # #32 какие домены
+        # ── Блок 1: новые признаки ──
+        self.translit_count    = 0          # #6 транслит русских слов латиницей
+        self.slang_freq: dict  = {}         # #8 индивидуальный сленг
+        self.total_paragraphs  = 0          # #9 длина абзацев
+        self.total_para_len    = 0          # #9 суммарная длина абзацев
+        self.attach_names: dict = {}        # #30 паттерны имён файлов
+        self.image_dims: dict  = {}         # #31 размеры изображений
+        self.last_msgs: list   = []         # #25 последние сообщения (для эхо)
 
-    def update(self, text: str, hour: int, timestamp: float = 0.0):
+    def update(self, text: str, hour: int, timestamp: float = 0.0,
+               channel_id: int = 0):
         import re as _re2
         if not text or len(text) < 2:
             return
@@ -5656,50 +5748,178 @@ class StyleProfile:
             self.first_seen = now_iso
         self.last_seen = now_iso
         self.msg_count += 1
-        words = text.lower().split()
+        low = text.lower()
+        words = low.split()
         if not words:
             return
+
+        if channel_id:
+            self.channels_seen.add(channel_id)
+
         wlens = [len(w.strip(".,!?;:\"'()[]")) for w in words if len(w) > 1]
         if wlens:
             self.total_word_len += sum(wlens) / len(wlens)
         self.total_msg_len += len(text)
-        last = text.rstrip()[-1] if text.rstrip() else ""
+
+        # ── Пунктуация и окончания ──
+        stripped = text.rstrip()
+        last = stripped[-1] if stripped else ""
         if last in ".!?":
             self.punct_msgs += 1
             self.sentence_enders[last] = self.sentence_enders.get(last, 0) + 1
         else:
             self.sentence_enders["none"] = self.sentence_enders.get("none", 0) + 1
+
+        # #3 Двойная пунктуация, многоточия, скобки
+        if _re2.search(r'[!?]{2,}', text):
+            self.double_punct += 1
+        if '...' in text or '…' in text:
+            self.ellipsis_count += 1
+        if _re2.search(r'\){2,}|\({2,}', text):
+            self.paren_count += 1
+        if _re2.search(r'\s+[.,!?;:]', text):
+            self.space_before_punct += 1
+
+        # #3 Количество предложений
+        sentences = _re2.split(r'[.!?]+', stripped)
+        self.total_sentences += len([s for s in sentences if s.strip()])
+
+        # #4 Регистр в начале
+        first_letter = next((c for c in text if c.isalpha()), "")
+        if first_letter:
+            if first_letter.isupper():
+                self.cap_start_msgs += 1
+            else:
+                self.lowercase_msgs += 1
+
+        # caps
         letters = [c for c in text if c.isalpha()]
         if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.6:
             self.caps_msgs += 1
+
+        # #5 Латинские буквы в русском тексте (раскладка-ошибки)
+        has_cyrillic = bool(_re2.search(r'[а-яё]', low))
+        has_latin    = bool(_re2.search(r'[a-z]', low))
+        if has_cyrillic and has_latin:
+            self.latin_in_ru += 1
+
+        # #7 Числа цифрами vs словами
+        if _re2.search(r'\d', text):
+            self.digits_as_num += 1
+        num_words = ['один','два','три','четыре','пять','шесть','семь','восемь','девять','десять',
+                     'ноль','сто','тысяча','много']
+        if any(nw in words for nw in num_words):
+            self.digits_as_word += 1
+
+        # #10 Многострочные
+        if '\n' in text:
+            self.newline_msgs += 1
+
+        # #40 Односложные ответы
+        if len(words) <= 2:
+            self.short_answers += 1
+
+        # emoji
         if _has_emoji(text):
             self.emoji_msgs += 1
+            # #33 Конкретные эмодзи
+            for ch in text:
+                if ch in '😀😁😂🤣😊😍🥺😎😭🔥💀👍👎❤️🙏✨🎉😅😏🤔':
+                    self.emoji_specific[ch] = self.emoji_specific.get(ch, 0) + 1
+
+        # ── Слова ──
         for word in words:
             w = _re2.sub(r"[^а-яёa-z]", "", word.lower())
             if len(w) >= 3 and w not in _STOP_WORDS:
                 self.word_freq[w] = self.word_freq.get(w, 0) + 1
                 self.unique_words.add(w)
-        clean = _re2.sub(r"[^а-яёa-z]", "", text.lower())
+
+        # #1 Биграммы слов
+        clean_words = [_re2.sub(r"[^а-яёa-z]", "", w.lower()) for w in words]
+        clean_words = [w for w in clean_words if len(w) >= 2]
+        for i in range(len(clean_words) - 1):
+            wb = f"{clean_words[i]} {clean_words[i+1]}"
+            self.word_bigrams[wb] = self.word_bigrams.get(wb, 0) + 1
+
+        # #34/39 Смех
+        for pat, key in [(r'ах[аи]х', 'ахах'), (r'хах', 'хах'), (r'\bлол\b', 'лол'),
+                          (r'\bору\b', 'ору'), (r'\bржу\b', 'ржу'), (r'\bхех\b', 'хех'),
+                          (r'\bкек\b', 'кек'), (r'\bлмао\b', 'лмао')]:
+            if _re2.search(pat, low):
+                self.laugh_freq[key] = self.laugh_freq.get(key, 0) + 1
+
+        # #34 Приветствия
+        for pat, key in [(r'\bприв', 'прив'), (r'\bхай\b', 'хай'), (r'\bдоров', 'доров'),
+                          (r'\bздаров', 'здаров'), (r'\bхеллоу', 'хеллоу'), (r'\bку\b', 'ку')]:
+            if _re2.search(pat, low):
+                self.greeting_freq[key] = self.greeting_freq.get(key, 0) + 1
+
+        # #38 Заполнители
+        for f in ['ну', 'типа', 'как бы', 'короче', 'вообще', 'это самое', 'блин']:
+            if f in low:
+                self.filler_freq[f] = self.filler_freq.get(f, 0) + 1
+
+        # #35 Согласие
+        for pat, key in [(r'\bда\b', 'да'), (r'\bага\b', 'ага'), (r'\bугу\b', 'угу'),
+                          (r'\bне\b', 'не'), (r'\bнеа\b', 'неа')]:
+            if _re2.search(pat, low):
+                self.agree_freq[key] = self.agree_freq.get(key, 0) + 1
+
+        # #6 Транслит — русские слова латиницей (privet, kak dela)
+        translit_markers = ['privet','poka','kak','dela','spasibo','pozhalujsta',
+                            'davaj','normalno','horosho','ploho','ladno','tipa',
+                            'koroche','vobsche','seychas','zavtra','segodnya']
+        if has_latin and not has_cyrillic:
+            if any(tm in low for tm in translit_markers):
+                self.translit_count += 1
+
+        # #8 Сленг/мемы — индивидуальный набор словечек
+        slang_words = ['кринж','краш','вайб','рофл','чилл','хайп','флекс','зашквар',
+                       'агонь','имба','нуб','рандом','токсик','читер','рил','кеш',
+                       'пруф','сус','база','кринге','вписка','тильт','гг','изи']
+        for sw in slang_words:
+            if sw in low:
+                self.slang_freq[sw] = self.slang_freq.get(sw, 0) + 1
+
+        # #9 Длина абзацев
+        paragraphs = [p for p in text.split('\n') if p.strip()]
+        if paragraphs:
+            self.total_paragraphs += len(paragraphs)
+            self.total_para_len += sum(len(p) for p in paragraphs)
+
+        # #25 Эхо-паттерн — храним последние сообщения (хэши)
+        msg_hash = hash(low.strip()[:50])
+        self.last_msgs.append(msg_hash)
+        if len(self.last_msgs) > 20:
+            self.last_msgs = self.last_msgs[-20:]
+
+        # ── Биграммы символов ──
+        clean = _re2.sub(r"[^а-яёa-z]", "", low)
         for i in range(len(clean) - 1):
             bg = clean[i:i+2]
             self.bigram_freq[bg] = self.bigram_freq.get(bg, 0) + 1
-        # Обрезаем bigram_freq до топ-100 каждые 50 сообщений
-        if self.msg_count % 50 == 0 and len(self.bigram_freq) > 100:
-            top_bg = sorted(self.bigram_freq.items(), key=lambda x: x[1], reverse=True)[:100]
-            self.bigram_freq = dict(top_bg)
-        # Обрезаем word_freq до топ-200 (экономия памяти и места на диске)
-        if self.msg_count % 50 == 0 and len(self.word_freq) > 200:
-            top_wf = sorted(self.word_freq.items(), key=lambda x: x[1], reverse=True)[:200]
-            self.word_freq = dict(top_wf)
-            self.unique_words = set(self.word_freq.keys())
+
+        # Обрезка для экономии памяти
+        if self.msg_count % 50 == 0:
+            if len(self.bigram_freq) > 100:
+                self.bigram_freq = dict(sorted(self.bigram_freq.items(),
+                    key=lambda x: x[1], reverse=True)[:100])
+            if len(self.word_freq) > 200:
+                self.word_freq = dict(sorted(self.word_freq.items(),
+                    key=lambda x: x[1], reverse=True)[:200])
+                self.unique_words = set(self.word_freq.keys())
+            if len(self.word_bigrams) > 100:
+                self.word_bigrams = dict(sorted(self.word_bigrams.items(),
+                    key=lambda x: x[1], reverse=True)[:100])
+
         block = str(hour // 3)
         self.active_blocks[block] = self.active_blocks.get(block, 0) + 1
         self.active_hours[str(hour)] = self.active_hours.get(str(hour), 0) + 1
+
+        # #11 Тайминг
         if timestamp and self._last_msg_ts:
             delay = timestamp - self._last_msg_ts
             if 2 <= delay <= 3600:
-                # Reservoir sampling — храним только 50 задержек вместо 200
-                # Экономия: ~900 байт на участника
                 if len(self.timing_delays) < 50:
                     self.timing_delays.append(round(delay, 1))
                 else:
@@ -5714,14 +5934,19 @@ class StyleProfile:
         return {w for w, cnt in self.word_freq.items()
                 if cnt <= 2 and len(w) >= 4 and w not in _COMMON_RU}
 
-    def get_top_words(self, n: int = 20) -> set:  # было 30 — экономия ~100 байт
+    def get_top_words(self, n: int = 20) -> set:
         return {w for w, _ in sorted(self.word_freq.items(),
                                       key=lambda x: x[1], reverse=True)[:n]}
 
-    def get_top_bigrams(self, n: int = 15) -> set:  # было 20 — экономия ~80 байт
+    def get_top_bigrams(self, n: int = 15) -> set:
         return {bg for bg, cnt in sorted(self.bigram_freq.items(),
                                           key=lambda x: x[1], reverse=True)[:n]
                 if cnt >= 3}
+
+    def get_top_word_bigrams(self, n: int = 15) -> set:
+        return {wb for wb, cnt in sorted(self.word_bigrams.items(),
+                                          key=lambda x: x[1], reverse=True)[:n]
+                if cnt >= 2}
 
     def get_ttr(self) -> float:
         total = sum(self.word_freq.values())
@@ -5732,6 +5957,29 @@ class StyleProfile:
             return 0.0
         s = sorted(self.timing_delays)
         return s[len(s) // 2]
+
+    def get_avg_sentence_len(self) -> float:
+        if self.total_sentences == 0:
+            return 0.0
+        return round(self.total_msg_len / self.total_sentences, 1)
+
+    def get_avg_paragraph_len(self) -> float:
+        if self.total_paragraphs == 0:
+            return 0.0
+        return round(self.total_para_len / self.total_paragraphs, 1)
+
+    def get_lexical_signature(self) -> dict:
+        """Топ паттерны: смех, приветствия, заполнители, согласие, сленг"""
+        def top(d, n=3):
+            return [k for k, _ in sorted(d.items(), key=lambda x: x[1], reverse=True)[:n]]
+        return {
+            "laugh":    top(self.laugh_freq),
+            "greeting": top(self.greeting_freq),
+            "filler":   top(self.filler_freq),
+            "agree":    top(self.agree_freq),
+            "emoji":    top(self.emoji_specific, 5),
+            "slang":    top(self.slang_freq, 5),   # #8
+        }
 
     def get_days_active(self) -> int:
         if not self.first_seen:
@@ -5747,13 +5995,30 @@ class StyleProfile:
         days_f = min(self.get_days_active() / max(MIN_DAYS_FOR_COMPARE, 1), 1.0)
         return round(msg_f * 0.6 + days_f * 0.4, 3)
 
-    def to_dict(self) -> dict:
-        """Возвращает профиль для сравнения (распакованные данные)"""
+    def _ratios(self) -> dict:
         n = max(self.msg_count, 1)
         return {
+            "double_punct_ratio":  round(self.double_punct / n, 3),
+            "ellipsis_ratio":      round(self.ellipsis_count / n, 3),
+            "paren_ratio":         round(self.paren_count / n, 3),
+            "cap_start_ratio":     round(self.cap_start_msgs / n, 3),
+            "lowercase_ratio":     round(self.lowercase_msgs / n, 3),
+            "latin_in_ru_ratio":   round(self.latin_in_ru / n, 3),
+            "newline_ratio":       round(self.newline_msgs / n, 3),
+            "short_answer_ratio":  round(self.short_answers / n, 3),
+            "space_punct_ratio":   round(self.space_before_punct / n, 3),
+            "digit_num_ratio":     round(self.digits_as_num / n, 3),
+            "translit_ratio":      round(self.translit_count / n, 3),   # #6
+            "avg_paragraph_len":   self.get_avg_paragraph_len(),         # #9
+        }
+
+    def to_dict(self) -> dict:
+        n = max(self.msg_count, 1)
+        base = {
             "msg_count":        self.msg_count,
             "avg_word_len":     round(self.total_word_len / n, 3),
             "avg_msg_len":      round(self.total_msg_len  / n, 1),
+            "avg_sentence_len": self.get_avg_sentence_len(),
             "punct_ratio":      round(self.punct_msgs / n, 3),
             "caps_ratio":       round(self.caps_msgs  / n, 3),
             "emoji_ratio":      round(self.emoji_msgs / n, 3),
@@ -5761,21 +6026,24 @@ class StyleProfile:
             "common_words":     json.dumps(list(self.get_top_words(20))),
             "common_typos":     json.dumps(list(self.get_typos())),
             "top_bigrams":      json.dumps(list(self.get_top_bigrams(15))),
+            "word_bigrams":     json.dumps(list(self.get_top_word_bigrams(15))),
             "ttr":              self.get_ttr(),
             "median_timing":    self.get_median_timing(),
             "sentence_enders":  json.dumps(self.sentence_enders),
             "active_hours":     json.dumps(self.active_hours),
             "active_blocks":    json.dumps(self.active_blocks),
+            "lexical_sig":      json.dumps(self.get_lexical_signature()),
             "first_seen":       self.first_seen,
             "last_seen":        self.last_seen,
             "days_active":      self.get_days_active(),
             "profile_maturity": self.get_profile_maturity(),
         }
+        base.update(self._ratios())
+        return base
 
     def to_storage(self) -> dict:
-        """Возвращает профиль для сохранения в БД (сжатые данные)"""
         n = max(self.msg_count, 1)
-        return {
+        d = {
             "msg_count":        self.msg_count,
             "avg_word_len":     round(self.total_word_len / n, 3),
             "avg_msg_len":      round(self.total_msg_len  / n, 1),
@@ -5783,12 +6051,13 @@ class StyleProfile:
             "caps_ratio":       round(self.caps_msgs  / n, 3),
             "emoji_ratio":      round(self.emoji_msgs / n, 3),
             "no_punct_ratio":   round(1 - self.punct_msgs / n, 3),
-            # Сжатые BLOB поля (zlib) — экономия ~73%
             "common_words":     _compress(list(self.get_top_words(20))),
             "common_typos":     _compress(list(self.get_typos())),
             "top_bigrams":      _compress(list(self.get_top_bigrams(15))),
+            "word_bigrams":     _compress(list(self.get_top_word_bigrams(15))),
             "timing_delays":    _compress(self.timing_delays),
-            # Packed форматы
+            "lexical_sig":      _compress(self.get_lexical_signature()),
+            "extra_ratios":     _compress(self._ratios()),
             "sentence_enders":  _pack_enders(self.sentence_enders),
             "active_hours":     _pack_hours(self.active_hours),
             "active_blocks":    _pack_hours({str(int(k)*3): v
@@ -5799,6 +6068,8 @@ class StyleProfile:
             "last_seen":        self.last_seen,
             "profile_maturity": self.get_profile_maturity(),
         }
+        return d
+
 
 def _jaccard(a: set, b: set) -> float:
     if not a or not b: return 0.0
@@ -5827,7 +6098,7 @@ async def get_server_vocab(guild_id: int) -> set:
         word_counts: dict = {}
         for (wjson,) in rows:
             try:
-                for w in json.loads(wjson or "[]"):
+                for w in (_decompress(wjson) or []):
                     word_counts[w] = word_counts.get(w, 0) + 1
             except Exception:
                 pass
@@ -5945,6 +6216,77 @@ def compare_profiles(p1: dict, p2: dict,
         tolerance = max(t1_med, t2_med) * 0.3
         add(12, _scalar_sim(t1_med, t2_med, tolerance), "Скорость печати")
 
+    # ── #1: Биграммы слов (фразы — очень уникальны) ──────────
+    try:
+        wb1 = set(json.loads(p1.get("word_bigrams", "[]")))
+        wb2 = set(json.loads(p2.get("word_bigrams", "[]")))
+        if wb1 and wb2:
+            sim = _jaccard(wb1, wb2)
+            common_wb = wb1 & wb2
+            if len(common_wb) >= 2:
+                sim = min(1.0, sim * 1.3)
+                reasons.append("Одинаковые фразы: " +
+                                ", ".join(f"«{w}»" for w in list(common_wb)[:4]))
+            add(20, sim, "Совпадение фраз")
+    except Exception:
+        pass
+
+    # ── #33-39: Лексическая подпись (смех/приветствия/филлеры) ─
+    try:
+        ls1 = json.loads(p1.get("lexical_sig", "{}"))
+        ls2 = json.loads(p2.get("lexical_sig", "{}"))
+        if ls1 and ls2:
+            sig_score = 0.0; sig_n = 0
+            for cat in ["laugh", "greeting", "filler", "agree", "emoji"]:
+                s1 = set(ls1.get(cat, [])); s2 = set(ls2.get(cat, []))
+                if s1 or s2:
+                    sig_n += 1
+                    sig_score += _jaccard(s1, s2)
+            if sig_n:
+                ls_sim = sig_score / sig_n
+                add(15, ls_sim, "Манера речи (смех/сленг)")
+                # Конкретные совпадения
+                same_laugh = set(ls1.get("laugh", [])) & set(ls2.get("laugh", []))
+                if same_laugh:
+                    reasons.append(f"Одинаковый смех: {', '.join(same_laugh)}")
+    except Exception:
+        pass
+
+    # ── #3-4: Синтаксис и пунктуационная подпись ──────────────
+    pairs = [
+        ("avg_sentence_len", 8,  "Длина предложений", 5),
+        ("double_punct_ratio", 6, "Двойная пунктуация", 0.1),
+        ("ellipsis_ratio",   6,  "Многоточия", 0.1),
+        ("paren_ratio",      6,  "Скобки )))", 0.1),
+        ("cap_start_ratio",  8,  "Заглавные в начале", 0.15),
+        ("lowercase_ratio",  8,  "Письмо без заглавных", 0.15),
+        ("latin_in_ru_ratio",10, "Раскладка-ошибки (лат+рус)", 0.1),
+        ("newline_ratio",    5,  "Многострочность", 0.1),
+        ("short_answer_ratio",6, "Односложные ответы", 0.15),
+        ("space_punct_ratio",5,  "Пробел перед знаком", 0.08),
+        ("digit_num_ratio",  5,  "Числа цифрами", 0.15),
+        ("translit_ratio",   10, "Транслит (рус латиницей)", 0.08),
+        ("avg_paragraph_len", 6, "Длина абзацев", 15),
+    ]
+    for key, weight, label, tol in pairs:
+        v1 = p1.get(key); v2 = p2.get(key)
+        if v1 is not None and v2 is not None:
+            add(weight, _scalar_sim(v1, v2, tol), label)
+
+    # ── #8: Сленг (отдельный вес, через lexical_sig) ──────────
+    try:
+        ls1 = json.loads(p1.get("lexical_sig", "{}")) if isinstance(p1.get("lexical_sig"), str) else (_decompress(p1.get("lexical_sig")) or {})
+        ls2 = json.loads(p2.get("lexical_sig", "{}")) if isinstance(p2.get("lexical_sig"), str) else (_decompress(p2.get("lexical_sig")) or {})
+        sl1 = set(ls1.get("slang", [])); sl2 = set(ls2.get("slang", []))
+        if sl1 and sl2:
+            sl_sim = _jaccard(sl1, sl2)
+            add(10, sl_sim, "Сленг")
+            same_slang = sl1 & sl2
+            if len(same_slang) >= 2:
+                reasons.append(f"Общий сленг: {', '.join(list(same_slang)[:4])}")
+    except Exception:
+        pass
+
     # ── Итоговый score ────────────────────────────────────────
     raw = round(score / total * 100, 1) if total > 0 else 0.0
 
@@ -5957,13 +6299,246 @@ def compare_profiles(p1: dict, p2: dict,
     return final, confidence, reasons
 
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ADVANCED TWIN DETECTION — граф, инвайты, забаненные
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async def record_interaction(guild_id: int, user_a: int, user_b: int,
+                              kind: str = "mention"):
+    """#20-26 Записывает взаимодействие между участниками"""
+    if user_a == user_b:
+        return
+    a, b = min(user_a, user_b), max(user_a, user_b)
+    col = {"mention": "mentions", "reply": "replies",
+           "conflict": "conflicts", "voice": "voice_overlap"}.get(kind, "mentions")
+    now = datetime.datetime.utcnow().isoformat()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(f"""
+                INSERT INTO interaction_graph (guild_id, user_a, user_b, {col}, last_seen)
+                VALUES (?, ?, ?, 1, ?)
+                ON CONFLICT(guild_id, user_a, user_b) DO UPDATE SET
+                    {col} = {col} + 1, last_seen = excluded.last_seen
+            """, (guild_id, a, b, now))
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def get_interaction_score(guild_id: int, user_a: int, user_b: int) -> dict:
+    """#20-24 Возвращает паттерн взаимодействия между двумя участниками"""
+    a, b = min(user_a, user_b), max(user_a, user_b)
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT mentions, replies, conflicts, voice_overlap
+                FROM interaction_graph WHERE guild_id=? AND user_a=? AND user_b=?
+            """, (guild_id, a, b)) as c:
+                row = await c.fetchone()
+        if not row:
+            return {"mentions": 0, "replies": 0, "conflicts": 0,
+                    "voice_overlap": 0, "interact_total": 0}
+        return {"mentions": row[0], "replies": row[1], "conflicts": row[2],
+                "voice_overlap": row[3], "interact_total": row[0] + row[1]}
+    except Exception:
+        return {"mentions": 0, "replies": 0, "conflicts": 0,
+                "voice_overlap": 0, "interact_total": 0}
+
+
+def twin_graph_signal(interaction: dict, base_score: float) -> tuple:
+    """
+    #23/24/26 Корректирует score на основе графа связей.
+    Альты РЕДКО общаются между собой и НИКОГДА не конфликтуют.
+    """
+    adjust = 0.0
+    reasons = []
+    total_interact = interaction.get("interact_total", 0)
+    conflicts      = interaction.get("conflicts", 0)
+    voice          = interaction.get("voice_overlap", 0)
+
+    # #24 Никогда не конфликтовали + высокий стилевой score = подозрительно
+    if base_score >= 60 and conflicts == 0 and total_interact < 3:
+        adjust += 8
+        reasons.append("Почти не общаются между собой")
+
+    # #26 Никогда не были вместе в голосовом
+    if voice == 0 and base_score >= 60:
+        adjust += 3
+        reasons.append("Не пересекались в голосовых")
+
+    # Если МНОГО общаются — скорее разные люди (снижаем)
+    if total_interact > 20:
+        adjust -= 10
+        reasons.append("Активно общаются (вероятно разные люди)")
+
+    return adjust, reasons
+
+
+async def check_invite_link(guild_id: int, user_a: int, user_b: int) -> tuple:
+    """#21/22 Проверяет пришли ли участники по одному инвайту/от одного человека"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT user_id, inviter_id, invite_code FROM member_inviter
+                WHERE guild_id=? AND user_id IN (?, ?)
+            """, (guild_id, user_a, user_b)) as c:
+                rows = await c.fetchall()
+        if len(rows) < 2:
+            return 0.0, []
+        data = {r[0]: (r[1], r[2]) for r in rows}
+        if user_a not in data or user_b not in data:
+            return 0.0, []
+        inv_a, code_a = data[user_a]
+        inv_b, code_b = data[user_b]
+        reasons = []
+        adjust = 0.0
+        if code_a and code_a == code_b:
+            adjust += 10
+            reasons.append("Пришли по одному инвайту")
+        elif inv_a and inv_a == inv_b:
+            adjust += 6
+            reasons.append("Приглашены одним человеком")
+        return adjust, reasons
+    except Exception:
+        return 0.0, []
+
+
+async def compare_with_banned(guild: discord.Guild, sp_dict: dict,
+                               server_vocab: set) -> tuple:
+    """
+    #47-49 Сравнивает профиль с забаненными (детект ban evasion / reincarnation)
+    Возвращает (best_score, banned_username, reasons)
+    """
+    gid = guild.id
+    best = 0.0; best_name = None; best_reasons = []
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT user_id, username, style_blob, ban_reason
+                FROM banned_profiles WHERE guild_id=?
+                ORDER BY banned_at DESC LIMIT 100
+            """, (gid,)) as c:
+                rows = await c.fetchall()
+        for uid, uname, blob, reason in rows:
+            banned_profile = _decompress(blob)
+            if not banned_profile:
+                continue
+            score, conf, reasons = compare_profiles(sp_dict, banned_profile, server_vocab)
+            if score > best:
+                best = score
+                best_name = uname or str(uid)
+                best_reasons = reasons
+    except Exception:
+        pass
+    return best, best_name, best_reasons
+
+
+async def save_banned_profile(guild_id: int, user_id: int, username: str,
+                               reason: str = ""):
+    """#48 Сохраняет стилевой профиль забаненного для будущего детекта"""
+    key = (guild_id, user_id)
+    sp = _style_cache.get(key)
+    if not sp or sp.msg_count < 20:
+        # Пытаемся загрузить из БД
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("""
+                    SELECT msg_count FROM style_profiles
+                    WHERE guild_id=? AND user_id=?
+                """, (guild_id, user_id)) as c:
+                    row = await c.fetchone()
+            if not row or row[0] < 20:
+                return  # мало данных, не сохраняем
+        except Exception:
+            return
+    now = datetime.datetime.utcnow().isoformat()
+    try:
+        style_blob = _compress(sp.to_dict()) if sp else None
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO banned_profiles
+                    (guild_id, user_id, username, style_blob, banned_at, ban_reason)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    style_blob=excluded.style_blob, banned_at=excluded.banned_at,
+                    ban_reason=excluded.ban_reason
+            """, (guild_id, user_id, username, style_blob, now, reason))
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def _check_ban_evasion(member):
+    """#48-52 При входе помечаем участника для проверки на обход бана.
+    Реальное сравнение произойдёт когда накопится профиль (в update_style_profile),
+    т.к. у новичка ещё нет сообщений для анализа стиля."""
+    gid = member.guild.id
+    # Проверяем есть ли вообще забаненные профили на сервере
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM banned_profiles WHERE guild_id=?", (gid,)
+            ) as c:
+                count = (await c.fetchone())[0]
+        if count == 0:
+            return
+        # Помечаем в watchlist для отложенной проверки
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO style_watchlist (guild_id, user_id, added_at, note)
+                VALUES (?, ?, ?, 'ban_evasion_check')
+                ON CONFLICT(guild_id, user_id) DO NOTHING
+            """, (gid, member.id, now))
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def ai_explain_twin(name_a: str, name_b: str, reasons: list,
+                           score: float) -> str:
+    """#53 AI объясняет почему два аккаунта похожи (человеческим языком)"""
+    if not reasons:
+        return ""
+    try:
+        prompt = (
+            f"Два аккаунта Discord ({name_a} и {name_b}) показали стилистическое "
+            f"сходство {score:.0f}/100. Совпадения: {'; '.join(reasons[:8])}. "
+            f"Объясни модератору в 2-3 предложениях почему это может быть один человек. "
+            f"Будь конкретным, не лей воду. Отвечай на русском."
+        )
+        result = await ask_ai(prompt, max_tokens=200)
+        return result or ""
+    except Exception:
+        return ""
+
+
+async def get_twin_threshold(guild_id: int) -> int:
+    """#64 Возвращает настроенный порог твинков для сервера"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT twin_threshold FROM guild_settings WHERE guild_id=?",
+                (guild_id,)
+            ) as c:
+                row = await c.fetchone()
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+    return TWIN_THRESHOLD
+
+
 async def update_style_profile(guild_id: int, user_id: int, message: discord.Message):
     key = (guild_id, user_id)
     if key not in _style_cache:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
                 "SELECT msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,emoji_ratio,"
-                "no_punct_ratio,common_words,common_typos,sentence_enders,active_hours "
+                "no_punct_ratio,common_words,common_typos,sentence_enders,active_hours,"
+                "COALESCE(top_bigrams,x'') ,COALESCE(timing_delays,x''),"
+                "COALESCE(first_seen,'') "
                 "FROM style_profiles WHERE guild_id=? AND user_id=?",
                 (guild_id, user_id)
             ) as c:
@@ -5982,14 +6557,14 @@ async def update_style_profile(guild_id: int, user_id: int, message: discord.Mes
                     sp.word_freq[w]     = sp.word_freq.get(w, 0) + 2
                 for w in (_decompress(row[8]) or []):
                     sp.word_freq[w]     = sp.word_freq.get(w, 0) + 1
-                for bg in (_decompress(row[12]) or []):
+                for bg in (_decompress(row[11]) or []):
                     sp.bigram_freq[bg]  = sp.bigram_freq.get(bg, 0) + 1
-                sp.timing_delays   = _decompress(row[13]) or []
+                sp.timing_delays   = _decompress(row[12]) or []
                 sp.sentence_enders = _unpack_enders(row[9])
                 sp.active_hours    = _unpack_hours(row[10])
                 sp.unique_words    = set(sp.word_freq.keys())
-                if row[16]:
-                    sp.first_seen  = row[16]
+                if row[13]:
+                    sp.first_seen  = row[13]
             except Exception:
                 pass
         _style_cache[key] = sp
@@ -5997,7 +6572,8 @@ async def update_style_profile(guild_id: int, user_id: int, message: discord.Mes
     sp = _style_cache[key]
     sp.update(message.content,
               datetime.datetime.utcnow().hour,
-              message.created_at.timestamp() if message.created_at else 0.0)
+              message.created_at.timestamp() if message.created_at else 0.0,
+              channel_id=message.channel.id if message.channel else 0)
 
     if sp.msg_count % SAVE_EVERY == 0:
         _style_dirty.add(key)
@@ -6011,29 +6587,139 @@ async def update_style_profile(guild_id: int, user_id: int, message: discord.Mes
         if sp.get_days_active() >= MIN_DAYS_FOR_COMPARE:
             asyncio.create_task(_run_twin_check(message.guild, user_id, sp))
 
+    # Блок 4: Ban evasion — проверяем watchlist участника при 30 сообщениях
+    if sp.msg_count == 30:
+        asyncio.create_task(_run_ban_evasion_check(message.guild, user_id, sp))
+
+
+async def _run_ban_evasion_check(guild, user_id: int, sp):
+    """Проверяет участника из watchlist против забаненных профилей"""
+    gid = guild.id
+    # Проверяем что участник в watchlist для ban evasion
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT note FROM style_watchlist
+                WHERE guild_id=? AND user_id=?
+            """, (gid, user_id)) as c:
+                row = await c.fetchone()
+        if not row:
+            return  # не в watchlist
+    except Exception:
+        return
+
+    server_vocab = await get_server_vocab(gid)
+    score, banned_name, reasons = await compare_with_banned(guild, sp.to_dict(), server_vocab)
+
+    # Убираем из watchlist после проверки
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM style_watchlist WHERE guild_id=? AND user_id=?",
+                (gid, user_id)
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+    if score >= TWIN_THRESHOLD and banned_name:
+        ch = await get_log_ch(guild)
+        if ch:
+            member = guild.get_member(user_id)
+            name = member.display_name if member else str(user_id)
+            e = build_embed(C.DANGER)
+            e.set_author(name="🚨 Возможный обход бана (Ban Evasion)")
+            e.add_field(name="Новый участник",
+                        value=f"{member.mention if member else user_id} (`{name}`)", inline=True)
+            e.add_field(name="Похож на забаненного", value=f"`{banned_name}`", inline=True)
+            e.add_field(name="Сходство стиля", value=f"**{score:.1f}/100**", inline=True)
+            if reasons:
+                e.add_field(name="Признаки",
+                            value="\n".join(f"• {r}" for r in reasons[:5]), inline=False)
+            e.set_footer(text="Участник зашёл недавно и пишет как ранее забаненный")
+            await ch.send(embed=e)
+
+
+
+
 
 async def _save_style_profile(guild_id: int, user_id: int, sp: StyleProfile):
     d   = sp.to_storage()   # сжатые данные для БД
     now = datetime.datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
+        # Миграция — добавляем новые колонки если их нет
+        for col_sql in [
+            "ALTER TABLE style_profiles ADD COLUMN top_bigrams BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN word_bigrams BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN timing_delays BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN lexical_sig BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN extra_ratios BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN active_blocks BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN ttr REAL DEFAULT 0",
+            "ALTER TABLE style_profiles ADD COLUMN median_timing REAL DEFAULT 0",
+            "ALTER TABLE style_profiles ADD COLUMN first_seen TEXT DEFAULT ''",
+            "ALTER TABLE style_profiles ADD COLUMN last_seen TEXT DEFAULT ''",
+            "ALTER TABLE style_profiles ADD COLUMN profile_maturity REAL DEFAULT 0",
+        ]:
+            try:
+                await db.execute(col_sql)
+            except Exception:
+                pass
         await db.execute("""
             INSERT INTO style_profiles
                 (guild_id,user_id,msg_count,avg_word_len,avg_msg_len,
                  punct_ratio,caps_ratio,emoji_ratio,no_punct_ratio,
-                 common_words,common_typos,sentence_enders,active_hours,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 common_words,common_typos,sentence_enders,active_hours,
+                 top_bigrams,word_bigrams,timing_delays,lexical_sig,extra_ratios,
+                 active_blocks,ttr,median_timing,first_seen,last_seen,
+                 profile_maturity,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(guild_id,user_id) DO UPDATE SET
                 msg_count=excluded.msg_count, avg_word_len=excluded.avg_word_len,
                 avg_msg_len=excluded.avg_msg_len, punct_ratio=excluded.punct_ratio,
                 caps_ratio=excluded.caps_ratio, emoji_ratio=excluded.emoji_ratio,
                 no_punct_ratio=excluded.no_punct_ratio, common_words=excluded.common_words,
                 common_typos=excluded.common_typos, sentence_enders=excluded.sentence_enders,
-                active_hours=excluded.active_hours, updated_at=excluded.updated_at
+                active_hours=excluded.active_hours, top_bigrams=excluded.top_bigrams,
+                word_bigrams=excluded.word_bigrams, timing_delays=excluded.timing_delays,
+                lexical_sig=excluded.lexical_sig, extra_ratios=excluded.extra_ratios,
+                active_blocks=excluded.active_blocks, ttr=excluded.ttr,
+                median_timing=excluded.median_timing,
+                first_seen=CASE WHEN style_profiles.first_seen='' OR style_profiles.first_seen IS NULL
+                                THEN excluded.first_seen ELSE style_profiles.first_seen END,
+                last_seen=excluded.last_seen,
+                profile_maturity=excluded.profile_maturity, updated_at=excluded.updated_at
         """, (guild_id, user_id,
               d["msg_count"], d["avg_word_len"], d["avg_msg_len"],
               d["punct_ratio"], d["caps_ratio"], d["emoji_ratio"], d["no_punct_ratio"],
-              d["common_words"], d["common_typos"], d["sentence_enders"], d["active_hours"], now))
+              d["common_words"], d["common_typos"], d["sentence_enders"], d["active_hours"],
+              d["top_bigrams"], d["word_bigrams"], d["timing_delays"], d["lexical_sig"],
+              d["extra_ratios"], d["active_blocks"], d["ttr"], d["median_timing"],
+              d["first_seen"], d["last_seen"], d["profile_maturity"], now))
         await db.commit()
+
+
+def _decompress_row(row, cols) -> dict:
+    """Распаковывает строку style_profiles из БД для сравнения"""
+    p = dict(zip(cols, row))
+    # BLOB поля → JSON строки (compare_profiles ждёт JSON)
+    p["common_words"] = json.dumps(list(_decompress(p.get("common_words")) or []))
+    p["common_typos"] = json.dumps(list(_decompress(p.get("common_typos")) or []))
+    p["top_bigrams"]  = json.dumps(list(_decompress(p.get("top_bigrams"))  or []))
+    if "word_bigrams" in p:
+        p["word_bigrams"] = json.dumps(list(_decompress(p.get("word_bigrams")) or []))
+    if "lexical_sig" in p:
+        p["lexical_sig"] = json.dumps(_decompress(p.get("lexical_sig")) or {})
+    # extra_ratios — распаковываем прямо в поля профиля
+    if "extra_ratios" in p:
+        ratios = _decompress(p.get("extra_ratios")) or {}
+        if isinstance(ratios, dict):
+            p.update(ratios)
+    # packed форматы
+    p["sentence_enders"] = json.dumps(_unpack_enders(p.get("sentence_enders", "")))
+    p["active_hours"]    = json.dumps(_unpack_hours(p.get("active_hours", b"")))
+    p["active_blocks"]   = json.dumps(_unpack_hours(p.get("active_blocks", b"")))
+    return p
 
 
 async def _run_twin_check(guild: discord.Guild, target_uid: int, target_sp: StyleProfile):
@@ -6049,12 +6735,15 @@ async def _run_twin_check(guild: discord.Guild, target_uid: int, target_sp: Styl
             SELECT user_id, msg_count, avg_word_len, avg_msg_len, punct_ratio, caps_ratio,
                    emoji_ratio, no_punct_ratio, common_words, common_typos, sentence_enders,
                    active_hours,
-                   COALESCE(top_bigrams, '[]') as top_bigrams,
+                   COALESCE(top_bigrams, x'') as top_bigrams,
                    COALESCE(ttr, 0) as ttr,
                    COALESCE(median_timing, 0) as median_timing,
-                   COALESCE(active_blocks, '{}') as active_blocks,
+                   COALESCE(active_blocks, x'') as active_blocks,
                    COALESCE(first_seen, '') as first_seen,
-                   COALESCE(profile_maturity, 0) as profile_maturity
+                   COALESCE(profile_maturity, 0) as profile_maturity,
+                   COALESCE(word_bigrams, x'') as word_bigrams,
+                   COALESCE(lexical_sig, x'') as lexical_sig,
+                   COALESCE(extra_ratios, x'') as extra_ratios
             FROM style_profiles
             WHERE guild_id=? AND user_id!=? AND msg_count>=? LIMIT ?
         """, (gid, target_uid, MIN_MSGS_FOR_COMPARE, MAX_COMPARE_USERS)) as c:
@@ -6396,6 +7085,60 @@ async def twinlinks_cmd(interaction: discord.Interaction, status: str = "pending
     else:
         view = PaginatedView(pages)
         await interaction.response.send_message(embed=pages[0], view=view, ephemeral=True)
+
+
+@bot.tree.command(name="watchlist",
+                  description="Список участников под наблюдением (стилометрия)")
+@app_commands.describe(action="view / add / remove", member="Участник (для add/remove)")
+async def watchlist_cmd(interaction: discord.Interaction, action: str = "view",
+                        member: discord.Member = None):
+    if not interaction.user.guild_permissions.manage_messages:
+        return await interaction.response.send_message("Нет прав.", ephemeral=True)
+    gid = interaction.guild_id
+
+    if action == "add" and member:
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO style_watchlist (guild_id, user_id, added_by, note, added_at)
+                VALUES (?, ?, ?, 'manual', ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET added_by=excluded.added_by
+            """, (gid, member.id, interaction.user.id, now))
+            await db.commit()
+        return await interaction.response.send_message(
+            f"✅ {member.mention} добавлен в watchlist.", ephemeral=True)
+
+    if action == "remove" and member:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "DELETE FROM style_watchlist WHERE guild_id=? AND user_id=?",
+                (gid, member.id))
+            await db.commit()
+        return await interaction.response.send_message(
+            f"✅ {member.mention} убран из watchlist.", ephemeral=True)
+
+    # view
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id, note, added_at FROM style_watchlist WHERE guild_id=? "
+            "ORDER BY added_at DESC LIMIT 50", (gid,)
+        ) as c:
+            rows = await c.fetchall()
+
+    e = build_embed(C.WARNING)
+    e.set_author(name="📋 Style Watchlist")
+    if not rows:
+        e.description = "Watchlist пуст."
+    else:
+        lines = []
+        for uid, note, added in rows:
+            m = interaction.guild.get_member(uid)
+            name = m.display_name if m else str(uid)
+            tag = {"manual":"👁","ban_evasion_check":"🚨"}.get(note, "•")
+            lines.append(f"{tag} **{name}** — {note} *({added[:10]})*")
+        e.description = "\n".join(lines)
+    e.set_footer(text="🚨 = проверка на обход бана · 👁 = ручное наблюдение")
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 
 @bot.tree.command(name="styleprofile",
