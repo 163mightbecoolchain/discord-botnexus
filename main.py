@@ -1310,41 +1310,45 @@ async def add_modlog(guild_id: int, user_id: int, mod_id: int,
 
 
 async def apply_progressive_punishment(member: discord.Member, warn_count: int, mod_id: int):
-    """Применяет автоматическое наказание по количеству варнов"""
+    """
+    Автоматическое наказание по количеству варнов:
+    1 варн → таймаут 7 дней
+    2 варн → таймаут 7 дней
+    3 варн → бан на 30 дней
+    """
     gid = member.guild.id
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT warn2_action,warn3_action,warn4_action,warn5_action FROM punishment_settings WHERE guild_id=?",
-            (gid,)
-        ) as c:
-            row = await c.fetchone()
-    if not row:
-        # Дефолтные правила
-        row = ("mute_1h", "mute_24h", "kick", "ban")
-
-    action_map = {
-        2: row[0], 3: row[1], 4: row[2], 5: row[3]
-    }
-    action = action_map.get(warn_count)
-    if not action:
-        return
-
     reason = f"Auto: {warn_count} warnings"
+
     try:
-        if action == "mute_1h":
-            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=1)
+        if warn_count == 1:
+            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=7)
             await member.timeout(until, reason=reason)
-            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_1H", reason)
-        elif action == "mute_24h":
-            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(hours=24)
+            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_7D", reason, "7d")
+            # DM отправит on_member_update автоматически
+
+        elif warn_count == 2:
+            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=7)
             await member.timeout(until, reason=reason)
-            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_24H", reason)
-        elif action == "kick":
-            await member.kick(reason=reason)
-            await add_modlog(gid, member.id, mod_id, "AUTO_KICK", reason)
-        elif action == "ban":
+            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_7D", reason, "7d")
+            # DM отправит on_member_update автоматически
+
+        elif warn_count >= 3:
+            unban_at = (datetime.datetime.utcnow() + timedelta(days=30)).isoformat()
+            try:
+                await send_appeal_dm(member, member.guild, "TEMPBAN",
+                    f"Авто-бан на 30 дней · накоплено {warn_count} варнов")
+            except Exception:
+                pass
             await member.ban(reason=reason)
-            await add_modlog(gid, member.id, mod_id, "AUTO_BAN", reason)
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("""
+                    INSERT INTO temp_bans (guild_id,user_id,mod_id,reason,unban_at)
+                    VALUES (?,?,?,?,?)
+                    ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                        unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
+                """, (gid, member.id, mod_id, reason, unban_at))
+                await db.commit()
+            await add_modlog(gid, member.id, mod_id, "AUTO_TEMPBAN_30D", reason, "30d")
     except discord.Forbidden:
         pass
 
@@ -1512,6 +1516,7 @@ async def on_message(message):
             try:
                 await message.delete()
                 await message.author.timeout(timedelta(seconds=30), reason="Anti-spam")
+                # DM отправит on_member_update автоматически
                 ch = await get_log_ch(message.guild)
                 if ch:
                     e = build_embed(C.DANGER)
@@ -1744,6 +1749,22 @@ async def on_member_update(before, after):
                                 last_muted    = excluded.last_muted
                         """, (after.guild.id, after.id, int(duration), now))
                         await db.commit()
+                    # DM с кнопкой апелляции на любой таймаут (даже от ручного действия модератора)
+                    if not after.bot:
+                        # форматируем длительность для DM
+                        if duration < 60:
+                            dur_str = f"{int(duration)} сек"
+                        elif duration < 3600:
+                            dur_str = f"{int(duration/60)} мин"
+                        elif duration < 86400:
+                            dur_str = f"{int(duration/3600)} ч"
+                        else:
+                            dur_str = f"{int(duration/86400)} д"
+                        try:
+                            await send_appeal_dm(after, after.guild, "MUTE",
+                                                  f"Тайм-аут на {dur_str}")
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
@@ -2388,7 +2409,7 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
     e.set_thumbnail(url=member.display_avatar.url)
     e.add_field(name="Участник",     value=member.mention,           inline=True)
     e.add_field(name="Модератор",    value=interaction.user.mention, inline=True)
-    e.add_field(name="Варнов всего", value=f"**{len(warns)}/5**",    inline=True)
+    e.add_field(name="Варнов всего", value=f"**{len(warns)}/3**",    inline=True)
     e.add_field(name="Причина",      value=reason,                   inline=False)
     await interaction.response.send_message(embed=e)
     # DM участнику с кнопкой апелляции
@@ -2397,8 +2418,7 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
         dm_e.set_author(name=f"Предупреждение на {interaction.guild.name}",
                         icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
         dm_e.add_field(name="Причина",      value=reason,                        inline=False)
-        dm_e.add_field(name="Варнов всего", value=f"**{len(warns)}/5**",         inline=True)
-        dm_e.add_field(name="Модератор",    value=interaction.user.display_name, inline=True)
+        dm_e.add_field(name="Варнов всего", value=f"**{len(warns)}/3**",         inline=True)
         dm_e.set_footer(text="Не согласен? Нажми кнопку ниже чтобы подать апелляцию")
         appeal_view = AppealButtonView(interaction.guild_id, "WARN", reason)
         await member.send(embed=dm_e, view=appeal_view)
@@ -2406,13 +2426,8 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
         pass  # DM закрыты
     # Записываем в modlog
     await add_modlog(interaction.guild_id, member.id, interaction.user.id, "WARN", reason)
-    # Прогрессивные наказания
+    # Прогрессивные наказания: 1 варн → 7д мут, 2 варн → 7д мут, 3 варн → 30д бан
     await apply_progressive_punishment(member, len(warns), interaction.user.id)
-    if len(warns) >= 3:
-        try:
-            await member.timeout(timedelta(hours=1), reason=f"Авто-таймаут: {len(warns)} варнов")
-            await interaction.channel.send(f"🔇 {member.mention} → авто-таймаут (3 варна)")
-        except Exception: pass
 
 @bot.tree.command(name="warnings", description="Список варнов [Premium]")
 @app_commands.describe(member="Пользователь")
@@ -2426,8 +2441,8 @@ async def warnings(interaction: discord.Interaction, member: discord.Member):
     if not rows:
         e.description = "Варнов нет."
     else:
-        warn_bar = bar(len(rows), 5, 8)
-        e.add_field(name="Всего", value=f"**{len(rows)}/5** `{warn_bar}`", inline=False)
+        warn_bar = bar(len(rows), 3, 8)
+        e.add_field(name="Всего", value=f"**{len(rows)}/3** `{warn_bar}`", inline=False)
         for wid, mod_id, reason, created in rows:
             mod = interaction.guild.get_member(mod_id)
             e.add_field(
@@ -2436,6 +2451,50 @@ async def warnings(interaction: discord.Interaction, member: discord.Member):
                 inline=False
             )
     await interaction.response.send_message(embed=e, ephemeral=True)
+
+MUTE_DURATIONS = {
+    "2 часа":  timedelta(hours=2),   "3 часа":  timedelta(hours=3),
+    "4 часа":  timedelta(hours=4),   "5 часов": timedelta(hours=5),
+    "6 часов": timedelta(hours=6),
+    "2 дня":   timedelta(days=2),    "3 дня":   timedelta(days=3),
+    "4 дня":   timedelta(days=4),    "5 дней":  timedelta(days=5),
+    "6 дней":  timedelta(days=6),    "7 дней":  timedelta(days=7),
+    "14 дней": timedelta(days=14),   "21 день": timedelta(days=21),
+    "27 дней": timedelta(days=27),   "28 дней": timedelta(days=28),
+}
+
+
+@bot.tree.command(name="mute", description="Выдать таймаут участнику")
+@app_commands.describe(member="Участник", duration="Длительность", reason="Причина")
+@app_commands.choices(duration=[
+    app_commands.Choice(name=k, value=k) for k in MUTE_DURATIONS
+])
+async def mute_cmd(interaction: discord.Interaction, member: discord.Member,
+                   duration: str, reason: str = "Не указана"):
+    if not interaction.user.guild_permissions.moderate_members:
+        return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
+
+    delta = MUTE_DURATIONS.get(duration)
+    if not delta:
+        return await interaction.response.send_message(
+            "❌ Неверная длительность. Выбери из списка.", ephemeral=True)
+
+    try:
+        await member.timeout(delta, reason=reason)
+        await add_modlog(interaction.guild_id, member.id, interaction.user.id,
+                         "MUTE", reason, duration)
+        # DM с кнопкой апелляции отправит on_member_update автоматически
+
+        e = build_embed(C.WARNING)
+        e.set_author(name=f"Mute — {member.display_name}", icon_url=member.display_avatar.url)
+        e.add_field(name="Участник",    value=member.mention,           inline=True)
+        e.add_field(name="Длительность", value=f"**{duration}**",       inline=True)
+        e.add_field(name="Модератор",   value=interaction.user.mention, inline=True)
+        e.add_field(name="Причина",     value=reason,                   inline=False)
+        await interaction.response.send_message(embed=e)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ Нет прав выдать таймаут.", ephemeral=True)
+
 
 @bot.tree.command(name="unmute", description="Снять мьют с участника")
 @app_commands.describe(member="Участник", reason="Причина")
@@ -5491,6 +5550,11 @@ async def tempban(interaction: discord.Interaction, member: discord.Member,
     unban_at = (datetime.datetime.utcnow() + timedelta(hours=hours)).isoformat()
 
     try:
+        # DM с кнопкой апелляции — до бана, иначе бот не сможет написать
+        try:
+            await send_appeal_dm(member, interaction.guild, "TEMPBAN",
+                                  f"Временный бан на {duration} · {reason}")
+        except Exception: pass
         await member.ban(reason=f"[Tempban {duration}] {reason}")
     except discord.Forbidden:
         return await interaction.response.send_message("❌ Нет прав забанить.", ephemeral=True)
@@ -7280,6 +7344,10 @@ class MemberActionView(discord.ui.View):
         if not interaction.user.guild_permissions.kick_members:
             return await interaction.response.send_message("No permission.", ephemeral=True)
         try:
+            try:
+                await send_appeal_dm(self.member, interaction.guild, "KICK",
+                                      "Кик с сервера")
+            except Exception: pass
             await self.member.kick(reason=f"Kicked by {interaction.user}")
             await add_modlog(interaction.guild_id, self.member.id, interaction.user.id, "KICK", "Kicked via userinfo button")
             await interaction.response.send_message(f"✓ Kicked **{self.member.display_name}**.", ephemeral=True)
@@ -7293,6 +7361,7 @@ class MemberActionView(discord.ui.View):
         try:
             until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
             await self.member.timeout(until, reason=f"Muted by {interaction.user}")
+            # DM отправит on_member_update автоматически
             await add_modlog(interaction.guild_id, self.member.id, interaction.user.id, "MUTE", "10m via userinfo button", "10m")
             await interaction.response.send_message(f"✓ **{self.member.display_name}** muted 10 min.", ephemeral=True)
         except Exception as ex:
