@@ -265,6 +265,9 @@ class ConfirmView(discord.ui.View):
 
 _cooldowns: dict = {}
 _spam_tracker: dict = {}
+# Подавляет автоматическое DM от on_member_update когда вызывающий код
+# (например /warn) сам отправит объединённое сообщение
+_suppress_next_timeout_dm: set = set()
 _raid_tracker: dict = {}
 
 # ── Очистка кэшей (запускается каждые 10 минут) ───────────────
@@ -1309,36 +1312,41 @@ async def add_modlog(guild_id: int, user_id: int, mod_id: int,
         await db.commit()
 
 
-async def apply_progressive_punishment(member: discord.Member, warn_count: int, mod_id: int):
+async def apply_progressive_punishment(member: discord.Member, warn_count: int,
+                                        mod_id: int, silent_dm: bool = False) -> str:
     """
     Автоматическое наказание по количеству варнов:
     1 варн → таймаут 7 дней
     2 варн → таймаут 7 дней
     3 варн → бан на 30 дней
+
+    silent_dm=True — не отправлять отдельное DM (используется когда вызывающий код
+    сам объединит уведомление о варне и наказании в одно сообщение)
+
+    Возвращает текстовую метку наказания ("Таймаут 7 дней" / "Бан 30 дней") или "".
     """
     gid = member.guild.id
     reason = f"Auto: {warn_count} warnings"
+    label = ""
 
     try:
-        if warn_count == 1:
+        if warn_count in (1, 2):
             until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=7)
+            if silent_dm:
+                _suppress_next_timeout_dm.add((gid, member.id))
             await member.timeout(until, reason=reason)
             await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_7D", reason, "7d")
-            # DM отправит on_member_update автоматически
-
-        elif warn_count == 2:
-            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=7)
-            await member.timeout(until, reason=reason)
-            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_7D", reason, "7d")
-            # DM отправит on_member_update автоматически
+            label = "🔇 Таймаут на 7 дней"
+            # Если не silent_dm — DM отправит on_member_update автоматически
 
         elif warn_count >= 3:
             unban_at = (datetime.datetime.utcnow() + timedelta(days=30)).isoformat()
-            try:
-                await send_appeal_dm(member, member.guild, "TEMPBAN",
-                    f"Авто-бан на 30 дней · накоплено {warn_count} варнов")
-            except Exception:
-                pass
+            if not silent_dm:
+                try:
+                    await send_appeal_dm(member, member.guild, "TEMPBAN",
+                        f"Авто-бан на 30 дней · накоплено {warn_count} варнов")
+                except Exception:
+                    pass
             await member.ban(reason=reason)
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute("""
@@ -1348,9 +1356,11 @@ async def apply_progressive_punishment(member: discord.Member, warn_count: int, 
                         unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
                 """, (gid, member.id, mod_id, reason, unban_at))
                 await db.commit()
+            label = "🔨 Бан на 30 дней"
             await add_modlog(gid, member.id, mod_id, "AUTO_TEMPBAN_30D", reason, "30d")
     except discord.Forbidden:
         pass
+    return label
 
 
 async def tempban_loop(bot_instance):
@@ -1750,7 +1760,8 @@ async def on_member_update(before, after):
                         """, (after.guild.id, after.id, int(duration), now))
                         await db.commit()
                     # DM с кнопкой апелляции на любой таймаут (даже от ручного действия модератора)
-                    if not after.bot:
+                    skey = (after.guild.id, after.id)
+                    if not after.bot and skey not in _suppress_next_timeout_dm:
                         # форматируем длительность для DM
                         if duration < 60:
                             dur_str = f"{int(duration)} сек"
@@ -1760,11 +1771,28 @@ async def on_member_update(before, after):
                             dur_str = f"{int(duration/3600)} ч"
                         else:
                             dur_str = f"{int(duration/86400)} д"
+
+                        # Достаём настоящую причину из audit log (для ручных мутов через Discord UI)
+                        mute_reason = f"Тайм-аут на {dur_str}"
                         try:
-                            await send_appeal_dm(after, after.guild, "MUTE",
-                                                  f"Тайм-аут на {dur_str}")
+                            async for entry in after.guild.audit_logs(
+                                limit=5, action=discord.AuditLogAction.member_update
+                            ):
+                                if (entry.target and entry.target.id == after.id and
+                                        (datetime.datetime.now(datetime.timezone.utc) -
+                                         entry.created_at).total_seconds() < 10):
+                                    if entry.reason:
+                                        mute_reason = f"Тайм-аут на {dur_str} · {entry.reason}"
+                                    break
                         except Exception:
                             pass
+
+                        try:
+                            await send_appeal_dm(after, after.guild, "MUTE", mute_reason)
+                        except Exception:
+                            pass
+                    # Снимаем флаг подавления после обработки
+                    _suppress_next_timeout_dm.discard(skey)
             except Exception:
                 pass
 
@@ -2403,31 +2431,40 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
     await add_warning(interaction.guild_id, member.id, interaction.user.id, reason)
     warns = await get_warnings(interaction.guild_id, member.id)
-    color = C.WARNING if len(warns) < 3 else C.DANGER
+    warn_count = len(warns)
+    color = C.WARNING if warn_count < 3 else C.DANGER
     e = build_embed(color)
     e.set_author(name=f"Предупреждение выдано · {member.display_name}", icon_url=member.display_avatar.url)
     e.set_thumbnail(url=member.display_avatar.url)
     e.add_field(name="Участник",     value=member.mention,           inline=True)
     e.add_field(name="Модератор",    value=interaction.user.mention, inline=True)
-    e.add_field(name="Варнов всего", value=f"**{len(warns)}/3**",    inline=True)
+    e.add_field(name="Варнов всего", value=f"**{warn_count}/3**",    inline=True)
     e.add_field(name="Причина",      value=reason,                   inline=False)
     await interaction.response.send_message(embed=e)
-    # DM участнику с кнопкой апелляции
+
+    # Записываем в modlog
+    await add_modlog(interaction.guild_id, member.id, interaction.user.id, "WARN", reason)
+
+    # Применяем прогрессивное наказание ДО отправки DM —
+    # чтобы объединить варн+мут/бан в одно сообщение
+    punishment_label = await apply_progressive_punishment(
+        member, warn_count, interaction.user.id, silent_dm=True
+    )
+
+    # Единое DM участнику: варн (+ наказание если применилось)
     try:
-        dm_e = build_embed(C.WARNING)
+        dm_e = build_embed(color)
         dm_e.set_author(name=f"Предупреждение на {interaction.guild.name}",
                         icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
-        dm_e.add_field(name="Причина",      value=reason,                        inline=False)
-        dm_e.add_field(name="Варнов всего", value=f"**{len(warns)}/3**",         inline=True)
+        dm_e.add_field(name="Причина",      value=reason,                inline=False)
+        dm_e.add_field(name="Варнов всего", value=f"**{warn_count}/3**", inline=True)
+        if punishment_label:
+            dm_e.add_field(name="Наказание", value=punishment_label, inline=True)
         dm_e.set_footer(text="Не согласен? Нажми кнопку ниже чтобы подать апелляцию")
         appeal_view = AppealButtonView(interaction.guild_id, "WARN", reason)
         await member.send(embed=dm_e, view=appeal_view)
     except (discord.Forbidden, discord.HTTPException):
         pass  # DM закрыты
-    # Записываем в modlog
-    await add_modlog(interaction.guild_id, member.id, interaction.user.id, "WARN", reason)
-    # Прогрессивные наказания: 1 варн → 7д мут, 2 варн → 7д мут, 3 варн → 30д бан
-    await apply_progressive_punishment(member, len(warns), interaction.user.id)
 
 @bot.tree.command(name="warnings", description="Список варнов [Premium]")
 @app_commands.describe(member="Пользователь")
