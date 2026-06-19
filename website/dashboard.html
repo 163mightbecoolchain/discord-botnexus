@@ -569,16 +569,25 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
         <div class="panel-header">
           <div>
             <div class="panel-title">Invite Tracking</div>
-            <div class="panel-desc">See who invited who, with notes</div>
+            <div class="panel-desc">Кто кого пригласил, с заметками</div>
+          </div>
+        </div>
+        <div class="panel-body" style="padding-bottom:0">
+          <div style="display:flex;gap:.75rem;margin-bottom:1rem">
+            <input type="text" class="form-control" id="invite-search"
+                   placeholder="Поиск по коду, имени, заметке..."
+                   oninput="debounceInviteSearch()"
+                   style="flex:1">
+            <button class="btn btn-outline" onclick="loadInvites('')">Сбросить</button>
           </div>
         </div>
         <div class="table-container">
           <table>
             <thead>
-              <tr><th>Code</th><th>Created by</th><th>Uses</th><th>Last used</th><th>Note</th></tr>
+              <tr><th>Код</th><th>Кто пригласил</th><th>Использований</th><th>Последний раз</th><th>Заметка</th></tr>
             </thead>
             <tbody id="inviteTable">
-              <tr><td colspan="5"><div class="empty"><span class="empty-icon">🔗</span><div class="empty-title">No invite data</div></div></td></tr>
+              <tr><td colspan="5"><div class="empty"><span class="empty-icon">🔗</span><div class="empty-title">Нет данных</div></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -633,74 +642,35 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
       <div class="panel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">Moderation Settings</div>
-            <div class="panel-desc">Configure warn thresholds and auto-actions</div>
+            <div class="panel-title">Warn punishments</div>
+            <div class="panel-desc">3-strike system — same values shown in bot's /punishments command</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save</button>
+          <button class="btn btn-accent btn-sm" onclick="savePunishments()">Save</button>
         </div>
         <div class="panel-body">
           <div class="form-row">
             <div class="form-group">
-              <label>Warn 2 → Action</label>
-              <select class="form-control" id="cfg-warn2">
-                <option value="mute_1h">Mute 1 hour</option>
-                <option value="mute_24h">Mute 24 hours</option>
-                <option value="kick">Kick</option>
-                <option value="ban">Ban</option>
-                <option value="none">None</option>
-              </select>
+              <label>1st warn → Timeout (days)</label>
+              <input type="number" class="form-control" id="cfg-mute1" value="7" min="1" max="28">
             </div>
             <div class="form-group">
-              <label>Warn 3 → Action</label>
-              <select class="form-control" id="cfg-warn3">
-                <option value="mute_1h">Mute 1 hour</option>
-                <option value="mute_24h" selected>Mute 24 hours</option>
-                <option value="kick">Kick</option>
-                <option value="ban">Ban</option>
-                <option value="none">None</option>
-              </select>
+              <label>2nd warn → Timeout (days)</label>
+              <input type="number" class="form-control" id="cfg-mute2" value="7" min="1" max="28">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Warn 4 → Action</label>
-              <select class="form-control" id="cfg-warn4">
-                <option value="mute_1h">Mute 1 hour</option>
-                <option value="mute_24h">Mute 24 hours</option>
-                <option value="kick" selected>Kick</option>
-                <option value="ban">Ban</option>
-                <option value="none">None</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Warn 5 → Action</label>
-              <select class="form-control" id="cfg-warn5">
-                <option value="mute_1h">Mute 1 hour</option>
-                <option value="mute_24h">Mute 24 hours</option>
-                <option value="kick">Kick</option>
-                <option value="ban" selected>Ban</option>
-                <option value="none">None</option>
-              </select>
+              <label>3rd warn → Ban (days)</label>
+              <input type="number" class="form-control" id="cfg-ban3" value="30" min="1" max="365">
             </div>
           </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">DM on warn</div>
-              <div class="toggle-sub">Send member a DM when they receive a warning</div>
-            </div>
-            <div class="toggle on" id="tog-warn-dm" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">Auto-tempban after 5 warns</div>
-              <div class="toggle-sub">Automatically tempban for 7 days on 5th warning</div>
-            </div>
-            <div class="toggle" id="tog-autoban" onclick="this.classList.toggle('on')"></div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:.5rem">
+            Discord limits timeouts to a maximum of 28 days. Changes here apply instantly — same as running <code style="color:var(--accent)">/punishments</code> in Discord.
           </div>
         </div>
       </div>
 
-      <!-- Punishment API -->
+      <!-- Quarantine -->
       <div class="panel">
         <div class="panel-header">
           <div>
@@ -709,11 +679,18 @@ tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
           </div>
         </div>
         <div class="panel-body">
-          <div class="form-row">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Quarantine enabled</div>
+              <div class="toggle-sub" id="quarantine-status-sub">Checking configuration...</div>
+            </div>
+            <div class="toggle" id="tog-quarantine" onclick="toggleQuarantine()"></div>
+          </div>
+          <div class="form-row" style="margin-top:1rem">
             <div class="form-group">
               <label>Quarantine Role</label>
               <select class="form-control" id="cfg-quarantine-role">
-                <option value="">None — disabled</option>
+                <option value="">None — select a role</option>
               </select>
             </div>
             <div class="form-group">
@@ -878,11 +855,38 @@ function authHeaders(){
   return t ? {'Authorization': 'Bearer '+t, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
 }
 
-async function apiFetch(path, opts={}){
+async function apiFetch(path, opts={}, retry=true){
   const t = getToken();
   const headers = opts.headers || {};
   if(t) headers['Authorization'] = 'Bearer '+t;
-  return fetch(API+path, {...opts, headers, credentials:'include'});
+  const resp = await fetch(API+path, {...opts, headers, credentials:'include'});
+  // Если 401 — пробуем refresh токен один раз
+  if(resp.status === 401 && retry){
+    const refreshed = await tryRefreshToken();
+    if(refreshed) return apiFetch(path, opts, false);
+    // Refresh не помог — разлогиниваемся
+    localStorage.removeItem('ws_token');
+    authToken = null;
+    showPage('login');
+  }
+  return resp;
+}
+
+async function tryRefreshToken(){
+  try{
+    const r = await fetch(API+'/api/refresh', {
+      credentials:'include',
+      headers: authToken ? {'Authorization':'Bearer '+authToken} : {}
+    });
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(d.token){
+      authToken = d.token;
+      localStorage.setItem('ws_token', d.token);
+      return true;
+    }
+  }catch(e){}
+  return false;
 }
 
 // ── Init ──────────────────────────────────────────────────────
@@ -912,6 +916,12 @@ async function init(){
       showPage('login'); return;
     }
     userData = await r.json();
+    // Скользящее окно — если бот вернул обновлённый токен, сохраняем его.
+    // Активные пользователи никогда не видят повторный логин.
+    if(userData.refreshed_token){
+      authToken = userData.refreshed_token;
+      localStorage.setItem('ws_token', authToken);
+    }
     document.getElementById('userName').textContent = userData.username;
     document.getElementById('userTag').textContent = '#'+userData.discriminator;
     if(userData.avatar){
@@ -951,7 +961,7 @@ function showPage(name){
   });
   if(name==='servers') loadGuilds();
   if(name==='modlog')  loadModlog();
-  if(name==='invites') loadInvites();
+  if(name==='invites') loadInvites('');
   if(name==='twins')   loadTwins();
   if(name==='general' && currentGuild) loadGeneralSettings();
 }
@@ -1037,13 +1047,14 @@ async function loadGeneralSettings(){
     window._serverRoles = roles;
 
     // Применяем настройки
-    document.getElementById('cfg-lang').value = s.lang ?? 'ru';
+    const langEl = document.getElementById('cfg-lang');
+    if(langEl) langEl.value = s.lang ?? 'ru';
 
     // Tickets toggle
     const tickTog = document.getElementById('tog-tickets');
     if(tickTog){ s.tickets_enabled ? tickTog.classList.add('on') : tickTog.classList.remove('on'); }
 
-    // Log channel — выбираем текущий
+    // Log channel
     if(s.log_channel){
       ['cfg-log-channel','cfg-log-channel-log'].forEach(id=>{
         const el = document.getElementById(id);
@@ -1051,11 +1062,22 @@ async function loadGeneralSettings(){
       });
     }
 
-    // Punishment actions
-    ['warn2','warn3','warn4','warn5'].forEach(w=>{
-      const el = document.getElementById('cfg-'+w);
-      if(el && s[w+'_action']) el.value = s[w+'_action'];
-    });
+    // Punishments (3-warn system)
+    const m1 = document.getElementById('cfg-mute1-days');
+    const m2 = document.getElementById('cfg-mute2-days');
+    const b3 = document.getElementById('cfg-ban3-days');
+    if(m1) m1.value = s.mute1_days ?? 7;
+    if(m2) m2.value = s.mute2_days ?? 7;
+    if(b3) b3.value = s.ban3_days  ?? 30;
+
+    // Quarantine
+    const qTog = document.getElementById('tog-quarantine');
+    if(qTog){ s.quarantine_enabled ? qTog.classList.add('on') : qTog.classList.remove('on'); }
+    if(s.quarantine_role_id) setSelect('cfg-quarantine-role', s.quarantine_role_id);
+    const qh = document.getElementById('cfg-quarantine-hours');
+    const qa = document.getElementById('cfg-quarantine-age');
+    if(qh) qh.value = s.quarantine_hours   ?? 24;
+    if(qa) qa.value = s.quarantine_min_age  ?? 7;
 
     // Security toggles
     const sec = s.security || {};
@@ -1139,13 +1161,27 @@ async function loadModlog(){
 }
 
 // ── Invites ───────────────────────────────────────────────────
-async function loadInvites(){
+let _inviteSearchTimer = null;
+function debounceInviteSearch(){
+  clearTimeout(_inviteSearchTimer);
+  _inviteSearchTimer = setTimeout(()=>{
+    const q = document.getElementById('invite-search')?.value || '';
+    loadInvites(q);
+  }, 400);
+}
+
+async function loadInvites(q=''){
   if(!currentGuild) return;
   try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites`);
+    const url = `/api/guild/${currentGuild.id}/invites` + (q ? `?q=${encodeURIComponent(q)}` : '');
+    const r = await apiFetch(url);
     const rows = await r.json();
     const tbody = document.getElementById('inviteTable');
-    if(!rows.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No invite data</td></tr>'; return; }
+    if(!rows.length){
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">
+        ${q ? 'Ничего не найдено по «'+q+'»' : 'Нет данных об инвайтах'}</td></tr>`;
+      return;
+    }
     tbody.innerHTML = rows.map(row=>`
       <tr>
         <td style="font-family:'Space Mono',monospace;color:var(--accent)">${row.invite_code}</td>
