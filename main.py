@@ -771,6 +771,11 @@ async def db_init():
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
                 member_id INTEGER, member_name TEXT, joined_at TEXT,
                 note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS invite_autoclean_settings (
+                guild_id    INTEGER PRIMARY KEY,
+                enabled     INTEGER DEFAULT 0,
+                max_age_days INTEGER DEFAULT 7,
+                log_channel INTEGER DEFAULT 0);
             CREATE TABLE IF NOT EXISTS birthdays (
                 guild_id INTEGER, user_id INTEGER, birthday TEXT,
                 PRIMARY KEY (guild_id, user_id));
@@ -875,11 +880,11 @@ async def db_init():
 
             -- Прогрессивные наказания (настройки)
             CREATE TABLE IF NOT EXISTS punishment_settings (
-                guild_id    INTEGER PRIMARY KEY,
-                warn2_action TEXT DEFAULT 'mute_1h',
-                warn3_action TEXT DEFAULT 'mute_24h',
-                warn4_action TEXT DEFAULT 'kick',
-                warn5_action TEXT DEFAULT 'ban');
+                guild_id     INTEGER PRIMARY KEY,
+                mute1_days   INTEGER DEFAULT 7,   -- 1й варн: дней таймаута
+                mute2_days   INTEGER DEFAULT 7,   -- 2й варн: дней таймаута
+                ban3_days    INTEGER DEFAULT 30,  -- 3й варн: дней бана
+                updated_at   TEXT DEFAULT '');
 
             -- Invite лидерборд
             CREATE TABLE IF NOT EXISTS invite_stats (
@@ -1019,6 +1024,13 @@ async def db_init():
             "ALTER TABLE guild_settings ADD COLUMN mod_channel INTEGER DEFAULT 0",
             "ALTER TABLE invite_log ADD COLUMN note TEXT DEFAULT ''",
             "ALTER TABLE guild_settings ADD COLUMN setup_done INTEGER DEFAULT 0",
+            # Новая 3-варн система наказаний (вместо старой warn2-5)
+            "ALTER TABLE punishment_settings ADD COLUMN mute1_days INTEGER DEFAULT 7",
+            "ALTER TABLE punishment_settings ADD COLUMN mute2_days INTEGER DEFAULT 7",
+            "ALTER TABLE punishment_settings ADD COLUMN ban3_days INTEGER DEFAULT 30",
+            "ALTER TABLE punishment_settings ADD COLUMN updated_at TEXT DEFAULT ''",
+            # Quarantine on/off тоггл (отдельно от роли — можно временно выключить)
+            "ALTER TABLE guild_settings ADD COLUMN quarantine_enabled INTEGER DEFAULT 1",
         ]
         for sql in migrations:
             try:
@@ -1312,13 +1324,51 @@ async def add_modlog(guild_id: int, user_id: int, mod_id: int,
         await db.commit()
 
 
+async def get_punishment_settings(gid: int) -> dict:
+    """
+    Возвращает настройки прогрессивных наказаний для сервера.
+    Используется и ботом (/warn, /punishments) и сайтом (dashboard) —
+    единый источник правды, изменения в одном месте видны в другом.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT mute1_days, mute2_days, ban3_days FROM punishment_settings WHERE guild_id=?",
+            (gid,)
+        ) as c:
+            row = await c.fetchone()
+    if row:
+        return {"mute1_days": row[0] or 7, "mute2_days": row[1] or 7, "ban3_days": row[2] or 30}
+    return {"mute1_days": 7, "mute2_days": 7, "ban3_days": 30}
+
+
+async def set_punishment_settings(gid: int, mute1_days: int = None,
+                                   mute2_days: int = None, ban3_days: int = None):
+    """Обновляет настройки наказаний. None значения не трогаются."""
+    current = await get_punishment_settings(gid)
+    m1 = mute1_days if mute1_days is not None else current["mute1_days"]
+    m2 = mute2_days if mute2_days is not None else current["mute2_days"]
+    b3 = ban3_days  if ban3_days  is not None else current["ban3_days"]
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO punishment_settings (guild_id, mute1_days, mute2_days, ban3_days, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                mute1_days=excluded.mute1_days,
+                mute2_days=excluded.mute2_days,
+                ban3_days=excluded.ban3_days,
+                updated_at=excluded.updated_at
+        """, (gid, m1, m2, b3, now))
+        await db.commit()
+    return {"mute1_days": m1, "mute2_days": m2, "ban3_days": b3}
+
+
 async def apply_progressive_punishment(member: discord.Member, warn_count: int,
                                         mod_id: int, silent_dm: bool = False) -> str:
     """
-    Автоматическое наказание по количеству варнов:
-    1 варн → таймаут 7 дней
-    2 варн → таймаут 7 дней
-    3 варн → бан на 30 дней
+    Автоматическое наказание по количеству варнов.
+    Дефолт: 1й варн → 7д мут, 2й варн → 7д мут, 3й варн → 30д бан.
+    Настраивается через /punishments или дашборд (punishment_settings таблица).
 
     silent_dm=True — не отправлять отдельное DM (используется когда вызывающий код
     сам объединит уведомление о варне и наказании в одно сообщение)
@@ -1328,23 +1378,27 @@ async def apply_progressive_punishment(member: discord.Member, warn_count: int,
     gid = member.guild.id
     reason = f"Auto: {warn_count} warnings"
     label = ""
+    cfg = await get_punishment_settings(gid)
 
     try:
         if warn_count in (1, 2):
-            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=7)
+            days = cfg["mute1_days"] if warn_count == 1 else cfg["mute2_days"]
+            days = max(1, min(28, days))  # Discord лимит на таймаут — 28 дней
+            until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=days)
             if silent_dm:
                 _suppress_next_timeout_dm.add((gid, member.id))
             await member.timeout(until, reason=reason)
-            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE_7D", reason, "7d")
-            label = "🔇 Таймаут на 7 дней"
+            await add_modlog(gid, member.id, mod_id, f"AUTO_MUTE_{days}D", reason, f"{days}d")
+            label = f"🔇 Таймаут на {days} дн."
             # Если не silent_dm — DM отправит on_member_update автоматически
 
         elif warn_count >= 3:
-            unban_at = (datetime.datetime.utcnow() + timedelta(days=30)).isoformat()
+            days = max(1, cfg["ban3_days"])
+            unban_at = (datetime.datetime.utcnow() + timedelta(days=days)).isoformat()
             if not silent_dm:
                 try:
                     await send_appeal_dm(member, member.guild, "TEMPBAN",
-                        f"Авто-бан на 30 дней · накоплено {warn_count} варнов")
+                        f"Авто-бан на {days} дн. · накоплено {warn_count} варнов")
                 except Exception:
                     pass
             await member.ban(reason=reason)
@@ -1356,8 +1410,8 @@ async def apply_progressive_punishment(member: discord.Member, warn_count: int,
                         unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
                 """, (gid, member.id, mod_id, reason, unban_at))
                 await db.commit()
-            label = "🔨 Бан на 30 дней"
-            await add_modlog(gid, member.id, mod_id, "AUTO_TEMPBAN_30D", reason, "30d")
+            label = f"🔨 Бан на {days} дн."
+            await add_modlog(gid, member.id, mod_id, f"AUTO_TEMPBAN_{days}D", reason, f"{days}d")
     except discord.Forbidden:
         pass
     return label
@@ -1483,6 +1537,7 @@ async def on_ready():
         bot.loop.create_task(topgg_stats_loop(bot))
         bot.loop.create_task(memory_cleanup_loop(bot))
         bot.loop.create_task(reminder_check_loop(bot))
+        bot.loop.create_task(invite_autoclean_loop())
         print("✅ Фоновые задачи запущены")
 
     # ── Загружаем языки серверов из БД ───────────────────────
@@ -4494,9 +4549,175 @@ async def birthday_check_loop():
         await asyncio.sleep(300)  # проверяем каждые 5 минут
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  🎫 TICKET SYSTEM
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async def invite_autoclean_loop():
+    """
+    Каждые 2 дня проверяет инвайты на всех серверах где включена авто-очистка.
+    Удаляет инвайты по которым никто не пришёл за max_age_days дней.
+    """
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT guild_id, max_age_days, log_channel FROM invite_autoclean_settings WHERE enabled=1"
+                ) as c:
+                    guilds_to_check = await c.fetchall()
+
+            for gid, max_age_days, log_ch_id in guilds_to_check:
+                guild = bot.get_guild(gid)
+                if not guild:
+                    continue
+                try:
+                    await _run_invite_autoclean(guild, max_age_days, log_ch_id)
+                except Exception as ex:
+                    print(f"[INVITE_CLEAN] Guild {gid} error: {ex}")
+
+        except Exception as ex:
+            print(f"[INVITE_CLEAN] Loop error: {ex}")
+
+        await asyncio.sleep(172800)  # 2 дня = 48 часов
+
+
+async def _run_invite_autoclean(guild: discord.Guild, max_age_days: int, log_ch_id: int):
+    """
+    Получает список инвайтов на сервере и удаляет те у которых:
+    - uses == 0 (никто не перешёл)
+    - созданы более max_age_days дней назад
+    """
+    try:
+        invites = await guild.invites()
+    except discord.Forbidden:
+        return
+
+    now         = datetime.datetime.now(datetime.timezone.utc)
+    deleted     = []
+    failed      = []
+    min_age     = datetime.timedelta(days=max_age_days)
+
+    for inv in invites:
+        # Пропускаем инвайты без даты создания
+        if not inv.created_at:
+            continue
+        # Пропускаем инвайты у которых уже были переходы
+        if (inv.uses or 0) > 0:
+            continue
+        # Пропускаем слишком свежие (ещё не прошло max_age_days)
+        age = now - inv.created_at
+        if age < min_age:
+            continue
+
+        # Удаляем
+        try:
+            await inv.delete(reason=f"Auto-clean: 0 uses за {age.days} дн.")
+            deleted.append(inv)
+            # Убираем из кэша
+            _invite_cache.pop(f"{guild.id}:{inv.code}", None)
+        except discord.Forbidden:
+            failed.append(inv.code)
+        except Exception:
+            pass
+
+    if not deleted:
+        return
+
+    # Логируем в канал если настроен
+    log_ch = guild.get_channel(log_ch_id) if log_ch_id else await get_log_ch(guild)
+    if log_ch:
+        e = build_embed(C.MUTED)
+        e.set_author(name=f"🔗 Авто-очистка инвайтов · удалено {len(deleted)}")
+        lines = []
+        for inv in deleted[:20]:  # максимум 20 в одном сообщении
+            creator = inv.inviter.display_name if inv.inviter else "Неизвестно"
+            age_str = f"{(now - inv.created_at).days} дн."
+            lines.append(f"`{inv.code}` — создан {creator} · {age_str} · 0 переходов")
+        if len(deleted) > 20:
+            lines.append(f"...и ещё {len(deleted) - 20}")
+        e.description = "\n".join(lines)
+        if failed:
+            e.add_field(name="⚠️ Не удалось удалить", value=", ".join(f"`{c}`" for c in failed[:10]), inline=False)
+        e.set_footer(text=f"Авто-очистка каждые 2 дня · инвайты старше {max_age_days} дн. без переходов")
+        try:
+            await log_ch.send(embed=e)
+        except Exception:
+            pass
+
+    print(f"[INVITE_CLEAN] {guild.name}: удалено {len(deleted)} инвайтов")
+
+
+@bot.tree.command(name="invclean", description="Настройка авто-очистки пустых инвайтов")
+@app_commands.describe(
+    action="enable / disable / status / run",
+    max_age_days="Удалять инвайты старше N дней без переходов (по умолчанию 7)"
+)
+async def invclean(interaction: discord.Interaction,
+                   action: str = "status",
+                   max_age_days: int = 7):
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.response.send_message("❌ Нужно Manage Server.", ephemeral=True)
+
+    gid = interaction.guild_id
+
+    if action == "enable":
+        max_age_days = max(1, min(365, max_age_days))
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT INTO invite_autoclean_settings (guild_id, enabled, max_age_days)
+                VALUES (?, 1, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    enabled=1, max_age_days=excluded.max_age_days
+            """, (gid, max_age_days))
+            await db.commit()
+        e = build_embed(C.SUCCESS)
+        e.set_author(name="✅ Авто-очистка инвайтов включена")
+        e.add_field(name="Удалять инвайты старше", value=f"**{max_age_days} дней** без переходов", inline=True)
+        e.add_field(name="Проверка",               value="Каждые **2 дня**", inline=True)
+        e.set_footer(text="Используй /invclean run для немедленной проверки")
+        return await interaction.response.send_message(embed=e)
+
+    elif action == "disable":
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE invite_autoclean_settings SET enabled=0 WHERE guild_id=?", (gid,)
+            )
+            await db.commit()
+        return await interaction.response.send_message("⏹ Авто-очистка инвайтов **отключена**.", ephemeral=True)
+
+    elif action == "run":
+        await interaction.response.defer()
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT max_age_days, log_channel FROM invite_autoclean_settings WHERE guild_id=?",
+                (gid,)
+            ) as c:
+                row = await c.fetchone()
+        days = row[0] if row else max_age_days
+        log_ch = row[1] if row else 0
+        await _run_invite_autoclean(interaction.guild, days, log_ch)
+        return await interaction.followup.send(
+            f"✅ Проверка завершена. Смотри лог-канал для деталей.", ephemeral=True
+        )
+
+    else:  # status
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT enabled, max_age_days FROM invite_autoclean_settings WHERE guild_id=?",
+                (gid,)
+            ) as c:
+                row = await c.fetchone()
+        e = build_embed(C.PRIMARY)
+        e.set_author(name="🔗 Авто-очистка инвайтов")
+        if row and row[0]:
+            e.add_field(name="Статус", value="✅ Включена", inline=True)
+            e.add_field(name="Удалять старше", value=f"**{row[1]} дней**", inline=True)
+            e.add_field(name="Периодичность", value="Каждые 2 дня", inline=True)
+        else:
+            e.add_field(name="Статус", value="⏹ Отключена", inline=True)
+            e.description = "Включи: `/invclean enable max_age_days:7`"
+        e.set_footer(text="/invclean enable · /invclean disable · /invclean run (немедленная проверка)")
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+
 
 @bot.tree.command(name="ticket", description="Система тикетов [Premium]")
 @app_commands.describe(action="open / close / setup / enable / disable", reason="Причина обращения")
@@ -5744,41 +5965,43 @@ async def quarantine_cmd(interaction: discord.Interaction,
 #  PUNISHMENT SETTINGS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@bot.tree.command(name="punishments", description="Настройка прогрессивных наказаний")
+@bot.tree.command(name="punishments", description="Настройка наказаний за варны (1й/2й варн = мут, 3й = бан)")
 @app_commands.describe(
-    warn2="Действие при 2 варнах: mute_1h / mute_24h / kick / ban",
-    warn3="Действие при 3 варнах",
-    warn4="Действие при 4 варнах",
-    warn5="Действие при 5 варнах"
+    action="view (посмотреть) / set (изменить)",
+    mute1_days="Дней таймаута за 1-й варн (1-28)",
+    mute2_days="Дней таймаута за 2-й варн (1-28)",
+    ban3_days="Дней бана за 3-й варн"
 )
 async def punishments_cmd(interaction: discord.Interaction,
-                           warn2: str = "mute_1h",
-                           warn3: str = "mute_24h",
-                           warn4: str = "kick",
-                           warn5: str = "ban"):
+                           action: str = "view",
+                           mute1_days: int = None,
+                           mute2_days: int = None,
+                           ban3_days: int = None):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
-    valid = {"mute_1h", "mute_24h", "kick", "ban", "none"}
-    for val in [warn2, warn3, warn4, warn5]:
-        if val not in valid:
-            return await interaction.response.send_message(
-                f"❌ Допустимые значения: `mute_1h` `mute_24h` `kick` `ban` `none`", ephemeral=True)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO punishment_settings (guild_id,warn2_action,warn3_action,warn4_action,warn5_action)
-            VALUES (?,?,?,?,?)
-            ON CONFLICT(guild_id) DO UPDATE SET
-                warn2_action=excluded.warn2_action, warn3_action=excluded.warn3_action,
-                warn4_action=excluded.warn4_action, warn5_action=excluded.warn5_action
-        """, (interaction.guild_id, warn2, warn3, warn4, warn5))
-        await db.commit()
 
-    e = discord.Embed(color=0x5865F2, timestamp=datetime.datetime.utcnow())
-    e.set_author(name="Progressive Punishments")
-    e.add_field(name="2 warns", value=f"`{warn2}`", inline=True)
-    e.add_field(name="3 warns", value=f"`{warn3}`", inline=True)
-    e.add_field(name="4 warns", value=f"`{warn4}`", inline=True)
-    e.add_field(name="5 warns", value=f"`{warn5}`", inline=True)
+    gid = interaction.guild_id
+
+    if action == "set":
+        if mute1_days is not None and not (1 <= mute1_days <= 28):
+            return await interaction.response.send_message(
+                "❌ mute1_days должен быть от 1 до 28 (лимит Discord на таймаут).", ephemeral=True)
+        if mute2_days is not None and not (1 <= mute2_days <= 28):
+            return await interaction.response.send_message(
+                "❌ mute2_days должен быть от 1 до 28.", ephemeral=True)
+        if ban3_days is not None and ban3_days < 1:
+            return await interaction.response.send_message(
+                "❌ ban3_days должен быть больше 0.", ephemeral=True)
+        cfg = await set_punishment_settings(gid, mute1_days, mute2_days, ban3_days)
+    else:
+        cfg = await get_punishment_settings(gid)
+
+    e = build_embed(C.PRIMARY)
+    e.set_author(name="⚖️ Прогрессивные наказания")
+    e.add_field(name="1-й варн", value=f"🔇 Таймаут **{cfg['mute1_days']}** дн.", inline=True)
+    e.add_field(name="2-й варн", value=f"🔇 Таймаут **{cfg['mute2_days']}** дн.", inline=True)
+    e.add_field(name="3-й варн", value=f"🔨 Бан **{cfg['ban3_days']}** дн.", inline=True)
+    e.set_footer(text="Изменить: /punishments action:set mute1_days:7 mute2_days:7 ban3_days:30 · также доступно на дашборде")
     await interaction.response.send_message(embed=e)
 
 
