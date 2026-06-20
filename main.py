@@ -2572,19 +2572,27 @@ async def mute_cmd(interaction: discord.Interaction, member: discord.Member,
             "❌ Неверная длительность. Выбери из списка.", ephemeral=True)
 
     try:
+        # Подавляем on_member_update DM — сами отправим с нужным текстом
+        _suppress_next_timeout_dm.add((interaction.guild_id, member.id))
         await member.timeout(delta, reason=reason)
         await add_modlog(interaction.guild_id, member.id, interaction.user.id,
                          "MUTE", reason, duration)
-        # DM с кнопкой апелляции отправит on_member_update автоматически
+        # DM участнику
+        try:
+            dm_reason = f"Тайм-аут на {duration}" + (f" · {reason}" if reason != "Не указана" else "")
+            await send_appeal_dm(member, interaction.guild, "MUTE", dm_reason)
+        except Exception:
+            pass
 
         e = build_embed(C.WARNING)
         e.set_author(name=f"Mute — {member.display_name}", icon_url=member.display_avatar.url)
-        e.add_field(name="Участник",    value=member.mention,           inline=True)
-        e.add_field(name="Длительность", value=f"**{duration}**",       inline=True)
-        e.add_field(name="Модератор",   value=interaction.user.mention, inline=True)
-        e.add_field(name="Причина",     value=reason,                   inline=False)
+        e.add_field(name="Участник",     value=member.mention,           inline=True)
+        e.add_field(name="Длительность", value=f"**{duration}**",        inline=True)
+        e.add_field(name="Модератор",    value=interaction.user.mention, inline=True)
+        e.add_field(name="Причина",      value=reason,                   inline=False)
         await interaction.response.send_message(embed=e)
     except discord.Forbidden:
+        _suppress_next_timeout_dm.discard((interaction.guild_id, member.id))
         await interaction.response.send_message("❌ Нет прав выдать таймаут.", ephemeral=True)
 
 
@@ -7620,11 +7628,20 @@ class MemberActionView(discord.ui.View):
             return await interaction.response.send_message("No permission.", ephemeral=True)
         try:
             until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
+            # Подавляем DM из on_member_update — сами отправим ниже
+            _suppress_next_timeout_dm.add((interaction.guild_id, self.member.id))
             await self.member.timeout(until, reason=f"Muted by {interaction.user}")
-            # DM отправит on_member_update автоматически
-            await add_modlog(interaction.guild_id, self.member.id, interaction.user.id, "MUTE", "10m via userinfo button", "10m")
-            await interaction.response.send_message(f"✓ **{self.member.display_name}** muted 10 min.", ephemeral=True)
+            await add_modlog(interaction.guild_id, self.member.id, interaction.user.id,
+                             "MUTE", "10m via userinfo button", "10m")
+            # Отправляем DM напрямую
+            try:
+                await send_appeal_dm(self.member, interaction.guild, "MUTE", "Тайм-аут на 10 минут")
+            except Exception:
+                pass
+            await interaction.response.send_message(
+                f"✓ **{self.member.display_name}** muted 10 min.", ephemeral=True)
         except Exception as ex:
+            _suppress_next_timeout_dm.discard((interaction.guild_id, self.member.id))
             await interaction.response.send_message(f"Error: {ex}", ephemeral=True)
 
     async def on_timeout(self):
