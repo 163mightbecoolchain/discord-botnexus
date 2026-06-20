@@ -4628,24 +4628,14 @@ async def _run_invite_autoclean(guild: discord.Guild, max_age_days: int, log_ch_
     if not deleted:
         return
 
-    # Логируем в канал если настроен
+    # Отправляем только итоговое сообщение с количеством
     log_ch = guild.get_channel(log_ch_id) if log_ch_id else await get_log_ch(guild)
     if log_ch:
-        e = build_embed(C.MUTED)
-        e.set_author(name=f"🔗 Авто-очистка инвайтов · удалено {len(deleted)}")
-        lines = []
-        for inv in deleted[:20]:  # максимум 20 в одном сообщении
-            creator = inv.inviter.display_name if inv.inviter else "Неизвестно"
-            age_str = f"{(now - inv.created_at).days} дн."
-            lines.append(f"`{inv.code}` — создан {creator} · {age_str} · 0 переходов")
-        if len(deleted) > 20:
-            lines.append(f"...и ещё {len(deleted) - 20}")
-        e.description = "\n".join(lines)
-        if failed:
-            e.add_field(name="⚠️ Не удалось удалить", value=", ".join(f"`{c}`" for c in failed[:10]), inline=False)
-        e.set_footer(text=f"Авто-очистка каждые 2 дня · инвайты старше {max_age_days} дн. без переходов")
         try:
-            await log_ch.send(embed=e)
+            await log_ch.send(
+                f"🔗 Авто-очистка инвайтов: было удалено **{len(deleted)}** инвайт "
+                f"{'код' if len(deleted) == 1 else 'кодов' if 5 <= len(deleted) % 100 <= 20 or len(deleted) % 10 >= 5 or len(deleted) % 10 == 0 else 'кода'}."
+            )
         except Exception:
             pass
 
