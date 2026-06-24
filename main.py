@@ -2463,18 +2463,6 @@ async def create_ban_request(guild: discord.Guild, member: discord.Member,
     except Exception:
         pass
 
-    # Уведомляем всех администраторов в DM
-    for admin in guild.members:
-        if (admin.guild_permissions.ban_members and
-                not admin.bot and admin.id != mod_id):
-            try:
-                msg = (f"⚖️ **Заявка на бан #{request_id}** на сервере **{guild.name}**\n"
-                       f"Участник: {member} · Причина: {reason}\n"
-                       f"Ответь в лог-канале или используй `/banrequests`")
-                await admin.send(msg, embed=e)
-            except Exception:
-                pass
-
     return request_id
 
 class BanRequestView(discord.ui.View):
@@ -3165,15 +3153,40 @@ async def banrequests_cmd(interaction: discord.Interaction, status: str = "pendi
     await interaction.followup.send(embed=e, ephemeral=True)
 
 
-@bot.tree.command(name="appeal", description="Подать апелляцию на наказание")
-@app_commands.describe(action="submit (подать) / list / view / accept / reject",
-                       appeal_id="ID апелляции (для view/accept/reject)",
+@bot.tree.command(name="appeal", description="Апелляции и заявки на бан")
+@app_commands.describe(action="submit / list / view / accept / reject / banrequests",
+                       appeal_id="ID апелляции или заявки на бан",
                        note="Комментарий (для accept/reject)")
 async def appeal_cmd(interaction: discord.Interaction,
                      action: str = "submit",
                      appeal_id: int = 0,
                      note: str = ""):
     gid = interaction.guild_id
+
+    # ── BANREQUESTS — заявки на бан ────────────────────────────
+    if action == "banrequests":
+        if not interaction.user.guild_permissions.ban_members:
+            return await interaction.response.send_message("❌ Нужно право Ban Members.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT id, user_id, username, reason, status, created_at
+                FROM ban_requests WHERE guild_id=? AND status='pending'
+                ORDER BY id DESC LIMIT 20
+            """, (gid,)) as c:
+                rows = await c.fetchall()
+        if not rows:
+            return await interaction.followup.send("✅ Нет активных заявок на бан.", ephemeral=True)
+        e = build_embed(C.DANGER)
+        e.set_author(name="⚖️ Заявки на бан — ожидают решения")
+        lines = []
+        for rid, uid, uname, reason, status, ts in rows:
+            m = interaction.guild.get_member(uid)
+            name = m.display_name if m else uname
+            lines.append(f"⏳ **#{rid}** · `{name}` · {reason[:40]} · *{ts[:10]}*")
+        e.description = "\n".join(lines)
+        e.set_footer(text="Кнопки для одобрения/отклонения находятся в лог-канале")
+        return await interaction.followup.send(embed=e, ephemeral=True)
 
     # ── SUBMIT — открываем модал ───────────────────────────────
     if action == "submit":
@@ -6270,43 +6283,62 @@ async def quarantine_cmd(interaction: discord.Interaction,
 #  PUNISHMENT SETTINGS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@bot.tree.command(name="punishments", description="Настройка наказаний за варны (1й/2й варн = мут, 3й = бан)")
+@bot.tree.command(name="punishments", description="Настройка наказаний за варны")
 @app_commands.describe(
-    action="view (посмотреть) / set (изменить)",
-    mute1_days="Дней таймаута за 1-й варн (1-28)",
-    mute2_days="Дней таймаута за 2-й варн (1-28)",
-    ban3_days="Дней бана за 3-й варн"
+    action="view / set",
+    mute1_days="Дней таймаута за 1-й варн (1-27)",
+    mute2_days="Дней таймаута за 2-й варн (1-27)",
+    ban3_days="Дней бана за 3-й варн",
+    warn3_type="Действие на 3-м варне: ban / mute / request"
 )
+@app_commands.choices(warn3_type=[
+    app_commands.Choice(name="🔨 Бан (авто)",           value="ban"),
+    app_commands.Choice(name="🔇 Мут (как 2-й варн)",   value="mute"),
+    app_commands.Choice(name="⚖️ Заявка на бан (вручную)", value="request"),
+])
 async def punishments_cmd(interaction: discord.Interaction,
                            action: str = "view",
                            mute1_days: int = None,
                            mute2_days: int = None,
-                           ban3_days: int = None):
+                           ban3_days: int = None,
+                           warn3_type: str = None):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
 
     gid = interaction.guild_id
 
     if action == "set":
-        if mute1_days is not None and not (1 <= mute1_days <= 28):
+        if mute1_days is not None and not (1 <= mute1_days <= 27):
             return await interaction.response.send_message(
-                "❌ mute1_days должен быть от 1 до 28 (лимит Discord на таймаут).", ephemeral=True)
-        if mute2_days is not None and not (1 <= mute2_days <= 28):
+                "❌ mute1_days: 1–27 (лимит Discord).", ephemeral=True)
+        if mute2_days is not None and not (1 <= mute2_days <= 27):
             return await interaction.response.send_message(
-                "❌ mute2_days должен быть от 1 до 28.", ephemeral=True)
+                "❌ mute2_days: 1–27.", ephemeral=True)
         if ban3_days is not None and ban3_days < 1:
             return await interaction.response.send_message(
                 "❌ ban3_days должен быть больше 0.", ephemeral=True)
-        cfg = await set_punishment_settings(gid, mute1_days, mute2_days, ban3_days)
+        if warn3_type and warn3_type not in ("ban", "mute", "request"):
+            return await interaction.response.send_message(
+                "❌ warn3_type: ban / mute / request", ephemeral=True)
+        cfg = await set_punishment_settings(gid, mute1_days, mute2_days, ban3_days, warn3_type)
     else:
         cfg = await get_punishment_settings(gid)
 
+    w3_labels = {
+        "ban":     f"🔨 Авто-бан **{cfg['ban3_days']}** дн.",
+        "mute":    f"🔇 Мут как 2-й варн (**{cfg['mute2_days']}** дн.)",
+        "request": "⚖️ Заявка на бан (одобряет администратор)",
+    }
     e = build_embed(C.PRIMARY)
     e.set_author(name="⚖️ Прогрессивные наказания")
     e.add_field(name="1-й варн", value=f"🔇 Таймаут **{cfg['mute1_days']}** дн.", inline=True)
     e.add_field(name="2-й варн", value=f"🔇 Таймаут **{cfg['mute2_days']}** дн.", inline=True)
-    e.add_field(name="3-й варн", value=f"🔨 Бан **{cfg['ban3_days']}** дн.", inline=True)
-    e.set_footer(text="Изменить: /punishments action:set mute1_days:7 mute2_days:7 ban3_days:30 · также доступно на дашборде")
+    e.add_field(name="3-й варн", value=w3_labels.get(cfg.get("warn3_type","ban"), "?"), inline=True)
+    if cfg.get("warn3_type") == "request":
+        e.add_field(name="Заявки на бан",
+                    value="Смотри `/appeal action:banrequests` или `/banrequests`",
+                    inline=False)
+    e.set_footer(text="/punishments action:set warn3_type:request — сменить режим")
     await interaction.response.send_message(embed=e)
 
 
