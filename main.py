@@ -827,6 +827,22 @@ async def db_init():
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
                 member_id INTEGER, member_name TEXT, joined_at TEXT,
                 note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS ban_requests (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                username    TEXT DEFAULT '',
+                mod_id      INTEGER NOT NULL,
+                reason      TEXT DEFAULT '',
+                warn_count  INTEGER DEFAULT 3,
+                status      TEXT DEFAULT 'pending',  -- pending / approved / rejected
+                reviewer_id INTEGER DEFAULT 0,
+                created_at  TEXT NOT NULL,
+                reviewed_at TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_ban_requests
+                ON ban_requests(guild_id, status);
+
             CREATE TABLE IF NOT EXISTS invite_autoclean_settings (
                 guild_id    INTEGER PRIMARY KEY,
                 enabled     INTEGER DEFAULT 0,
@@ -1085,6 +1101,7 @@ async def db_init():
             "ALTER TABLE punishment_settings ADD COLUMN mute2_days INTEGER DEFAULT 7",
             "ALTER TABLE punishment_settings ADD COLUMN ban3_days INTEGER DEFAULT 30",
             "ALTER TABLE punishment_settings ADD COLUMN updated_at TEXT DEFAULT ''",
+            "ALTER TABLE punishment_settings ADD COLUMN warn3_type TEXT DEFAULT 'ban'",
             # Quarantine on/off тоггл (отдельно от роли — можно временно выключить)
             "ALTER TABLE guild_settings ADD COLUMN quarantine_enabled INTEGER DEFAULT 1",
         ]
@@ -1388,86 +1405,102 @@ async def get_punishment_settings(gid: int) -> dict:
     """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT mute1_days, mute2_days, ban3_days FROM punishment_settings WHERE guild_id=?",
+            "SELECT mute1_days, mute2_days, ban3_days, COALESCE(warn3_type,'ban') "
+            "FROM punishment_settings WHERE guild_id=?",
             (gid,)
         ) as c:
             row = await c.fetchone()
     if row:
-        return {"mute1_days": row[0] or 7, "mute2_days": row[1] or 7, "ban3_days": row[2] or 30}
-    return {"mute1_days": 7, "mute2_days": 7, "ban3_days": 30}
+        return {"mute1_days": row[0] or 7, "mute2_days": row[1] or 7,
+                "ban3_days": row[2] or 30, "warn3_type": row[3] or "ban"}
+    return {"mute1_days": 7, "mute2_days": 7, "ban3_days": 30, "warn3_type": "ban"}
 
 
 async def set_punishment_settings(gid: int, mute1_days: int = None,
-                                   mute2_days: int = None, ban3_days: int = None):
+                                   mute2_days: int = None, ban3_days: int = None,
+                                   warn3_type: str = None):
     """Обновляет настройки наказаний. None значения не трогаются."""
     current = await get_punishment_settings(gid)
-    m1 = mute1_days if mute1_days is not None else current["mute1_days"]
-    m2 = mute2_days if mute2_days is not None else current["mute2_days"]
-    b3 = ban3_days  if ban3_days  is not None else current["ban3_days"]
+    m1 = mute1_days  if mute1_days  is not None else current["mute1_days"]
+    m2 = mute2_days  if mute2_days  is not None else current["mute2_days"]
+    b3 = ban3_days   if ban3_days   is not None else current["ban3_days"]
+    w3 = warn3_type  if warn3_type  is not None else current["warn3_type"]
     now = datetime.datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT INTO punishment_settings (guild_id, mute1_days, mute2_days, ban3_days, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO punishment_settings
+                (guild_id, mute1_days, mute2_days, ban3_days, warn3_type, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
-                mute1_days=excluded.mute1_days,
-                mute2_days=excluded.mute2_days,
-                ban3_days=excluded.ban3_days,
+                mute1_days=excluded.mute1_days, mute2_days=excluded.mute2_days,
+                ban3_days=excluded.ban3_days,   warn3_type=excluded.warn3_type,
                 updated_at=excluded.updated_at
-        """, (gid, m1, m2, b3, now))
+        """, (gid, m1, m2, b3, w3, now))
         await db.commit()
-    return {"mute1_days": m1, "mute2_days": m2, "ban3_days": b3}
+    return {"mute1_days": m1, "mute2_days": m2, "ban3_days": b3, "warn3_type": w3}
 
 
 async def apply_progressive_punishment(member: discord.Member, warn_count: int,
                                         mod_id: int, silent_dm: bool = False) -> str:
     """
     Автоматическое наказание по количеству варнов.
-    Дефолт: 1й варн → 7д мут, 2й варн → 7д мут, 3й варн → 30д бан.
-    Настраивается через /punishments или дашборд (punishment_settings таблица).
-
-    silent_dm=True — не отправлять отдельное DM (используется когда вызывающий код
-    сам объединит уведомление о варне и наказании в одно сообщение)
-
-    Возвращает текстовую метку наказания ("Таймаут 7 дней" / "Бан 30 дней") или "".
+    Читает warn3_type из punishment_settings:
+      "ban"     → авто-бан (дефолт)
+      "mute"    → авто-мут как 2й варн
+      "request" → заявка на бан, решение за администратором
     """
     gid = member.guild.id
-    reason = f"Auto: {warn_count} warnings"
+    ps  = await get_punishment_settings(gid)
     label = ""
-    cfg = await get_punishment_settings(gid)
 
     try:
         if warn_count in (1, 2):
-            days = cfg["mute1_days"] if warn_count == 1 else cfg["mute2_days"]
-            days = max(1, min(28, days))  # Discord лимит на таймаут — 28 дней
+            days  = ps["mute1_days"] if warn_count == 1 else ps["mute2_days"]
             until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=days)
             if silent_dm:
                 _suppress_next_timeout_dm.add((gid, member.id))
-            await member.timeout(until, reason=reason)
-            await add_modlog(gid, member.id, mod_id, f"AUTO_MUTE_{days}D", reason, f"{days}d")
-            label = f"🔇 Таймаут на {days} дн."
-            # Если не silent_dm — DM отправит on_member_update автоматически
+            await member.timeout(until, reason=f"Auto: {warn_count} warnings")
+            await add_modlog(gid, member.id, mod_id, "AUTO_MUTE", f"Auto: {warn_count} warns", f"{days}d")
+            label = f"🔇 Таймаут на {days} дней"
 
         elif warn_count >= 3:
-            days = max(1, cfg["ban3_days"])
-            unban_at = (datetime.datetime.utcnow() + timedelta(days=days)).isoformat()
-            if not silent_dm:
-                try:
-                    await send_appeal_dm(member, member.guild, "TEMPBAN",
-                        f"Авто-бан на {days} дн. · накоплено {warn_count} варнов")
-                except Exception:
-                    pass
-            await member.ban(reason=reason)
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("""
-                    INSERT INTO temp_bans (guild_id,user_id,mod_id,reason,unban_at)
-                    VALUES (?,?,?,?,?)
-                    ON CONFLICT(guild_id,user_id) DO UPDATE SET
-                        unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
-                """, (gid, member.id, mod_id, reason, unban_at))
-                await db.commit()
-            label = f"🔨 Бан на {days} дн."
-            await add_modlog(gid, member.id, mod_id, f"AUTO_TEMPBAN_{days}D", reason, f"{days}d")
+            w3 = ps.get("warn3_type", "ban")
+
+            if w3 == "mute":
+                days  = ps["mute2_days"]
+                until = datetime.datetime.now(datetime.timezone.utc) + timedelta(days=days)
+                if silent_dm:
+                    _suppress_next_timeout_dm.add((gid, member.id))
+                await member.timeout(until, reason="Auto: 3 warnings")
+                await add_modlog(gid, member.id, mod_id, "AUTO_MUTE", "Auto: 3 warns", f"{days}d")
+                label = f"🔇 Таймаут на {days} дней (3й варн)"
+
+            elif w3 == "request":
+                reason = "Накоплено 3 варна"
+                await create_ban_request(member.guild, member, mod_id, reason, warn_count)
+                label = "⚖️ Создана заявка на бан"
+
+            else:
+                ban_days = ps.get("ban3_days", 30)
+                unban_at = (datetime.datetime.utcnow() + timedelta(days=ban_days)).isoformat()
+                if not silent_dm:
+                    try:
+                        await send_appeal_dm(member, member.guild, "TEMPBAN",
+                            f"Авто-бан на {ban_days} дней · накоплено {warn_count} варнов")
+                    except Exception:
+                        pass
+                await member.ban(reason="Auto: 3 warnings")
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("""
+                        INSERT INTO temp_bans (guild_id, user_id, mod_id, reason, unban_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                            unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
+                    """, (gid, member.id, mod_id, "Auto: 3 warnings", unban_at))
+                    await db.commit()
+                label = f"🔨 Бан на {ban_days} дней"
+                await add_modlog(gid, member.id, mod_id, "AUTO_TEMPBAN", "Auto: 3 warns", f"{ban_days}d")
+
     except discord.Forbidden:
         pass
     return label
@@ -2393,6 +2426,168 @@ async def invdel(interaction: discord.Interaction, code: str):
 #  APPEAL SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
+
+
+async def create_ban_request(guild: discord.Guild, member: discord.Member,
+                              mod_id: int, reason: str, warn_count: int) -> int:
+    """Создаёт заявку на бан и уведомляет администраторов с кнопками."""
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            INSERT INTO ban_requests (guild_id, user_id, username, mod_id, reason, warn_count, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (guild.id, member.id, str(member), mod_id, reason, warn_count, now))
+        request_id = cur.lastrowid
+        await db.commit()
+
+    # Находим канал для уведомления
+    ch = await get_log_ch(guild)
+    if not ch:
+        return request_id
+
+    mod = guild.get_member(mod_id)
+    e = build_embed(C.DANGER)
+    e.set_author(name=f"⚖️ Заявка на бан #{request_id}",
+                  icon_url=member.display_avatar.url)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.add_field(name="Участник",  value=f"{member.mention} (`{member}`)", inline=True)
+    e.add_field(name="Варнов",    value=f"**{warn_count}/3**",           inline=True)
+    e.add_field(name="Инициатор", value=mod.mention if mod else str(mod_id), inline=True)
+    e.add_field(name="Причина",   value=reason,                          inline=False)
+    e.set_footer(text="Администратор должен одобрить или отклонить бан")
+
+    view = BanRequestView(request_id, member.id, guild.id)
+    try:
+        await ch.send(embed=e, view=view)
+    except Exception:
+        pass
+
+    # Уведомляем всех администраторов в DM
+    for admin in guild.members:
+        if (admin.guild_permissions.ban_members and
+                not admin.bot and admin.id != mod_id):
+            try:
+                msg = (f"⚖️ **Заявка на бан #{request_id}** на сервере **{guild.name}**\n"
+                       f"Участник: {member} · Причина: {reason}\n"
+                       f"Ответь в лог-канале или используй `/banrequests`")
+                await admin.send(msg, embed=e)
+            except Exception:
+                pass
+
+    return request_id
+
+class BanRequestView(discord.ui.View):
+    """Кнопки для рассмотрения заявки на бан"""
+    def __init__(self, request_id: int, user_id: int, guild_id: int):
+        super().__init__(timeout=None)
+        self.request_id = request_id
+        self.user_id    = user_id
+        self.guild_id   = guild_id
+
+    @discord.ui.button(label="✅ Одобрить бан", style=discord.ButtonStyle.danger)
+    async def approve_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.ban_members:
+            return await interaction.response.send_message("❌ Нужно право Ban Members.", ephemeral=True)
+        await interaction.response.defer()
+        # Проверяем что заявка ещё pending
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT status, reason FROM ban_requests WHERE id=?", (self.request_id,)
+            ) as c:
+                row = await c.fetchone()
+        if not row or row[0] != "pending":
+            return await interaction.followup.send("Заявка уже рассмотрена.", ephemeral=True)
+
+        reason  = row[1]
+        guild   = interaction.guild
+        member  = guild.get_member(self.user_id)
+        ps      = await get_punishment_settings(self.guild_id)
+        ban_days = ps.get("ban3_days", 30)
+        unban_at = (datetime.datetime.utcnow() + timedelta(days=ban_days)).isoformat()
+
+        ban_ok = False
+        try:
+            if member:
+                try:
+                    await send_appeal_dm(member, guild, "TEMPBAN",
+                                          f"Бан на {ban_days} дней · {reason}")
+                except Exception:
+                    pass
+            user = member or await bot.fetch_user(self.user_id)
+            await guild.ban(user, reason=f"[Заявка #{self.request_id}] {reason}")
+            ban_ok = True
+            # Записываем как tempban
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("""
+                    INSERT INTO temp_bans (guild_id, user_id, mod_id, reason, unban_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
+                """, (self.guild_id, self.user_id, interaction.user.id, reason, unban_at))
+                await db.commit()
+        except discord.Forbidden:
+            pass
+
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE ban_requests SET status='approved', reviewer_id=?, reviewed_at=?
+                WHERE id=?
+            """, (interaction.user.id, now, self.request_id))
+            await db.commit()
+
+        await add_modlog(self.guild_id, self.user_id, interaction.user.id,
+                         "AUTO_TEMPBAN", reason, f"{ban_days}d")
+
+        # Обновляем сообщение
+        e = interaction.message.embeds[0] if interaction.message.embeds else build_embed(C.SUCCESS)
+        e.color = discord.Color.green()
+        new_e = build_embed(C.SUCCESS)
+        new_e.set_author(name=f"✅ Бан одобрен · #{self.request_id}")
+        new_e.add_field(name="Одобрил", value=interaction.user.mention, inline=True)
+        new_e.add_field(name="Бан",     value=f"{ban_days} дней {'✅' if ban_ok else '⚠️ нет прав'}", inline=True)
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(embed=new_e, view=self)
+        await interaction.followup.send(
+            f"✅ Бан на **{ban_days} дней** {'выдан' if ban_ok else 'НЕ выдан (нет прав)'}.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="❌ Отклонить", style=discord.ButtonStyle.secondary)
+    async def reject_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.ban_members:
+            return await interaction.response.send_message("❌ Нужно право Ban Members.", ephemeral=True)
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT status FROM ban_requests WHERE id=?", (self.request_id,)
+            ) as c:
+                row = await c.fetchone()
+        if not row or row[0] != "pending":
+            return await interaction.response.send_message("Заявка уже рассмотрена.", ephemeral=True)
+
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE ban_requests SET status='rejected', reviewer_id=?, reviewed_at=?
+                WHERE id=?
+            """, (interaction.user.id, now, self.request_id))
+            await db.commit()
+
+        new_e = build_embed(C.MUTED)
+        new_e.set_author(name=f"❌ Бан отклонён · #{self.request_id}")
+        new_e.add_field(name="Отклонил", value=interaction.user.mention, inline=True)
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(embed=new_e, view=self)
+        await interaction.response.send_message("Заявка отклонена.", ephemeral=True)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
 class AppealModal(discord.ui.Modal, title="Подать апелляцию"):
     """Discord Modal для ввода апелляции"""
     def __init__(self, guild_id: int, action_type: str, original_reason: str = ""):
@@ -2931,6 +3126,44 @@ async def leaderboard(interaction: discord.Interaction):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  /appeal команды
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.tree.command(name="banrequests", description="Заявки на бан — просмотр и рассмотрение")
+@app_commands.describe(status="pending (по умолчанию) / approved / rejected / all")
+async def banrequests_cmd(interaction: discord.Interaction, status: str = "pending"):
+    if not interaction.user.guild_permissions.ban_members:
+        return await interaction.response.send_message("❌ Нужно право Ban Members.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+
+    gid = interaction.guild_id
+    async with aiosqlite.connect(DB_PATH) as db:
+        if status == "all":
+            async with db.execute("""
+                SELECT id, user_id, username, mod_id, reason, warn_count, status, created_at
+                FROM ban_requests WHERE guild_id=? ORDER BY id DESC LIMIT 20
+            """, (gid,)) as c:
+                rows = await c.fetchall()
+        else:
+            async with db.execute("""
+                SELECT id, user_id, username, mod_id, reason, warn_count, status, created_at
+                FROM ban_requests WHERE guild_id=? AND status=? ORDER BY id DESC LIMIT 20
+            """, (gid, status)) as c:
+                rows = await c.fetchall()
+
+    if not rows:
+        return await interaction.followup.send(
+            f"Заявок со статусом **{status}** нет.", ephemeral=True)
+
+    icons = {"pending": "⏳", "approved": "✅", "rejected": "❌"}
+    e = build_embed(C.PRIMARY)
+    e.set_author(name=f"⚖️ Заявки на бан · {status}")
+    lines = []
+    for rid, uid, uname, mid, reason, wc, st, ts in rows:
+        ic = icons.get(st, "•")
+        lines.append(f"{ic} **#{rid}** · `{uname}` · {reason[:40]} · *{ts[:10]}*")
+    e.description = "\n".join(lines)
+    e.set_footer(text="Активные заявки с кнопками — в лог-канале")
+    await interaction.followup.send(embed=e, ephemeral=True)
+
 
 @bot.tree.command(name="appeal", description="Подать апелляцию на наказание")
 @app_commands.describe(action="submit (подать) / list / view / accept / reject",
