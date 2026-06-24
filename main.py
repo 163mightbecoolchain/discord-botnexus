@@ -270,6 +270,62 @@ _spam_tracker: dict = {}
 _suppress_next_timeout_dm: set = set()
 _raid_tracker: dict = {}
 
+# ── Анти-нюк трекер ──────────────────────────────────────────
+# Ключ: (guild_id, mod_id, action_type) → [timestamps]
+_antinuke_tracker: dict = {}
+ANTINUKE_LIMITS = {
+    "ban":     (5, 30),   # 5 банов за 30 сек
+    "kick":    (5, 30),   # 5 киков за 30 сек
+    "mute":    (8, 30),   # 8 мутов за 30 сек
+    "channel": (3, 20),   # 3 удаления каналов за 20 сек
+    "role":    (3, 20),   # 3 удаления ролей за 20 сек
+}
+
+
+async def antinuke_check(guild: discord.Guild, mod_id: int, action: str) -> bool:
+    """Возвращает True если лимит превышён (нюк-атака)."""
+    if not guild or not mod_id:
+        return False
+    # Владелец сервера исключён из проверки
+    if guild.owner_id == mod_id:
+        return False
+    limit, window = ANTINUKE_LIMITS.get(action, (10, 60))
+    key = (guild.id, mod_id, action)
+    now = time.time()
+    _antinuke_tracker.setdefault(key, [])
+    _antinuke_tracker[key] = [t for t in _antinuke_tracker[key] if now - t < window]
+    _antinuke_tracker[key].append(now)
+    if len(_antinuke_tracker[key]) >= limit:
+        await _antinuke_alert(guild, mod_id, action, len(_antinuke_tracker[key]), window)
+        return True
+    return False
+
+
+async def _antinuke_alert(guild: discord.Guild, mod_id: int,
+                           action: str, count: int, window: int):
+    """Алерт владельцу и в лог-канал при обнаружении нюка."""
+    ch  = await get_log_ch(guild)
+    mod = guild.get_member(mod_id)
+    labels = {"ban": "банов", "kick": "киков", "mute": "мутов",
+              "channel": "удалений каналов", "role": "удалений ролей"}
+    e = build_embed(C.DANGER)
+    e.set_author(name="🚨 Анти-нюк — подозрительная активность")
+    e.add_field(name="Модератор",
+                value=f"{mod.mention if mod else mod_id} (`{mod.display_name if mod else mod_id}`)",
+                inline=True)
+    e.add_field(name="Действие",
+                value=f"**{count} {labels.get(action, action)}** за {window} сек.",
+                inline=True)
+    e.add_field(name="Рекомендация",
+                value="Немедленно проверь права этого модератора.",
+                inline=False)
+    if ch:
+        try: await ch.send(embed=e)
+        except Exception: pass
+    if guild.owner:
+        try: await guild.owner.send(embed=e)
+        except Exception: pass
+
 # ── Очистка кэшей (запускается каждые 10 минут) ───────────────
 async def reminder_check_loop(bot_instance):
     """Проверяет и отправляет напоминания каждую минуту"""
@@ -2005,6 +2061,11 @@ async def on_guild_channel_delete(channel_deleted):
     e.set_author(name="Channel deleted")
     e.add_field(name="Канал", value=channel_deleted.name, inline=True)
     await ch.send(embed=e)
+    try:
+        async for entry in channel_deleted.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+            await antinuke_check(channel_deleted.guild, entry.user.id, "channel")
+            break
+    except Exception: pass
 
 @bot.event
 async def on_guild_role_create(role):
@@ -2023,6 +2084,11 @@ async def on_guild_role_delete(role):
     e.set_author(name="Role deleted")
     e.add_field(name="Роль", value=role.name, inline=True)
     await ch.send(embed=e)
+    try:
+        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+            await antinuke_check(role.guild, entry.user.id, "role")
+            break
+    except Exception: pass
 
 @bot.event
 async def on_guild_update(before, after):
@@ -2572,6 +2638,10 @@ async def mute_cmd(interaction: discord.Interaction, member: discord.Member,
             "❌ Неверная длительность. Выбери из списка.", ephemeral=True)
 
     try:
+        # Анти-нюк проверка
+        if await antinuke_check(interaction.guild, interaction.user.id, "mute"):
+            return await interaction.response.send_message(
+                "⚠️ Слишком много мутов за короткое время. Подожди немного.", ephemeral=True)
         # Подавляем on_member_update DM — сами отправим с нужным текстом
         _suppress_next_timeout_dm.add((interaction.guild_id, member.id))
         await member.timeout(delta, reason=reason)
@@ -5806,6 +5876,10 @@ async def tempban(interaction: discord.Interaction, member: discord.Member,
     unban_at = (datetime.datetime.utcnow() + timedelta(hours=hours)).isoformat()
 
     try:
+        # Анти-нюк проверка
+        if await antinuke_check(interaction.guild, interaction.user.id, "ban"):
+            return await interaction.response.send_message(
+                "⚠️ Слишком много банов за короткое время. Подожди немного.", ephemeral=True)
         # DM с кнопкой апелляции — до бана, иначе бот не сможет написать
         try:
             await send_appeal_dm(member, interaction.guild, "TEMPBAN",
