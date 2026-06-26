@@ -347,7 +347,8 @@ async def api_guild_settings_get(request):
 
             # punishment_settings (3-warn system)
             async with db.execute(
-                "SELECT mute1_days, mute2_days, ban3_days FROM punishment_settings WHERE guild_id=?",
+                "SELECT mute1_days, mute2_days, ban3_days, COALESCE(warn3_type,'ban') "
+                "FROM punishment_settings WHERE guild_id=?",
                 (guild_id,)
             ) as c:
                 ps_row = await c.fetchone()
@@ -378,6 +379,7 @@ async def api_guild_settings_get(request):
             'mute1_days':         ps_row[0] if ps_row else 7,
             'mute2_days':         ps_row[1] if ps_row else 7,
             'ban3_days':          ps_row[2] if ps_row else 30,
+            'warn3_type':         ps_row[3] if ps_row else 'ban',
             # quarantine
             'quarantine_enabled':     qs_row[3] if qs_row else 0,
             'quarantine_role_id':     qs_row[0] if qs_row else 0,
@@ -436,31 +438,35 @@ async def api_guild_settings_post(request):
             mute1 = data.get('mute1_days')
             mute2 = data.get('mute2_days')
             ban3  = data.get('ban3_days')
-            if any(v is not None for v in [mute1, mute2, ban3]):
+            w3t   = data.get('warn3_type')
+            if any(v is not None for v in [mute1, mute2, ban3, w3t]):
                 # Читаем текущие значения
                 async with db.execute(
-                    "SELECT mute1_days, mute2_days, ban3_days FROM punishment_settings WHERE guild_id=?",
+                    "SELECT mute1_days, mute2_days, ban3_days, COALESCE(warn3_type,'ban') "
+                    "FROM punishment_settings WHERE guild_id=?",
                     (guild_id,)
                 ) as c:
                     cur = await c.fetchone()
-                cur = cur or (7, 7, 30)
+                cur = cur or (7, 7, 30, 'ban')
                 new_mute1 = int(mute1) if mute1 is not None else cur[0]
                 new_mute2 = int(mute2) if mute2 is not None else cur[1]
                 new_ban3  = int(ban3)  if ban3  is not None else cur[2]
+                new_w3t   = w3t        if w3t  in ('ban','mute','request') else cur[3]
                 # Ограничения
                 new_mute1 = max(1, min(27, new_mute1))
                 new_mute2 = max(1, min(27, new_mute2))
                 new_ban3  = max(1, new_ban3)
                 now = datetime.datetime.utcnow().isoformat()
                 await db.execute("""
-                    INSERT INTO punishment_settings (guild_id, mute1_days, mute2_days, ban3_days, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO punishment_settings (guild_id, mute1_days, mute2_days, ban3_days, warn3_type, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(guild_id) DO UPDATE SET
                         mute1_days=excluded.mute1_days,
                         mute2_days=excluded.mute2_days,
                         ban3_days=excluded.ban3_days,
+                        warn3_type=excluded.warn3_type,
                         updated_at=excluded.updated_at
-                """, (guild_id, new_mute1, new_mute2, new_ban3, now))
+                """, (guild_id, new_mute1, new_mute2, new_ban3, new_w3t, now))
 
             # ── quarantine_settings ────────────────────────────
             q_enabled = data.get('quarantine_enabled')
@@ -692,6 +698,111 @@ async def api_twins(request):
     except Exception:
         return web.json_response([])
 
+# ── API: appeal accept/reject ─────────────────────────────────
+
+@require_auth
+async def api_appeal_action(request):
+    """POST /api/guild/:id/appeal/:appeal_id/[accept|reject]"""
+    guild_id  = int(request.match_info['guild_id'])
+    appeal_id = int(request.match_info['appeal_id'])
+    action    = request.match_info['action']
+    if action not in ('accept', 'reject'):
+        return web.json_response({'error': 'invalid_action'}, status=400)
+
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    member = bg.get_member(int(s['user_id']))
+    if not member or not member.guild_permissions.manage_messages:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    note = data.get('note', '')
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT user_id, action_type, status FROM appeals WHERE id=? AND guild_id=?",
+                (appeal_id, guild_id)
+            ) as c:
+                row = await c.fetchone()
+        if not row:
+            return web.json_response({'error': 'appeal_not_found'}, status=404)
+        uid, atype, status = row
+        if status != 'pending':
+            return web.json_response({'error': 'already_reviewed'}, status=400)
+
+        now = datetime.datetime.utcnow().isoformat()
+        new_status = 'accepted' if action == 'accept' else 'rejected'
+
+        # Если accept — пытаемся снять наказание
+        if action == 'accept':
+            try:
+                if atype in ('BAN', 'TEMPBAN'):
+                    try:
+                        user = await bot.fetch_user(uid)
+                        await bg.unban(user, reason=f"Апелляция #{appeal_id} принята")
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            await db.execute(
+                                "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=? AND unbanned=0",
+                                (guild_id, uid)
+                            )
+                            await db.commit()
+                    except Exception:
+                        pass
+                elif atype == 'MUTE':
+                    m = bg.get_member(uid)
+                    if m and m.is_timed_out():
+                        try:
+                            await m.timeout(None, reason=f"Апелляция #{appeal_id}")
+                        except Exception:
+                            pass
+                elif atype == 'WARN':
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute("""
+                            DELETE FROM warnings WHERE id IN (
+                                SELECT id FROM warnings
+                                WHERE guild_id=? AND user_id=?
+                                ORDER BY id DESC LIMIT 1
+                            )
+                        """, (guild_id, uid))
+                        await db.commit()
+            except Exception:
+                pass
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE appeals SET status=?, reviewer_id=?,
+                                    reviewer_note=?, reviewed_at=?
+                WHERE id=? AND guild_id=?
+            """, (new_status, int(s['user_id']), note, now, appeal_id, guild_id))
+            await db.commit()
+
+        # Уведомляем участника в DM
+        try:
+            user = bot.get_user(uid) or await bot.fetch_user(uid)
+            if user:
+                guild_name = bg.name
+                if action == 'accept':
+                    msg = f"✅ Твоя апелляция #{appeal_id} на сервере **{guild_name}** **принята**. Наказание снято."
+                else:
+                    msg = f"❌ Твоя апелляция #{appeal_id} на сервере **{guild_name}** **отклонена**."
+                if note:
+                    msg += f"\n\n**Комментарий:** {note}"
+                await user.send(msg)
+        except Exception:
+            pass
+
+        return web.json_response({'ok': True, 'status': new_status})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+
 # ── API: appeals ──────────────────────────────────────────────
 
 @require_auth
@@ -775,6 +886,7 @@ def create_app(bot) -> web.Application:
     app.router.add_get('/api/guild/{guild_id}/invites',           api_invites)
     app.router.add_get('/api/guild/{guild_id}/twins',             api_twins)
     app.router.add_get('/api/guild/{guild_id}/appeals',           api_appeals)
+    app.router.add_post('/api/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action)
 
     return app
 
