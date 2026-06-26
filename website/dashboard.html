@@ -1,1293 +1,1594 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard — Witness</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<title>Witness · Dashboard</title>
 <style>
-:root{
-  --bg:#080B10;--surface:#0E1318;--surface2:#131920;
-  --border:#1C2330;--border2:#242d3d;
-  --accent:#00E5FF;--accent2:#FF6B35;--gold:#FFD166;
-  --text:#E8EDF5;--muted:#5A6478;--muted2:#8896aa;
-  --success:#57F287;--danger:#ED4245;--warning:#FEE75C;
-  --premium:#00E5FF;--security:#FF6B35;--free:#57F287;
-  --sidebar:220px;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;display:flex;min-height:100vh}
-
-/* ── SIDEBAR ── */
-.sidebar{
-  width:var(--sidebar);min-height:100vh;
-  background:var(--surface);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;
-  position:fixed;left:0;top:0;
-  z-index:50;
-}
-.sidebar-logo{
-  padding:1.5rem;border-bottom:1px solid var(--border);
-  font-size:1.2rem;font-weight:800;color:var(--accent);
-  display:flex;align-items:center;gap:.5rem;
-  text-decoration:none;
-}
-.sidebar-logo span{color:var(--text)}
-.sidebar-section{padding:.75rem 1rem .25rem;font-size:.65rem;
-  letter-spacing:.15em;text-transform:uppercase;color:var(--muted);
-  font-family:'Space Mono',monospace;}
-.sidebar-nav{flex:1;padding:.5rem 0}
-.nav-item{
-  display:flex;align-items:center;gap:.75rem;
-  padding:.65rem 1.5rem;color:var(--muted);
-  text-decoration:none;font-size:.9rem;font-weight:600;
-  transition:all .15s;cursor:pointer;
-  border-left:2px solid transparent;
-}
-.nav-item:hover{color:var(--text);background:rgba(255,255,255,.03);border-left-color:var(--border2)}
-.nav-item.active{color:var(--accent);background:rgba(0,229,255,.06);border-left-color:var(--accent)}
-.nav-item .icon{width:18px;text-align:center;font-size:1rem}
-.sidebar-user{
-  padding:1rem 1.5rem;border-top:1px solid var(--border);
-  display:flex;align-items:center;gap:.75rem;
-}
-.user-avatar{width:32px;height:32px;border-radius:50%;background:var(--border2)}
-.user-name{font-size:.85rem;font-weight:600}
-.user-tag{font-size:.75rem;color:var(--muted);font-family:'Space Mono',monospace}
-
-/* ── MAIN ── */
-.main{margin-left:var(--sidebar);flex:1;display:flex;flex-direction:column}
-.topbar{
-  height:60px;background:var(--surface);border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;
-  padding:0 2rem;position:sticky;top:0;z-index:40;
-}
-.topbar-left{display:flex;align-items:center;gap:1rem}
-.breadcrumb{display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:var(--muted)}
-.breadcrumb .sep{color:var(--border2)}
-.breadcrumb .current{color:var(--text);font-weight:600}
-.guild-selector{
-  display:flex;align-items:center;gap:.5rem;
-  background:var(--surface2);border:1px solid var(--border);
-  padding:.4rem .75rem;border-radius:8px;cursor:pointer;
-  font-size:.85rem;font-weight:600;transition:border-color .2s;
-}
-.guild-selector:hover{border-color:var(--accent)}
-.guild-icon{width:22px;height:22px;border-radius:50%;background:var(--border2)}
-.topbar-right{display:flex;align-items:center;gap:1rem}
-.btn{
-  display:inline-flex;align-items:center;gap:.4rem;
-  padding:.5rem 1rem;border-radius:6px;font-family:'Syne',sans-serif;
-  font-weight:700;font-size:.85rem;text-decoration:none;
-  transition:all .15s;cursor:pointer;border:none;
-}
-.btn-sm{padding:.35rem .75rem;font-size:.8rem}
-.btn-accent{background:var(--accent);color:#000}
-.btn-accent:hover{background:#00c8e0}
-.btn-danger{background:var(--danger);color:#fff}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--muted)}
-.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
-.content{padding:2rem;flex:1}
-
-/* ── GUILD SWITCHER ── */
-#guildList{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
-  gap:1rem;padding:2rem;
-}
-.guild-card{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:12px;padding:1.5rem;cursor:pointer;
-  transition:all .2s;display:flex;flex-direction:column;align-items:center;
-  gap:.75rem;text-align:center;
-}
-.guild-card:hover{border-color:var(--accent);transform:translateY(-2px)}
-.guild-card.active-server{border-color:var(--accent);background:rgba(0,229,255,.04)}
-.guild-card-icon{
-  width:56px;height:56px;border-radius:16px;
-  background:var(--border2);display:flex;align-items:center;justify-content:center;
-  font-size:1.5rem;overflow:hidden;
-}
-.guild-card-icon img{width:100%;height:100%;object-fit:cover}
-.guild-card-name{font-weight:700;font-size:.95rem}
-.guild-card-members{color:var(--muted);font-size:.8rem;font-family:'Space Mono',monospace}
-.guild-card-plan{
-  font-size:.7rem;padding:.2rem .6rem;border-radius:4px;
-  font-family:'Space Mono',monospace;font-weight:700;
+:root {
+  --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
+  --panel: #1a2028; --panel-2: #232b35;
+  --border: #2a3441; --border-2: #3a4554;
+  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
+  --accent: #00d9a3; --accent-2: #00bfa5;
+  --danger: #ff5470; --warning: #ffaa00; --info: #5a9eff;
+  --mono: 'Space Mono', 'JetBrains Mono', monospace;
 }
 
-/* ── SETTINGS PANELS ── */
-.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
-.panel-header{
-  padding:1rem 1.5rem;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;
-}
-.panel-title{font-size:1rem;font-weight:700}
-.panel-desc{color:var(--muted);font-size:.8rem;margin-top:.1rem}
-.panel-body{padding:1.5rem}
-.form-row{
-  display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;
-  margin-bottom:1.5rem;
-}
-.form-row.full{grid-template-columns:1fr}
-.form-group label{
-  display:block;font-size:.8rem;font-weight:700;
-  color:var(--muted2);margin-bottom:.5rem;letter-spacing:.05em;text-transform:uppercase;
-}
-.form-control{
-  width:100%;background:var(--surface2);border:1px solid var(--border);
-  color:var(--text);padding:.6rem .9rem;border-radius:6px;
-  font-family:'Syne',sans-serif;font-size:.9rem;
-  transition:border-color .2s;outline:none;
-}
-.form-control:focus{border-color:var(--accent)}
-.form-control select{width:100%}
-select.form-control{appearance:none;cursor:pointer}
-.toggle-row{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:.9rem 0;border-bottom:1px solid var(--border);
-}
-.toggle-row:last-child{border-bottom:none}
-.toggle-info{}
-.toggle-label{font-size:.9rem;font-weight:600}
-.toggle-sub{font-size:.8rem;color:var(--muted);margin-top:.2rem}
-.toggle{
-  position:relative;width:42px;height:24px;
-  background:var(--border2);border-radius:100px;
-  cursor:pointer;transition:background .2s;flex-shrink:0;
-}
-.toggle.on{background:var(--accent)}
-.toggle::after{
-  content:'';position:absolute;top:3px;left:3px;
-  width:18px;height:18px;border-radius:50%;background:#fff;
-  transition:transform .2s;
-}
-.toggle.on::after{transform:translateX(18px)}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── STATS CARDS ── */
-.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem}
-.stat-card{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:10px;padding:1.25rem;
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text);
+  font-size: 14px; line-height: 1.5;
+  min-height: 100vh;
 }
-.stat-card-label{font-size:.75rem;color:var(--muted);text-transform:uppercase;
-  letter-spacing:.1em;font-family:'Space Mono',monospace;}
-.stat-card-value{font-size:2rem;font-weight:800;margin-top:.4rem;
-  font-family:'Space Mono',monospace;color:var(--accent);}
-.stat-card-sub{font-size:.8rem;color:var(--muted);margin-top:.25rem}
 
-/* ── MODLOG TABLE ── */
-.table-container{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
-th{text-align:left;padding:.75rem 1rem;color:var(--muted);
-  font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;
-  border-bottom:1px solid var(--border);font-family:'Space Mono',monospace;}
-td{padding:.75rem 1rem;border-bottom:1px solid var(--border);color:var(--muted2)}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:rgba(255,255,255,.02);color:var(--text)}
-.badge{
-  display:inline-block;font-size:.7rem;padding:.2rem .6rem;
-  border-radius:4px;font-family:'Space Mono',monospace;font-weight:700;
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
 }
-.badge-warn{background:rgba(254,231,92,.1);color:var(--warning)}
-.badge-ban{background:rgba(237,66,69,.1);color:var(--danger)}
-.badge-kick{background:rgba(255,107,53,.1);color:var(--accent2)}
-.badge-mute{background:rgba(0,229,255,.1);color:var(--accent)}
 
-/* ── EMPTY STATE ── */
-.empty{text-align:center;padding:4rem 2rem;color:var(--muted)}
-.empty-icon{font-size:3rem;margin-bottom:1rem;display:block}
-.empty-title{font-size:1.1rem;font-weight:700;color:var(--text);margin-bottom:.5rem}
-.empty-desc{font-size:.9rem;line-height:1.6}
-
-/* ── TABS ── */
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.5rem}
-.tab{
-  padding:.75rem 1.25rem;font-size:.85rem;font-weight:600;color:var(--muted);
-  cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;
-  margin-bottom:-1px;
+/* Sidebar */
+.sidebar {
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+  overflow-y: auto;
 }
-.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.tab:hover:not(.active){color:var(--text)}
-.tab-panel{display:none}
-.tab-panel.active{display:block}
 
-/* ── NOTICE ── */
-.notice{
-  background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.2);
-  border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem;
-  display:flex;align-items:center;gap:.75rem;font-size:.9rem;
+.sidebar-head {
+  padding: 1.25rem 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
 }
-.notice.warn{background:rgba(254,231,92,.06);border-color:rgba(254,231,92,.2)}
-.notice.danger{background:rgba(237,66,69,.06);border-color:rgba(237,66,69,.2)}
 
-@media(max-width:900px){
-  .sidebar{transform:translateX(-100%)}
-  .main{margin-left:0}
-  .stats-row{grid-template-columns:1fr 1fr}
-  .form-row{grid-template-columns:1fr}
+.logo {
+  display: flex; align-items: center; gap: .65rem;
+  text-decoration: none; color: inherit;
 }
+
+.logo-mark {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent), #00a085);
+  display: grid; place-items: center;
+  font-weight: 900; color: #001a14; font-size: .85rem;
+  box-shadow: 0 0 20px rgba(0,217,163,0.3);
+}
+
+.logo-text {
+  font-family: var(--mono); font-weight: 700;
+  font-size: 1rem; letter-spacing: -.01em;
+}
+
+.logo-text span { color: var(--accent); }
+
+.guild-selector {
+  margin: 1rem 1.25rem;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: .65rem .75rem;
+  display: flex; align-items: center; gap: .65rem;
+  cursor: pointer; transition: border-color .15s;
+}
+
+.guild-selector:hover { border-color: var(--accent); }
+
+.guild-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: var(--bg-3); display: grid; place-items: center;
+  font-weight: 700; flex-shrink: 0;
+  overflow: hidden;
+}
+
+.guild-icon img { width: 100%; height: 100%; object-fit: cover; }
+
+.guild-info { flex: 1; min-width: 0; }
+.guild-info .name {
+  font-size: .85rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.guild-info .members {
+  font-size: .7rem; color: var(--muted);
+  font-family: var(--mono);
+}
+
+.nav-section {
+  padding: 0 .75rem; margin-top: 1rem;
+}
+
+.nav-label {
+  font-size: .65rem; font-weight: 700;
+  color: var(--muted); text-transform: uppercase;
+  letter-spacing: .12em; padding: 0 .5rem .5rem;
+}
+
+.nav-item {
+  display: flex; align-items: center; gap: .65rem;
+  padding: .55rem .65rem; border-radius: 6px;
+  color: var(--text-2); text-decoration: none;
+  font-size: .88rem; font-weight: 500;
+  cursor: pointer; transition: all .12s;
+  border: 1px solid transparent;
+}
+
+.nav-item:hover {
+  background: var(--panel); color: var(--text);
+}
+
+.nav-item.active {
+  background: rgba(0,217,163,0.08);
+  color: var(--accent);
+  border-color: rgba(0,217,163,0.2);
+}
+
+.nav-item .icon {
+  width: 16px; text-align: center;
+  font-size: .9rem;
+}
+
+.nav-item .badge {
+  margin-left: auto;
+  background: var(--danger); color: white;
+  padding: .1rem .4rem; border-radius: 999px;
+  font-size: .65rem; font-weight: 700;
+}
+
+.user-card {
+  margin-top: auto; padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: .65rem;
+}
+
+.user-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--bg-3); overflow: hidden;
+}
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.user-info { flex: 1; min-width: 0; }
+.user-info .name {
+  font-size: .82rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.user-info .role {
+  font-size: .68rem; color: var(--muted); font-family: var(--mono);
+}
+
+.logout-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); padding: .25rem;
+  border-radius: 4px; transition: color .15s;
+}
+.logout-btn:hover { color: var(--danger); }
+
+/* Main content */
+.main {
+  padding: 1.5rem 2rem;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.page-head {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  margin-bottom: 2rem; padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-title {
+  font-size: 1.5rem; font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.page-subtitle {
+  color: var(--muted); font-size: .85rem;
+  margin-top: .25rem; font-family: var(--mono);
+}
+
+/* Cards */
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.card-head {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+.card-title {
+  font-size: .95rem; font-weight: 600;
+}
+
+.card-desc {
+  font-size: .78rem; color: var(--muted);
+  margin-top: .2rem;
+}
+
+.card-body { padding: 1.25rem; }
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem; margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1.25rem;
+  position: relative; overflow: hidden;
+}
+
+.stat-card::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; width: 3px; height: 100%;
+  background: var(--accent);
+}
+
+.stat-card.danger::before { background: var(--danger); }
+.stat-card.warning::before { background: var(--warning); }
+.stat-card.info::before { background: var(--info); }
+
+.stat-label {
+  font-size: .7rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em;
+  font-weight: 600; margin-bottom: .4rem;
+}
+
+.stat-value {
+  font-family: var(--mono); font-size: 1.6rem;
+  font-weight: 700; line-height: 1;
+}
+
+.stat-change {
+  font-size: .75rem; margin-top: .35rem;
+  color: var(--text-2); font-family: var(--mono);
+}
+
+/* Forms */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem; margin-bottom: 1rem;
+}
+
+.form-group { margin-bottom: 1rem; }
+
+label {
+  display: block; font-size: .8rem;
+  font-weight: 600; color: var(--text-2);
+  margin-bottom: .4rem;
+}
+
+.input, .select, .textarea {
+  width: 100%; padding: .6rem .75rem;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text);
+  font-size: .87rem; font-family: inherit;
+  transition: border-color .15s;
+}
+
+.input:focus, .select:focus, .textarea:focus {
+  outline: none; border-color: var(--accent);
+}
+
+.input-help {
+  font-size: .72rem; color: var(--muted);
+  margin-top: .3rem;
+}
+
+.toggle-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .75rem 0; border-top: 1px solid var(--border);
+}
+
+.toggle-row:first-child { border-top: 0; }
+
+.toggle-info { flex: 1; }
+.toggle-label { font-size: .9rem; font-weight: 600; }
+.toggle-desc { font-size: .77rem; color: var(--muted); margin-top: .15rem; }
+
+.toggle {
+  width: 38px; height: 22px; background: var(--border-2);
+  border-radius: 999px; position: relative; cursor: pointer;
+  transition: background .15s; flex-shrink: 0;
+}
+
+.toggle::after {
+  content: ''; position: absolute;
+  top: 2px; left: 2px;
+  width: 18px; height: 18px; background: white;
+  border-radius: 50%; transition: transform .15s;
+}
+
+.toggle.on { background: var(--accent); }
+.toggle.on::after { transform: translateX(16px); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .55rem 1rem; border-radius: 6px;
+  font-size: .85rem; font-weight: 600;
+  border: 1px solid transparent; cursor: pointer;
+  font-family: inherit; transition: all .15s;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--accent); color: #001a14; border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-2); }
+
+.btn-ghost {
+  background: transparent; color: var(--text); border-color: var(--border-2);
+}
+.btn-ghost:hover { background: var(--panel-2); border-color: var(--accent); }
+
+.btn-danger {
+  background: var(--danger); color: white; border-color: var(--danger);
+}
+
+.btn-success {
+  background: var(--accent); color: #001a14; border-color: var(--accent);
+}
+
+.btn-sm { padding: .35rem .65rem; font-size: .78rem; }
+
+/* Tables */
+.table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden;
+  background: var(--panel);
+}
+
+.table {
+  width: 100%; border-collapse: collapse;
+  font-size: .85rem;
+}
+
+.table thead {
+  background: var(--bg-3);
+}
+
+.table th {
+  text-align: left; padding: .65rem 1rem;
+  font-weight: 600; font-size: .73rem;
+  color: var(--muted); text-transform: uppercase;
+  letter-spacing: .08em;
+  border-bottom: 1px solid var(--border);
+}
+
+.table td {
+  padding: .65rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.table tr:last-child td { border-bottom: 0; }
+.table tr:hover { background: rgba(255,255,255,0.02); }
+
+.code {
+  font-family: var(--mono); color: var(--accent);
+  background: rgba(0,217,163,0.08);
+  padding: .15rem .4rem; border-radius: 4px;
+  font-size: .8rem;
+}
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .2rem .55rem; border-radius: 999px;
+  font-size: .72rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+
+.status-pill.pending { background: rgba(255,170,0,0.12); color: var(--warning); }
+.status-pill.accepted, .status-pill.approved { background: rgba(0,217,163,0.12); color: var(--accent); }
+.status-pill.rejected { background: rgba(255,84,112,0.12); color: var(--danger); }
+
+/* Search */
+.search-bar {
+  display: flex; gap: .75rem; margin-bottom: 1rem;
+}
+
+.search-bar .input { flex: 1; }
+
+/* Empty state */
+.empty {
+  padding: 3rem 1rem; text-align: center; color: var(--muted);
+}
+
+.empty-icon { font-size: 2.5rem; margin-bottom: .75rem; opacity: .4; }
+.empty-title { font-weight: 600; color: var(--text-2); margin-bottom: .25rem; }
+.empty-sub { font-size: .8rem; }
+
+/* Toast */
+.toast {
+  position: fixed; top: 1.5rem; right: 1.5rem;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: .85rem 1.25rem;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+  z-index: 1000; opacity: 0; transform: translateY(-10px);
+  transition: all .25s; max-width: 360px;
+  font-size: .87rem;
+}
+
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.success { border-left: 3px solid var(--accent); }
+.toast.error { border-left: 3px solid var(--danger); }
+
+/* Login page */
+.login-page {
+  min-height: 100vh;
+  display: grid; place-items: center;
+  padding: 2rem;
+}
+
+.login-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 3rem;
+  max-width: 420px; width: 100%; text-align: center;
+}
+
+.login-logo {
+  width: 64px; height: 64px; border-radius: 16px;
+  background: linear-gradient(135deg, var(--accent), #00a085);
+  display: grid; place-items: center; margin: 0 auto 1.5rem;
+  font-weight: 900; color: #001a14; font-size: 1.75rem;
+  box-shadow: 0 0 40px rgba(0,217,163,0.3);
+}
+
+.login-card h1 { font-size: 1.5rem; margin-bottom: .5rem; }
+.login-card p { color: var(--text-2); margin-bottom: 2rem; font-size: .9rem; }
+
+/* Hidden page */
+.page { display: none; }
+.page.active { display: block; }
+
+/* Modal */
+.modal-bg {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: none; place-items: center;
+  z-index: 500; padding: 1rem;
+}
+.modal-bg.show { display: grid; }
+
+.modal {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1.5rem;
+  max-width: 540px; width: 100%;
+  max-height: 85vh; overflow-y: auto;
+}
+
+.modal-title {
+  font-size: 1.05rem; font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.modal-actions {
+  display: flex; gap: .5rem; justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 240px; z-index: 200; transform: translateX(-100%);
+    transition: transform .2s;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .main { padding: 1rem; }
+  .form-row { grid-template-columns: 1fr; }
+}
+
+/* Helpers */
+.hidden { display: none !important; }
+.flex { display: flex; }
+.flex-1 { flex: 1; }
+.gap-1 { gap: .5rem; }
+.gap-2 { gap: 1rem; }
+.text-mono { font-family: var(--mono); }
+.text-muted { color: var(--muted); }
+.mb-1 { margin-bottom: .5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.mb-3 { margin-bottom: 1.5rem; }
+.mt-2 { margin-top: 1rem; }
 </style>
 </head>
 <body>
 
-<!-- SIDEBAR -->
-<aside class="sidebar">
-  <a href="/" class="sidebar-logo">👁 <span>Witness</span></a>
-
-  <nav class="sidebar-nav">
-    <div class="sidebar-section">Overview</div>
-    <a class="nav-item active" onclick="showPage('overview')">
-      <span class="icon">📊</span> Overview
+<!-- LOGIN PAGE -->
+<div id="page-login" class="login-page hidden">
+  <div class="login-card">
+    <div class="login-logo">W</div>
+    <h1>Witness Dashboard</h1>
+    <p>Войди через Discord чтобы управлять серверами где есть бот</p>
+    <a href="/login" class="btn btn-primary" style="width: 100%; justify-content: center; padding: .8rem;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+      Войти через Discord
     </a>
-    <a class="nav-item" onclick="showPage('servers')">
-      <span class="icon">🏠</span> My Servers
-    </a>
-
-    <div class="sidebar-section">Server Settings</div>
-    <a class="nav-item" onclick="showPage('general')">
-      <span class="icon">⚙️</span> General
-    </a>
-    <a class="nav-item" onclick="showPage('security')">
-      <span class="icon">🛡️</span> Security
-    </a>
-    <a class="nav-item" onclick="showPage('logging')">
-      <span class="icon">📋</span> Logging
-    </a>
-    <a class="nav-item" onclick="showPage('moderation')">
-      <span class="icon">🔨</span> Moderation
-    </a>
-    <a class="nav-item" onclick="showPage('welcome')">
-      <span class="icon">👋</span> Welcome
-    </a>
-
-    <div class="sidebar-section">Tools</div>
-    <a class="nav-item" onclick="showPage('modlog')">
-      <span class="icon">📜</span> Mod Log
-    </a>
-    <a class="nav-item" onclick="showPage('invites')">
-      <span class="icon">🔗</span> Invites
-    </a>
-    <a class="nav-item" onclick="showPage('twins')">
-      <span class="icon">🧬</span> Twin Detection
-    </a>
-
-    <div class="sidebar-section">Subscription</div>
-    <a class="nav-item" onclick="showPage('billing')">
-      <span class="icon">💳</span> Billing
-    </a>
-  </nav>
-
-  <div class="sidebar-user" id="sidebarUser">
-    <div class="user-avatar" id="userAvatar"></div>
-    <div>
-      <div class="user-name" id="userName">Loading...</div>
-      <div class="user-tag" id="userTag">#0000</div>
-    </div>
+    <p style="margin-top: 1.5rem; font-size: .75rem;">
+      <a href="/" style="color: var(--muted);">← на главную</a>
+    </p>
   </div>
-</aside>
+</div>
 
-<!-- MAIN -->
-<div class="main">
-  <header class="topbar">
-    <div class="topbar-left">
-      <div class="guild-selector" onclick="showPage('servers')">
-        <div class="guild-icon" id="topbarIcon"></div>
-        <span id="topbarName">Select Server</span>
-        <span style="color:var(--muted)">▾</span>
-      </div>
-      <div class="breadcrumb">
-        <span class="sep">/</span>
-        <span class="current" id="breadcrumbPage">Overview</span>
-      </div>
+<!-- MAIN LAYOUT -->
+<div id="page-app" class="layout hidden">
+
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <a href="/" class="logo">
+        <div class="logo-mark">W</div>
+        <div class="logo-text">Witness<span>.</span></div>
+      </a>
     </div>
-    <div class="topbar-right">
-      <a href="__INVITE_URL__" class="btn btn-accent btn-sm" target="_blank">➕ Add to Server</a>
-      <a href="#" onclick="logout()" class="btn btn-outline btn-sm">Logout</a>
+
+    <div class="guild-selector" id="guildSelector" onclick="openGuildPicker()">
+      <div class="guild-icon" id="guildIcon">?</div>
+      <div class="guild-info">
+        <div class="name" id="guildName">Выбери сервер</div>
+        <div class="members" id="guildMembers">—</div>
+      </div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
     </div>
-  </header>
 
-  <div class="content">
-
-    <!-- ── NOT LOGGED IN ── -->
-    <div id="page-login" style="display:none">
-      <div class="empty">
-        <span class="empty-icon">🔐</span>
-        <div class="empty-title">Login required</div>
-        <div class="empty-desc">Connect your Discord account to manage your servers.</div>
-        <a href="__BOT_API_URL__/login" class="btn btn-discord" style="margin-top:1.5rem">
-          Login with Discord
-        </a>
+    <div class="nav-section">
+      <div class="nav-label">Обзор</div>
+      <div class="nav-item active" data-page="overview" onclick="showPage('overview')">
+        <span class="icon">📊</span> Обзор
       </div>
     </div>
 
-    <!-- ── OVERVIEW ── -->
-    <div id="page-overview">
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-card-label">Bot Latency</div>
-          <div class="stat-card-value" id="ov-ping">—</div>
-          <div class="stat-card-sub">milliseconds</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Your Servers</div>
-          <div class="stat-card-value" id="ov-guilds">—</div>
-          <div class="stat-card-sub">with Witness</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Commands</div>
-          <div class="stat-card-value">75</div>
-          <div class="stat-card-sub">available</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-label">Status</div>
-          <div class="stat-card-value" style="color:var(--success);font-size:1.2rem" id="ov-status">● Online</div>
-          <div class="stat-card-sub">all systems</div>
+    <div class="nav-section">
+      <div class="nav-label">Настройки</div>
+      <div class="nav-item" data-page="general" onclick="showPage('general')">
+        <span class="icon">⚙️</span> Общие
+      </div>
+      <div class="nav-item" data-page="logging" onclick="showPage('logging')">
+        <span class="icon">📝</span> Логирование
+      </div>
+      <div class="nav-item" data-page="moderation" onclick="showPage('moderation')">
+        <span class="icon">⚖️</span> Модерация
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Данные</div>
+      <div class="nav-item" data-page="modlog" onclick="showPage('modlog')">
+        <span class="icon">📋</span> Mod Log
+      </div>
+      <div class="nav-item" data-page="appeals" onclick="showPage('appeals')">
+        <span class="icon">⚖️</span> Апелляции
+        <span class="badge hidden" id="appealsBadge">0</span>
+      </div>
+      <div class="nav-item" data-page="invites" onclick="showPage('invites')">
+        <span class="icon">🔗</span> Инвайты
+      </div>
+      <div class="nav-item" data-page="twins" onclick="showPage('twins')">
+        <span class="icon">🧬</span> Стилометрия
+      </div>
+    </div>
+
+    <div class="user-card">
+      <div class="user-avatar" id="userAvatar">?</div>
+      <div class="user-info">
+        <div class="name" id="userName">—</div>
+        <div class="role">Administrator</div>
+      </div>
+      <button class="logout-btn" onclick="logout()" title="Выйти">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- OVERVIEW -->
+    <div id="content-overview" class="page active">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Обзор сервера</div>
+          <div class="page-subtitle">// real-time stats</div>
         </div>
       </div>
 
-      <div class="notice">
-        👁 <span>Select a server from <b>My Servers</b> to configure it.</span>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Участников</div>
+          <div class="stat-value" id="ovMembers">—</div>
+        </div>
+        <div class="stat-card info">
+          <div class="stat-label">Действий модерации</div>
+          <div class="stat-value" id="ovModlog">—</div>
+        </div>
+        <div class="stat-card warning">
+          <div class="stat-label">Активных апелляций</div>
+          <div class="stat-value" id="ovAppeals">—</div>
+        </div>
+        <div class="stat-card danger">
+          <div class="stat-label">Возможных твинков</div>
+          <div class="stat-value" id="ovTwins">—</div>
+        </div>
       </div>
 
-      <div class="panel">
-        <div class="panel-header">
+      <div class="card">
+        <div class="card-head">
           <div>
-            <div class="panel-title">Quick Actions</div>
-            <div class="panel-desc">Common tasks for your servers</div>
+            <div class="card-title">Последние действия</div>
+            <div class="card-desc">5 последних записей из mod log</div>
           </div>
+          <button class="btn btn-ghost btn-sm" onclick="showPage('modlog')">Все →</button>
         </div>
-        <div class="panel-body" style="display:flex;gap:1rem;flex-wrap:wrap">
-          <a href="__INVITE_URL__" class="btn btn-accent" target="_blank">➕ Add to new server</a>
-          <button class="btn btn-outline" onclick="showPage('servers')">🏠 Manage servers</button>
-          <a href="__SUPPORT_URL__" class="btn btn-outline" target="_blank">💬 Support</a>
-          <a href="https://top.gg/bot/__BOT_ID__/vote" class="btn btn-outline" target="_blank">⬆️ Vote on top.gg</a>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── MY SERVERS ── -->
-    <div id="page-servers" style="display:none">
-      <h2 style="font-size:1.5rem;font-weight:800;margin-bottom:1.5rem">My Servers</h2>
-      <div id="guildList">
-        <div class="empty" style="grid-column:1/-1">
-          <span class="empty-icon">⏳</span>
-          <div class="empty-title">Loading servers...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── GENERAL SETTINGS ── -->
-    <div id="page-general" style="display:none">
-      <div id="noServerSelected" class="notice warn">
-        ⚠️ <span>Select a server from <b>My Servers</b> first.</span>
-      </div>
-      <div id="generalContent" style="display:none">
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">General Settings</div>
-              <div class="panel-desc">Basic bot configuration for this server</div>
-            </div>
-            <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save Changes</button>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <div class="form-group">
-                <label>Bot Language</label>
-                <select class="form-control" id="cfg-lang">
-                  <option value="ru">🇷🇺 Russian</option>
-                  <option value="en">🇬🇧 English</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Log Channel</label>
-                <select class="form-control" id="cfg-log-channel">
-                  <option value="">None</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Ticket Category</label>
-                <select class="form-control" id="cfg-ticket-cat">
-                  <option value="">None</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Birthday Channel</label>
-                <select class="form-control" id="cfg-birthday-ch">
-                  <option value="">None</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row full">
-              <div class="form-group">
-                <label>Suggestion Channel</label>
-                <select class="form-control" id="cfg-suggestion-ch">
-                  <option value="">None</option>
-                </select>
-              </div>
-            </div>
-
-            <div style="margin-top:1.5rem">
-              <div class="toggle-row">
-                <div class="toggle-info">
-                  <div class="toggle-label">Ticket System</div>
-                  <div class="toggle-sub">Allow members to open support tickets</div>
-                </div>
-                <div class="toggle" id="tog-tickets" onclick="toggleSetting('tickets')"></div>
-              </div>
-              <div class="toggle-row">
-                <div class="toggle-info">
-                  <div class="toggle-label">Birthday Announcements</div>
-                  <div class="toggle-sub">Announce member birthdays in the birthday channel</div>
-                </div>
-                <div class="toggle" id="tog-birthday" onclick="toggleSetting('birthday')"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── SECURITY SETTINGS ── -->
-    <div id="page-security" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Security Modules</div>
-            <div class="panel-desc">Toggle individual logging and protection features</div>
-          </div>
-          <button class="btn btn-accent btn-sm" onclick="saveSecurity()">Save</button>
-        </div>
-        <div class="panel-body">
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">📥 Member Join/Leave</div>
-              <div class="toggle-sub">Log when members join and leave</div>
-            </div>
-            <div class="toggle on" id="sec-join" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">🗑️ Message Delete</div>
-              <div class="toggle-sub">Log deleted messages with content</div>
-            </div>
-            <div class="toggle on" id="sec-msg_delete" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">✏️ Message Edit</div>
-              <div class="toggle-sub">Log edited messages with before/after</div>
-            </div>
-            <div class="toggle on" id="sec-msg_edit" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">🔒 Role Changes</div>
-              <div class="toggle-sub">Log role additions and removals</div>
-            </div>
-            <div class="toggle on" id="sec-role_change" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">✏️ Nickname Changes</div>
-              <div class="toggle-sub">Log nickname modifications</div>
-            </div>
-            <div class="toggle on" id="sec-nick_change" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">🔊 Voice Activity</div>
-              <div class="toggle-sub">Log voice channel joins/leaves/moves</div>
-            </div>
-            <div class="toggle on" id="sec-voice" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">🔗 Invites</div>
-              <div class="toggle-sub">Track invite usage and creation</div>
-            </div>
-            <div class="toggle on" id="sec-invites" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">🚨 Anti-Raid</div>
-              <div class="toggle-sub">Auto-kick on 8+ joins in 10 seconds</div>
-            </div>
-            <div class="toggle on" id="sec-anti_raid" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">📵 Anti-Spam</div>
-              <div class="toggle-sub">Auto-timeout on 6+ messages in 5 seconds</div>
-            </div>
-            <div class="toggle on" id="sec-anti_spam" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">⚠️ Suspicious Accounts</div>
-              <div class="toggle-sub">Alert when accounts under 7 days old join</div>
-            </div>
-            <div class="toggle on" id="sec-suspicious" onclick="this.classList.toggle('on')"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── MOD LOG ── -->
-    <div id="page-modlog" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Moderation Log</div>
-            <div class="panel-desc">Recent moderation actions on this server</div>
-          </div>
-        </div>
-        <div class="table-container">
-          <table>
+        <div class="table-wrap" style="border: 0; border-radius: 0;">
+          <table class="table">
             <thead>
               <tr>
-                <th>Action</th>
-                <th>Member</th>
-                <th>Moderator</th>
-                <th>Reason</th>
-                <th>Date</th>
+                <th>Действие</th><th>Участник</th><th>Модератор</th>
+                <th>Причина</th><th>Когда</th>
               </tr>
             </thead>
-            <tbody id="modlogTable">
-              <tr><td colspan="5"><div class="empty"><span class="empty-icon">📜</span><div class="empty-title">No actions yet</div></div></td></tr>
+            <tbody id="ovRecentTable">
+              <tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- ── INVITES ── -->
-    <div id="page-invites" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Invite Tracking</div>
-            <div class="panel-desc">Кто кого пригласил, с заметками</div>
-          </div>
+    <!-- GENERAL -->
+    <div id="content-general" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Общие настройки</div>
+          <div class="page-subtitle">// general configuration</div>
         </div>
-        <div class="panel-body" style="padding-bottom:0">
-          <div style="display:flex;gap:.75rem;margin-bottom:1rem">
-            <input type="text" class="form-control" id="invite-search"
-                   placeholder="Поиск по коду, имени, заметке..."
-                   oninput="debounceInviteSearch()"
-                   style="flex:1">
-            <button class="btn btn-outline" onclick="loadInvites('')">Сбросить</button>
-          </div>
-        </div>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr><th>Код</th><th>Кто пригласил</th><th>Использований</th><th>Последний раз</th><th>Заметка</th></tr>
-            </thead>
-            <tbody id="inviteTable">
-              <tr><td colspan="5"><div class="empty"><span class="empty-icon">🔗</span><div class="empty-title">Нет данных</div></div></td></tr>
-            </tbody>
-          </table>
-        </div>
+        <button class="btn btn-primary" onclick="saveGeneral()">Сохранить</button>
       </div>
-    </div>
 
-    <!-- ── LOGGING ── -->
-    <div id="page-logging" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
+      <div class="card">
+        <div class="card-head">
           <div>
-            <div class="panel-title">Log Channel</div>
-            <div class="panel-desc">Where to send event logs</div>
+            <div class="card-title">Базовое</div>
+            <div class="card-desc">Язык, тикеты, каналы по умолчанию</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="saveSettings()">Save</button>
         </div>
-        <div class="panel-body">
+        <div class="card-body">
           <div class="form-row">
             <div class="form-group">
-              <label>Log Channel</label>
-              <select class="form-control" id="cfg-log-channel-log">
-                <option value="">None — logging disabled</option>
+              <label>Язык бота</label>
+              <select class="select" id="gen-lang">
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+                <option value="de">Deutsch</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Starboard Channel</label>
-              <select class="form-control" id="cfg-starboard-ch">
-                <option value="">None</option>
+              <label>Канал для дней рождения</label>
+              <select class="select" id="gen-birthday-ch">
+                <option value="">— нет —</option>
               </select>
             </div>
           </div>
+
           <div class="toggle-row">
             <div class="toggle-info">
-              <div class="toggle-label">Log bot commands</div>
-              <div class="toggle-sub">Log when slash commands are used</div>
+              <div class="toggle-label">Система тикетов</div>
+              <div class="toggle-desc">Позволяет участникам создавать тикеты поддержки</div>
             </div>
-            <div class="toggle" id="tog-log-cmds" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">Log voice activity</div>
-              <div class="toggle-sub">Join/leave/move in voice channels</div>
-            </div>
-            <div class="toggle on" id="tog-log-voice" onclick="this.classList.toggle('on')"></div>
+            <div class="toggle" id="tog-tickets" onclick="this.classList.toggle('on')"></div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ── MODERATION ── -->
-    <div id="page-moderation" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Warn punishments</div>
-            <div class="panel-desc">3-strike system — same values shown in bot's /punishments command</div>
-          </div>
-          <button class="btn btn-accent btn-sm" onclick="savePunishments()">Save</button>
+    <!-- LOGGING -->
+    <div id="content-logging" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Логирование</div>
+          <div class="page-subtitle">// log channels</div>
         </div>
-        <div class="panel-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label>1st warn → Timeout (days)</label>
-              <input type="number" class="form-control" id="cfg-mute1" value="7" min="1" max="28">
-            </div>
-            <div class="form-group">
-              <label>2nd warn → Timeout (days)</label>
-              <input type="number" class="form-control" id="cfg-mute2" value="7" min="1" max="28">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>3rd warn → Ban (days)</label>
-              <input type="number" class="form-control" id="cfg-ban3" value="30" min="1" max="365">
-            </div>
-          </div>
-          <div style="font-size:.78rem;color:var(--muted);margin-top:.5rem">
-            Discord limits timeouts to a maximum of 28 days. Changes here apply instantly — same as running <code style="color:var(--accent)">/punishments</code> in Discord.
-          </div>
-        </div>
+        <button class="btn btn-primary" onclick="saveLogging()">Сохранить</button>
       </div>
 
-      <!-- Quarantine -->
-      <div class="panel">
-        <div class="panel-header">
+      <div class="card">
+        <div class="card-head">
           <div>
-            <div class="panel-title">Quarantine</div>
-            <div class="panel-desc">Auto-role for new accounts</div>
+            <div class="card-title">Каналы для логов</div>
+            <div class="card-desc">Куда бот будет писать события сервера</div>
           </div>
         </div>
-        <div class="panel-body">
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">Quarantine enabled</div>
-              <div class="toggle-sub" id="quarantine-status-sub">Checking configuration...</div>
-            </div>
-            <div class="toggle" id="tog-quarantine" onclick="toggleQuarantine()"></div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Главный лог-канал</label>
+            <select class="select" id="log-main">
+              <option value="">— выбери канал —</option>
+            </select>
+            <div class="input-help">Логи модерации, наказаний, апелляций</div>
           </div>
-          <div class="form-row" style="margin-top:1rem">
+
+          <div class="form-row">
             <div class="form-group">
-              <label>Quarantine Role</label>
-              <select class="form-control" id="cfg-quarantine-role">
-                <option value="">None — select a role</option>
+              <label>Канал для предложений</label>
+              <select class="select" id="log-suggestion">
+                <option value="">— нет —</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Min account age (days)</label>
-              <input type="number" class="form-control" id="cfg-quarantine-age" value="7" min="1" max="30">
+              <label>Канал starboard</label>
+              <select class="select" id="log-starboard">
+                <option value="">— нет —</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODERATION -->
+    <div id="content-moderation" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Модерация</div>
+          <div class="page-subtitle">// punishments and quarantine</div>
+        </div>
+        <button class="btn btn-primary" onclick="saveModeration()">Сохранить</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Прогрессивные наказания</div>
+            <div class="card-desc">3-варн система с настраиваемой длительностью</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>1-й варн → таймаут (дней)</label>
+              <input type="number" class="input" id="mod-mute1" value="7" min="1" max="27">
+              <div class="input-help">Макс. 27 дней (лимит Discord)</div>
+            </div>
+            <div class="form-group">
+              <label>2-й варн → таймаут (дней)</label>
+              <input type="number" class="input" id="mod-mute2" value="7" min="1" max="27">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Quarantine duration (hours)</label>
-              <input type="number" class="form-control" id="cfg-quarantine-hours" value="24" min="1" max="720">
+              <label>3-й варн → действие</label>
+              <select class="select" id="mod-warn3type">
+                <option value="ban">🔨 Авто-бан</option>
+                <option value="mute">🔇 Мут (как 2-й варн)</option>
+                <option value="request">⚖️ Заявка на бан (вручную)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Дней бана (если выбран бан)</label>
+              <input type="number" class="input" id="mod-ban3" value="30" min="1">
             </div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="saveQuarantine()">Save Quarantine</button>
         </div>
       </div>
-    </div>
 
-    <!-- ── WELCOME ── -->
-    <div id="page-welcome" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
+      <div class="card">
+        <div class="card-head">
           <div>
-            <div class="panel-title">Welcome & Goodbye Messages</div>
-            <div class="panel-desc">Greet new members and say goodbye</div>
+            <div class="card-title">Карантин</div>
+            <div class="card-desc">Авто-роль для аккаунтов младше N дней</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="saveWelcome()">Save</button>
         </div>
-        <div class="panel-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Welcome Channel</label>
-              <select class="form-control" id="cfg-welcome-ch">
-                <option value="">None — disabled</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Goodbye Channel</label>
-              <select class="form-control" id="cfg-goodbye-ch">
-                <option value="">None — disabled</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row full">
-            <div class="form-group">
-              <label>Welcome Message</label>
-              <input type="text" class="form-control" id="cfg-welcome-msg"
-                placeholder="Welcome {user} to {server}! You are member #{count}">
-              <div style="font-size:.75rem;color:var(--muted);margin-top:.4rem">
-                Variables: <code style="color:var(--accent)">{user}</code> {server} {count} {id}
-              </div>
-            </div>
-          </div>
-          <div class="form-row full">
-            <div class="form-group">
-              <label>Goodbye Message</label>
-              <input type="text" class="form-control" id="cfg-goodbye-msg"
-                placeholder="{user} has left the server.">
-            </div>
-          </div>
+        <div class="card-body">
           <div class="toggle-row">
             <div class="toggle-info">
-              <div class="toggle-label">Show member avatar in welcome</div>
-              <div class="toggle-sub">Embed member avatar in welcome message</div>
+              <div class="toggle-label">Карантин включён</div>
+              <div class="toggle-desc">Новые аккаунты автоматически получают роль</div>
             </div>
-            <div class="toggle on" id="tog-welcome-avatar" onclick="this.classList.toggle('on')"></div>
+            <div class="toggle" id="tog-quarantine" onclick="this.classList.toggle('on')"></div>
           </div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">Auto-role on join</div>
-              <div class="toggle-sub">Automatically assign a role when member joins</div>
-            </div>
-            <div class="toggle" id="tog-autorole" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="form-row" id="autorole-row" style="margin-top:1rem;display:none">
+
+          <div class="form-row" style="margin-top: 1rem;">
             <div class="form-group">
-              <label>Auto-role</label>
-              <select class="form-control" id="cfg-autorole">
-                <option value="">Select role</option>
+              <label>Роль карантина</label>
+              <select class="select" id="mod-qrole">
+                <option value="">— выбери роль —</option>
               </select>
             </div>
+            <div class="form-group">
+              <label>Мин. возраст аккаунта (дней)</label>
+              <input type="number" class="input" id="mod-qage" value="7" min="1" max="365">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Длительность карантина (часов)</label>
+            <input type="number" class="input" id="mod-qhours" value="24" min="1" max="720">
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ── TWIN DETECTION ── -->
-    <div id="page-twins" style="display:none">
-      <div class="notice">
-        🧬 <span>Twin detection automatically runs when members reach 40+ messages. Alerts appear in your log channel.</span>
+    <!-- MODLOG -->
+    <div id="content-modlog" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Mod Log</div>
+          <div class="page-subtitle">// последние 100 действий модерации</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadModlog()">⟳ Обновить</button>
       </div>
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Detected Twin Links</div>
-            <div class="panel-desc">Possible alt accounts detected by stylometry analysis</div>
-          </div>
-        </div>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr><th>Member A</th><th>Member B</th><th>Similarity</th><th>Status</th><th>Detected</th></tr>
-            </thead>
-            <tbody id="twinsTable">
-              <tr><td colspan="5"><div class="empty"><span class="empty-icon">🧬</span><div class="empty-title">No twin links detected yet</div><div class="empty-desc">The system needs 40+ messages per member to analyze.</div></div></td></tr>
-            </tbody>
-          </table>
-        </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Действие</th><th>Участник</th><th>Модератор</th>
+              <th>Причина</th><th>Длительность</th><th>Когда</th>
+            </tr>
+          </thead>
+          <tbody id="modlogTable">
+            <tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Загрузка...</div></div></td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <!-- ── BILLING ── -->
-    <div id="page-billing" style="display:none">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <div class="panel-title">Subscription</div>
-            <div class="panel-desc">Manage your server plan</div>
-          </div>
+    <!-- APPEALS -->
+    <div id="content-appeals" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Апелляции</div>
+          <div class="page-subtitle">// pending / accepted / rejected</div>
         </div>
-        <div class="panel-body">
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1.5rem">
-              <div style="font-size:.75rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace">Free</div>
-              <div style="font-size:2rem;font-weight:800;margin:.5rem 0;font-family:'Space Mono',monospace">€0</div>
-              <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">Albion · Games · Basic Security</p>
-              <button class="btn btn-outline" style="width:100%" disabled>Current Plan</button>
-            </div>
-            <div style="background:var(--bg);border:1px solid var(--accent);border-radius:10px;padding:1.5rem;position:relative">
-              <div style="font-size:.75rem;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace">Premium</div>
-              <div style="font-size:2rem;font-weight:800;margin:.5rem 0;font-family:'Space Mono',monospace">€2<span style="font-size:.9rem;color:var(--muted)">.99/mo</span></div>
-              <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">AI · Black Market · Craft · Giveaway</p>
-              <a href="https://buy.stripe.com/__PREMIUM_LINK__" class="btn btn-accent" style="width:100%;justify-content:center" target="_blank">Upgrade</a>
-            </div>
-            <div style="background:var(--bg);border:1px solid var(--security);border-radius:10px;padding:1.5rem">
-              <div style="font-size:.75rem;color:var(--security);letter-spacing:.1em;text-transform:uppercase;font-family:'Space Mono',monospace">Security</div>
-              <div style="font-size:2rem;font-weight:800;margin:.5rem 0;font-family:'Space Mono',monospace">€4<span style="font-size:.9rem;color:var(--muted)">.99/mo</span></div>
-              <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem">Everything + Advanced -q commands</p>
-              <a href="https://buy.stripe.com/__SECURITY_LINK__" class="btn" style="width:100%;justify-content:center;background:var(--security);color:#fff" target="_blank">Upgrade</a>
-            </div>
-          </div>
+        <div class="flex gap-1">
+          <select class="select" id="appealsFilter" onchange="loadAppeals()" style="width: 180px;">
+            <option value="pending">⏳ Ожидают</option>
+            <option value="accepted">✅ Принятые</option>
+            <option value="rejected">❌ Отклонённые</option>
+            <option value="">Все</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadAppeals()">⟳</button>
         </div>
+      </div>
+
+      <div id="appealsList">
+        <div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Загрузка...</div></div>
       </div>
     </div>
 
-  </div><!-- /content -->
-</div><!-- /main -->
+    <!-- INVITES -->
+    <div id="content-invites" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Инвайты</div>
+          <div class="page-subtitle">// кто кого пригласил</div>
+        </div>
+      </div>
+
+      <div class="search-bar">
+        <input type="text" class="input" id="inviteSearch"
+               placeholder="Поиск по коду, имени, заметке..."
+               oninput="debounceInviteSearch()">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('inviteSearch').value=''; loadInvites('')">Сбросить</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Код</th><th>Создал</th><th>Использований</th>
+              <th>Последний раз</th><th>Заметка</th>
+            </tr>
+          </thead>
+          <tbody id="invitesTable">
+            <tr><td colspan="5"><div class="empty"><div class="empty-icon">🔗</div><div class="empty-title">Загрузка...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TWINS -->
+    <div id="content-twins" class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Стилометрия</div>
+          <div class="page-subtitle">// возможные альт-аккаунты</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadTwins()">⟳ Обновить</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th><th>Участник A</th><th>Участник B</th>
+              <th>Сходство</th><th>Статус</th><th>Обнаружено</th>
+            </tr>
+          </thead>
+          <tbody id="twinsTable">
+            <tr><td colspan="6"><div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Загрузка...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- GUILD PICKER MODAL -->
+<div class="modal-bg" id="guildPickerModal" onclick="if(event.target===this)closeGuildPicker()">
+  <div class="modal">
+    <div class="modal-title">Выбери сервер</div>
+    <div id="guildPickerList">
+      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-title">Загрузка серверов...</div></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeGuildPicker()">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- APPEAL DETAILS MODAL -->
+<div class="modal-bg" id="appealModal" onclick="if(event.target===this)closeAppealModal()">
+  <div class="modal" id="appealModalContent">
+    <!-- filled by JS -->
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
-const API = '__BOT_API_URL__';
-let currentGuild = null;
-let userData = null;
-let authToken = null;
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  STATE & AUTH
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const API = (function() {
+  const meta = document.querySelector('meta[name="bot-api"]');
+  if (meta && meta.content) return meta.content;
+  if (window.location.hostname === 'localhost') return 'http://localhost:8080';
+  return '__BOT_API_URL__';
+})();
 
-// ── Auth helpers ──────────────────────────────────────────────
-function getToken(){
+let authToken = null;
+let currentGuild = null;
+let userGuilds = [];
+
+function getToken() {
   return authToken || localStorage.getItem('ws_token');
 }
 
-function authHeaders(){
-  const t = getToken();
-  return t ? {'Authorization': 'Bearer '+t, 'Content-Type':'application/json'} : {'Content-Type':'application/json'};
+function setToken(t) {
+  authToken = t;
+  if (t) localStorage.setItem('ws_token', t);
+  else localStorage.removeItem('ws_token');
 }
 
-async function apiFetch(path, opts={}, retry=true){
+async function apiFetch(path, opts={}, retry=true) {
   const t = getToken();
   const headers = opts.headers || {};
-  if(t) headers['Authorization'] = 'Bearer '+t;
-  const resp = await fetch(API+path, {...opts, headers, credentials:'include'});
-  // Если 401 — пробуем refresh токен один раз
-  if(resp.status === 401 && retry){
+  if (t) headers['Authorization'] = 'Bearer ' + t;
+  const resp = await fetch(API + path, {...opts, headers, credentials: 'include'});
+  if (resp.status === 401 && retry) {
     const refreshed = await tryRefreshToken();
-    if(refreshed) return apiFetch(path, opts, false);
-    // Refresh не помог — разлогиниваемся
-    localStorage.removeItem('ws_token');
-    authToken = null;
-    showPage('login');
+    if (refreshed) return apiFetch(path, opts, false);
+    setToken(null);
+    showLogin();
+    return resp;
   }
   return resp;
 }
 
-async function tryRefreshToken(){
-  try{
-    const r = await fetch(API+'/api/refresh', {
-      credentials:'include',
-      headers: authToken ? {'Authorization':'Bearer '+authToken} : {}
+async function tryRefreshToken() {
+  try {
+    const r = await fetch(API + '/api/refresh', {
+      credentials: 'include',
+      headers: getToken() ? {'Authorization': 'Bearer ' + getToken()} : {}
     });
-    if(!r.ok) return false;
+    if (!r.ok) return false;
     const d = await r.json();
-    if(d.token){
-      authToken = d.token;
-      localStorage.setItem('ws_token', d.token);
+    if (d.token) {
+      setToken(d.token);
       return true;
     }
-  }catch(e){}
+  } catch(e) {}
   return false;
 }
 
-// ── Init ──────────────────────────────────────────────────────
-function logout(){
-  localStorage.removeItem('ws_token');
-  authToken = null;
-  window.location.href = '__BOT_API_URL__/logout';
+function logout() {
+  setToken(null);
+  localStorage.removeItem('current_guild');
+  window.location.href = '/logout';
 }
 
-async function init(){
-  // Читаем токен из URL если есть (после OAuth2 redirect)
-  const params = new URLSearchParams(window.location.search);
-  const urlToken = params.get('token');
-  if(urlToken){
-    authToken = urlToken;
-    localStorage.setItem('ws_token', urlToken);
-    // Убираем токен из URL
+function showLogin() {
+  document.getElementById('page-login').classList.remove('hidden');
+  document.getElementById('page-app').classList.add('hidden');
+}
+
+function showApp() {
+  document.getElementById('page-login').classList.add('hidden');
+  document.getElementById('page-app').classList.remove('hidden');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  INIT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function init() {
+  // URL token (cross-domain login)
+  const urlToken = new URLSearchParams(window.location.search).get('token');
+  if (urlToken) {
+    setToken(urlToken);
     window.history.replaceState({}, '', '/dashboard');
-  } else {
-    authToken = localStorage.getItem('ws_token');
   }
 
-  try{
+  if (!getToken()) {
+    return showLogin();
+  }
+
+  // Verify token
+  try {
     const r = await apiFetch('/api/me');
-    if(!r.ok){
-      localStorage.removeItem('ws_token');
-      showPage('login'); return;
+    if (!r.ok) return showLogin();
+    const me = await r.json();
+    document.getElementById('userName').textContent = me.username;
+    if (me.avatar) {
+      document.getElementById('userAvatar').innerHTML =
+        `<img src="https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png" alt="">`;
+    } else {
+      document.getElementById('userAvatar').textContent = me.username.charAt(0).toUpperCase();
     }
-    userData = await r.json();
-    // Скользящее окно — если бот вернул обновлённый токен, сохраняем его.
-    // Активные пользователи никогда не видят повторный логин.
-    if(userData.refreshed_token){
-      authToken = userData.refreshed_token;
-      localStorage.setItem('ws_token', authToken);
-    }
-    document.getElementById('userName').textContent = userData.username;
-    document.getElementById('userTag').textContent = '#'+userData.discriminator;
-    if(userData.avatar){
-      const av = document.getElementById('userAvatar');
-      av.style.backgroundImage = `url(https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png)`;
-      av.style.backgroundSize = 'cover';
-    }
-    loadStats();
-    showPage('overview');
-  }catch(e){
-    showPage('login');
+  } catch(e) {
+    return showLogin();
+  }
+
+  showApp();
+  await loadGuilds();
+
+  // Восстанавливаем последний выбранный сервер
+  const savedGuild = localStorage.getItem('current_guild');
+  if (savedGuild) {
+    const g = userGuilds.find(x => x.id === savedGuild);
+    if (g) await selectGuild(g);
+  }
+
+  if (!currentGuild && userGuilds.length === 1) {
+    await selectGuild(userGuilds[0]);
+  }
+  if (!currentGuild) openGuildPicker();
+}
+
+async function loadGuilds() {
+  try {
+    const r = await apiFetch('/api/guilds');
+    if (!r.ok) { userGuilds = []; return; }
+    userGuilds = await r.json();
+  } catch(e) {
+    userGuilds = [];
   }
 }
 
-async function loadStats(){
-  try{
-    const r = await apiFetch('/api/stats');
-    const d = await r.json();
-    document.getElementById('ov-ping').textContent = d.latency ? d.latency+'ms' : '—';
-    document.getElementById('ov-guilds').textContent = d.user_guilds ?? '—';
-  }catch(e){}
+function openGuildPicker() {
+  const list = document.getElementById('guildPickerList');
+  if (!userGuilds.length) {
+    list.innerHTML = `<div class="empty">
+      <div class="empty-icon">🤖</div>
+      <div class="empty-title">Нет доступных серверов</div>
+      <div class="empty-sub">Добавь бота на сервер где у тебя есть права администратора</div>
+    </div>`;
+  } else {
+    list.innerHTML = userGuilds.map(g => `
+      <div class="guild-selector" style="margin: .5rem 0;" onclick="selectGuildById('${g.id}'); closeGuildPicker();">
+        <div class="guild-icon">${g.icon
+          ? `<img src="https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png" alt="">`
+          : (g.name || '?').charAt(0).toUpperCase()}</div>
+        <div class="guild-info">
+          <div class="name">${g.name}</div>
+          <div class="members">${g.member_count || 0} участников</div>
+        </div>
+      </div>
+    `).join('');
+  }
+  document.getElementById('guildPickerModal').classList.add('show');
 }
 
-// ── Page routing ─────────────────────────────────────────────
-const pages = ['login','overview','servers','general','security','logging',
-               'moderation','welcome','modlog','invites','twins','billing'];
-
-function showPage(name){
-  pages.forEach(p=>{
-    const el = document.getElementById('page-'+p);
-    if(el) el.style.display = p===name ? 'block' : 'none';
-  });
-  document.getElementById('breadcrumbPage').textContent =
-    name.charAt(0).toUpperCase()+name.slice(1).replace(/-/g,' ');
-  document.querySelectorAll('.nav-item').forEach(el=>{
-    el.classList.toggle('active', el.getAttribute('onclick')?.includes(name));
-  });
-  if(name==='servers') loadGuilds();
-  if(name==='modlog')  loadModlog();
-  if(name==='invites') loadInvites('');
-  if(name==='twins')   loadTwins();
-  if(name==='general' && currentGuild) loadGeneralSettings();
+function closeGuildPicker() {
+  document.getElementById('guildPickerModal').classList.remove('show');
 }
 
-// ── Guild list ────────────────────────────────────────────────
-async function loadGuilds(){
-  const list = document.getElementById('guildList');
-  try{
-    const r = await apiFetch('/api/guilds');
-    const guilds = await r.json();
-    if(!guilds.length){
-      list.innerHTML = `<div class="empty" style="grid-column:1/-1">
-        <span class="empty-icon">🤖</span>
-        <div class="empty-title">No servers found</div>
-        <div class="empty-desc">Add Witness to a server first.</div>
-        <a href="__INVITE_URL__" class="btn btn-accent" style="margin-top:1rem" target="_blank">Add to Server</a>
-      </div>`;
+async function selectGuildById(id) {
+  const g = userGuilds.find(x => x.id === id);
+  if (g) await selectGuild(g);
+}
+
+async function selectGuild(g) {
+  currentGuild = g;
+  localStorage.setItem('current_guild', g.id);
+
+  document.getElementById('guildName').textContent = g.name;
+  document.getElementById('guildMembers').textContent = `${g.member_count || 0} участников`;
+  const icon = document.getElementById('guildIcon');
+  if (g.icon) {
+    icon.innerHTML = `<img src="https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png" alt="">`;
+  } else {
+    icon.textContent = g.name.charAt(0).toUpperCase();
+  }
+
+  await loadChannelsRoles();
+  await loadSettings();
+  await showPage('overview');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  PAGES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function showPage(name) {
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === name);
+  });
+  document.querySelectorAll('.page').forEach(el => {
+    el.classList.toggle('active', el.id === 'content-' + name);
+  });
+
+  if (!currentGuild) return;
+
+  if (name === 'overview') await loadOverview();
+  if (name === 'modlog') await loadModlog();
+  if (name === 'appeals') await loadAppeals();
+  if (name === 'invites') await loadInvites('');
+  if (name === 'twins') await loadTwins();
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  CHANNELS & ROLES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _channels = [];
+let _roles = [];
+
+async function loadChannelsRoles() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/channels`);
+    if (!r.ok) return;
+    const data = await r.json();
+    _channels = data.channels || [];
+    _roles = data.roles || [];
+    fillChannelSelects();
+    fillRoleSelects();
+  } catch(e) {}
+}
+
+function fillChannelSelects() {
+  const ids = ['gen-birthday-ch', 'log-main', 'log-suggestion', 'log-starboard'];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const current = el.value;
+    el.innerHTML = '<option value="">— нет —</option>' +
+      _channels.filter(c => c.type === 'text').map(c =>
+        `<option value="${c.id}">#${c.name}</option>`).join('');
+    if (current) el.value = current;
+  }
+}
+
+function fillRoleSelects() {
+  const ids = ['mod-qrole'];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const current = el.value;
+    el.innerHTML = '<option value="">— выбери роль —</option>' +
+      _roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    if (current) el.value = current;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SETTINGS LOAD
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadSettings() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`);
+    if (!r.ok) return;
+    const s = await r.json();
+
+    // General
+    setVal('gen-lang', s.lang ?? 'ru');
+    setSelect('gen-birthday-ch', s.birthday_channel);
+    setToggle('tog-tickets', s.tickets_enabled);
+
+    // Logging
+    setSelect('log-main', s.log_channel);
+    setSelect('log-suggestion', s.suggestion_channel);
+    setSelect('log-starboard', s.starboard_channel);
+
+    // Moderation - punishments
+    setVal('mod-mute1', s.mute1_days ?? 7);
+    setVal('mod-mute2', s.mute2_days ?? 7);
+    setVal('mod-ban3', s.ban3_days ?? 30);
+    setVal('mod-warn3type', s.warn3_type ?? 'ban');
+
+    // Moderation - quarantine
+    setToggle('tog-quarantine', s.quarantine_enabled);
+    setSelect('mod-qrole', s.quarantine_role_id);
+    setVal('mod-qage', s.quarantine_min_age ?? 7);
+    setVal('mod-qhours', s.quarantine_hours ?? 24);
+  } catch(e) {
+    console.error('Settings load error:', e);
+  }
+}
+
+function setVal(id, v) {
+  const el = document.getElementById(id);
+  if (el && v !== undefined && v !== null) el.value = String(v);
+}
+function setSelect(id, v) {
+  const el = document.getElementById(id);
+  if (el && v) el.value = String(v);
+}
+function setToggle(id, v) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (v) el.classList.add('on');
+  else el.classList.remove('on');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SAVE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function saveSettings(payload) {
+  if (!currentGuild) return false;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) {
+      showToast('✓ Сохранено', 'success');
+      return true;
+    }
+    const err = await r.json().catch(() => ({}));
+    showToast('Ошибка: ' + (err.error || r.status), 'error');
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+  }
+  return false;
+}
+
+function saveGeneral() {
+  saveSettings({
+    lang: getVal('gen-lang'),
+    tickets_enabled: getToggle('tog-tickets'),
+    birthday_channel: getVal('gen-birthday-ch') || 0,
+  });
+}
+
+function saveLogging() {
+  saveSettings({
+    log_channel: getVal('log-main') || 0,
+    suggestion_channel: getVal('log-suggestion') || 0,
+    starboard_channel: getVal('log-starboard') || 0,
+  });
+}
+
+function saveModeration() {
+  const payload = {
+    mute1_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute1')) || 7)),
+    mute2_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute2')) || 7)),
+    ban3_days:  Math.max(1, parseInt(getVal('mod-ban3')) || 30),
+    warn3_type: getVal('mod-warn3type') || 'ban',
+    quarantine_enabled: getToggle('tog-quarantine'),
+    quarantine_role_id: getVal('mod-qrole') || 0,
+    quarantine_min_age: parseInt(getVal('mod-qage')) || 7,
+    quarantine_hours: parseInt(getVal('mod-qhours')) || 24,
+  };
+  saveSettings(payload);
+}
+
+function getVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value : undefined;
+}
+function getToggle(id) {
+  const el = document.getElementById(id);
+  return el && el.classList.contains('on') ? 1 : 0;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  OVERVIEW
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadOverview() {
+  if (!currentGuild) return;
+  document.getElementById('ovMembers').textContent = currentGuild.member_count || '—';
+
+  try {
+    const [modlogR, appealsR, twinsR] = await Promise.all([
+      apiFetch(`/api/guild/${currentGuild.id}/modlog`),
+      apiFetch(`/api/guild/${currentGuild.id}/appeals?status=pending`),
+      apiFetch(`/api/guild/${currentGuild.id}/twins`),
+    ]);
+
+    const modlog = modlogR.ok ? await modlogR.json() : [];
+    const appeals = appealsR.ok ? await appealsR.json() : [];
+    const twins = twinsR.ok ? await twinsR.json() : [];
+
+    document.getElementById('ovModlog').textContent = modlog.length;
+    document.getElementById('ovAppeals').textContent = appeals.length;
+    document.getElementById('ovTwins').textContent = twins.filter(t => !t.confirmed && !t.false_positive).length;
+
+    const badge = document.getElementById('appealsBadge');
+    if (appeals.length > 0) {
+      badge.textContent = appeals.length;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+
+    const tbody = document.getElementById('ovRecentTable');
+    if (!modlog.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Пока пусто</div></div></td></tr>';
+    } else {
+      tbody.innerHTML = modlog.slice(0, 5).map(row => `
+        <tr>
+          <td><span class="code">${row.action || '?'}</span></td>
+          <td>${row.user_name || row.user_id || '—'}</td>
+          <td>${row.mod_name || row.mod_id || '—'}</td>
+          <td>${escapeHtml(row.reason || '—').slice(0, 80)}</td>
+          <td class="text-mono text-muted">${(row.created_at || '').slice(0, 10)}</td>
+        </tr>
+      `).join('');
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  MODLOG
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadModlog() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/modlog`);
+    const rows = r.ok ? await r.json() : [];
+    const tbody = document.getElementById('modlogTable');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Mod log пуст</div></div></td></tr>';
       return;
     }
-    list.innerHTML = guilds.map(g=>{
-      const icon = g.icon
-        ? `<img src="https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png" alt="">`
-        : g.name.charAt(0);
-      const planColor = {0:'var(--free)',1:'var(--premium)',2:'var(--security)'}[g.tier??0];
-      const planLabel = {0:'FREE',1:'PREMIUM',2:'SECURITY'}[g.tier??0];
-      return `<div class="guild-card ${currentGuild?.id===g.id?'active-server':''}" onclick="selectGuild(${JSON.stringify(g).replace(/"/g,'&quot;')})">
-        <div class="guild-card-icon">${icon}</div>
-        <div class="guild-card-name">${g.name}</div>
-        <div class="guild-card-members">${g.member_count?.toLocaleString()??'?'} members</div>
-        <span class="guild-card-plan" style="background:${planColor}18;color:${planColor}">${planLabel}</span>
-      </div>`;
-    }).join('');
-  }catch(e){
-    list.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-title">Failed to load servers</div></div>`;
-  }
-}
-
-function selectGuild(guild){
-  currentGuild = guild;
-  document.getElementById('topbarName').textContent = guild.name;
-  if(guild.icon){
-    const el = document.getElementById('topbarIcon');
-    el.style.backgroundImage = `url(https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png)`;
-    el.style.backgroundSize = 'cover';
-  }
-  showPage('general');
-}
-
-// ── General settings ──────────────────────────────────────────
-async function loadGeneralSettings(){
-  if(!currentGuild) return;
-  document.getElementById('noServerSelected').style.display='none';
-  document.getElementById('generalContent').style.display='block';
-  try{
-    // Загружаем настройки и каналы параллельно
-    const [sr, cr] = await Promise.all([
-      apiFetch(`/api/guild/${currentGuild.id}/settings`),
-      apiFetch(`/api/guild/${currentGuild.id}/channels`)
-    ]);
-    const s  = await sr.json();
-    const ch = await cr.json();
-
-    // Заполняем каналы в dropdown
-    const textCh = (ch.channels||[]).filter(c=>c.type==='text');
-    const selIds = ['cfg-log-channel','cfg-ticket-cat','cfg-birthday-ch',
-                    'cfg-suggestion-ch','cfg-log-channel-log','cfg-starboard-ch',
-                    'cfg-welcome-ch','cfg-goodbye-ch'];
-    selIds.forEach(id=>{
-      const el = document.getElementById(id);
-      if(!el) return;
-      el.innerHTML = '<option value="">None</option>' +
-        textCh.map(c=>`<option value="${c.id}">#${c.name}</option>`).join('');
-    });
-
-    // Roles для quarantine и autorole
-    const roles = ch.roles || [];
-    ['cfg-quarantine-role','cfg-autorole'].forEach(id=>{
-      const el = document.getElementById(id);
-      if(!el) return;
-      el.innerHTML = '<option value="">None</option>' +
-        roles.map(r=>`<option value="${r.id}">@${r.name}</option>`).join('');
-    });
-    window._serverRoles = roles;
-
-    // Применяем настройки
-    const langEl = document.getElementById('cfg-lang');
-    if(langEl) langEl.value = s.lang ?? 'ru';
-
-    // Tickets toggle
-    const tickTog = document.getElementById('tog-tickets');
-    if(tickTog){ s.tickets_enabled ? tickTog.classList.add('on') : tickTog.classList.remove('on'); }
-
-    // Log channel
-    if(s.log_channel){
-      ['cfg-log-channel','cfg-log-channel-log'].forEach(id=>{
-        const el = document.getElementById(id);
-        if(el) el.value = String(s.log_channel);
-      });
-    }
-
-    // Punishments (3-warn system)
-    const m1 = document.getElementById('cfg-mute1-days');
-    const m2 = document.getElementById('cfg-mute2-days');
-    const b3 = document.getElementById('cfg-ban3-days');
-    if(m1) m1.value = s.mute1_days ?? 7;
-    if(m2) m2.value = s.mute2_days ?? 7;
-    if(b3) b3.value = s.ban3_days  ?? 30;
-
-    // Quarantine
-    const qTog = document.getElementById('tog-quarantine');
-    if(qTog){ s.quarantine_enabled ? qTog.classList.add('on') : qTog.classList.remove('on'); }
-    if(s.quarantine_role_id) setSelect('cfg-quarantine-role', s.quarantine_role_id);
-    const qh = document.getElementById('cfg-quarantine-hours');
-    const qa = document.getElementById('cfg-quarantine-age');
-    if(qh) qh.value = s.quarantine_hours   ?? 24;
-    if(qa) qa.value = s.quarantine_min_age  ?? 7;
-
-    // Security toggles
-    const sec = s.security || {};
-    Object.entries(sec).forEach(([key, val])=>{
-      const el = document.getElementById('sec-'+key);
-      if(el){ val ? el.classList.add('on') : el.classList.remove('on'); }
-    });
-
-    // Остальные каналы
-    if(s.suggestion_channel) setSelect('cfg-suggestion-ch', s.suggestion_channel);
-    if(s.birthday_channel)   setSelect('cfg-birthday-ch',   s.birthday_channel);
-    if(s.ticket_category)    setSelect('cfg-ticket-cat',     s.ticket_category);
-    if(s.starboard_channel)  setSelect('cfg-starboard-ch',   s.starboard_channel);
-
-  }catch(e){ console.error('Settings load error:', e) }
-}
-
-function setSelect(id, value){
-  const el = document.getElementById(id);
-  if(el && value) el.value = String(value);
-}
-
-async function loadChannels(){
-  if(!currentGuild) return;
-  try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/channels`);
-    const d = await r.json();
-    const textChannels = (d.channels||[]).filter(c=>c.type==='text');
-    const selects = ['cfg-log-channel','cfg-ticket-cat','cfg-birthday-ch','cfg-suggestion-ch'];
-    selects.forEach(id=>{
-      const el = document.getElementById(id);
-      if(!el) return;
-      const cur = el.value;
-      el.innerHTML = '<option value="">None</option>' +
-        textChannels.map(c=>`<option value="${c.id}">#${c.name}</option>`).join('');
-      if(cur) el.value = cur;
-    });
-    // Roles для reaction roles и quarantine
-    window._serverRoles = d.roles || [];
-  }catch(e){ console.error('channels load error', e) }
-}
-
-async function saveSettings(){
-  if(!currentGuild) return;
-  const payload = {
-    lang: document.getElementById('cfg-lang').value,
-    tickets_enabled: document.getElementById('tog-tickets').classList.contains('on') ? 1 : 0,
-  };
-  try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`, {
-      method:'POST', body: JSON.stringify(payload)
-    });
-    if(r.ok) showToast('✓ Settings saved');
-    else showToast('Failed to save', true);
-  }catch(e){ showToast('Error', true) }
-}
-
-function toggleSetting(key){
-  const el = document.getElementById('tog-'+key);
-  if(el) el.classList.toggle('on');
-}
-
-// ── Mod log ───────────────────────────────────────────────────
-async function loadModlog(){
-  if(!currentGuild) return;
-  try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/modlog`);
-    const rows = await r.json();
-    const tbody = document.getElementById('modlogTable');
-    if(!rows.length){ tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">No actions yet</td></tr>'; return; }
-    const badgeClass = {WARN:'badge-warn',BAN:'badge-ban',KICK:'badge-kick',MUTE:'badge-mute',TEMPBAN:'badge-ban'};
-    tbody.innerHTML = rows.map(row=>`
+    tbody.innerHTML = rows.map(row => `
       <tr>
-        <td><span class="badge ${badgeClass[row.action]??''}">${row.action}</span></td>
-        <td>${row.user_name ?? row.user_id}</td>
-        <td>${row.mod_name ?? row.mod_id}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${row.reason||'—'}</td>
-        <td>${row.created_at?.slice(0,10)??'—'}</td>
-      </tr>`).join('');
-  }catch(e){}
+        <td><span class="code">${row.action || '?'}</span></td>
+        <td>${row.user_name || row.user_id || '—'}</td>
+        <td>${row.mod_name || '—'}</td>
+        <td>${escapeHtml(row.reason || '—').slice(0, 100)}</td>
+        <td>${row.duration || '—'}</td>
+        <td class="text-mono text-muted">${(row.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+      </tr>
+    `).join('');
+  } catch(e) {}
 }
 
-// ── Invites ───────────────────────────────────────────────────
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  APPEALS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadAppeals() {
+  if (!currentGuild) return;
+  const status = document.getElementById('appealsFilter').value;
+  const qs = status ? `?status=${status}` : '';
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals${qs}`);
+    const rows = r.ok ? await r.json() : [];
+    const list = document.getElementById('appealsList');
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Нет апелляций</div><div class="empty-sub">с этим статусом</div></div>';
+      return;
+    }
+    list.innerHTML = rows.map(a => `
+      <div class="card" style="cursor: pointer;" onclick="openAppealDetails(${a.id})">
+        <div class="card-body" style="display: flex; align-items: center; gap: 1rem;">
+          <span class="status-pill ${a.status}">${a.status}</span>
+          <div style="flex: 1;">
+            <div style="font-weight: 600;">#${a.id} · ${escapeHtml(a.username || a.user_id)}</div>
+            <div style="font-size: .8rem; color: var(--muted); margin-top: .2rem;">
+              ${a.action_type} · ${escapeHtml((a.appeal_text || '').slice(0, 100))}...
+            </div>
+          </div>
+          <div style="font-family: var(--mono); font-size: .75rem; color: var(--muted);">
+            ${(a.submitted_at || '').slice(0, 10)}
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+let _currentAppealId = null;
+
+async function openAppealDetails(id) {
+  _currentAppealId = id;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals`);
+    const rows = r.ok ? await r.json() : [];
+    const a = rows.find(x => x.id === id);
+    if (!a) return;
+
+    const isPending = a.status === 'pending';
+    document.getElementById('appealModalContent').innerHTML = `
+      <div class="modal-title">Апелляция #${a.id}</div>
+      <div style="margin-bottom: 1rem;">
+        <span class="status-pill ${a.status}">${a.status}</span>
+      </div>
+
+      <div class="form-group">
+        <label>Участник</label>
+        <div style="font-weight: 600;">${escapeHtml(a.username || a.user_id)}</div>
+      </div>
+      <div class="form-group">
+        <label>Наказание</label>
+        <div><span class="code">${a.action_type}</span></div>
+      </div>
+      <div class="form-group">
+        <label>Объяснение</label>
+        <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px;
+                    font-size: .9rem; line-height: 1.6;">
+          ${escapeHtml(a.appeal_text || '—')}
+        </div>
+      </div>
+      ${a.reviewer_note ? `
+        <div class="form-group">
+          <label>Комментарий модератора</label>
+          <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px; font-size: .9rem;">
+            ${escapeHtml(a.reviewer_note)}
+          </div>
+        </div>
+      ` : ''}
+
+      ${isPending ? `
+        <div class="form-group">
+          <label>Твой комментарий (опционально)</label>
+          <textarea class="textarea" id="appealNote" rows="2" placeholder="Будет показан участнику..."></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
+          <button class="btn btn-danger btn-sm" onclick="reviewAppeal('reject')">❌ Отклонить</button>
+          <button class="btn btn-success btn-sm" onclick="reviewAppeal('accept')">✅ Принять</button>
+        </div>
+      ` : `
+        <div class="modal-actions">
+          <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
+        </div>
+      `}
+    `;
+    document.getElementById('appealModal').classList.add('show');
+  } catch(e) {}
+}
+
+function closeAppealModal() {
+  document.getElementById('appealModal').classList.remove('show');
+  _currentAppealId = null;
+}
+
+async function reviewAppeal(action) {
+  if (!_currentAppealId) return;
+  const note = document.getElementById('appealNote')?.value || '';
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeal/${_currentAppealId}/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({note})
+    });
+    if (r.ok) {
+      showToast(action === 'accept' ? '✓ Апелляция принята' : '✗ Апелляция отклонена', 'success');
+      closeAppealModal();
+      loadAppeals();
+    } else {
+      showToast('Ошибка', 'error');
+    }
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  INVITES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let _inviteSearchTimer = null;
-function debounceInviteSearch(){
+function debounceInviteSearch() {
   clearTimeout(_inviteSearchTimer);
-  _inviteSearchTimer = setTimeout(()=>{
-    const q = document.getElementById('invite-search')?.value || '';
+  _inviteSearchTimer = setTimeout(() => {
+    const q = document.getElementById('inviteSearch')?.value || '';
     loadInvites(q);
   }, 400);
 }
 
-async function loadInvites(q=''){
-  if(!currentGuild) return;
-  try{
+async function loadInvites(q='') {
+  if (!currentGuild) return;
+  try {
     const url = `/api/guild/${currentGuild.id}/invites` + (q ? `?q=${encodeURIComponent(q)}` : '');
     const r = await apiFetch(url);
-    const rows = await r.json();
-    const tbody = document.getElementById('inviteTable');
-    if(!rows.length){
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem">
-        ${q ? 'Ничего не найдено по «'+q+'»' : 'Нет данных об инвайтах'}</td></tr>`;
+    const rows = r.ok ? await r.json() : [];
+    const tbody = document.getElementById('invitesTable');
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="empty">
+        <div class="empty-icon">🔗</div>
+        <div class="empty-title">${q ? 'Ничего не найдено' : 'Нет данных'}</div>
+        ${q ? `<div class="empty-sub">по запросу «${escapeHtml(q)}»</div>` : ''}
+      </div></td></tr>`;
       return;
     }
-    tbody.innerHTML = rows.map(row=>`
+    tbody.innerHTML = rows.map(row => `
       <tr>
-        <td style="font-family:'Space Mono',monospace;color:var(--accent)">${row.invite_code}</td>
-        <td>${row.inviter_name||'—'}</td>
-        <td>${row.uses||0}</td>
-        <td>${row.last_used?.slice(0,10)||'—'}</td>
-        <td>${row.note||'<span style="color:var(--muted)">—</span>'}</td>
-      </tr>`).join('');
-  }catch(e){}
+        <td><span class="code">${row.invite_code}</span></td>
+        <td>${escapeHtml(row.inviter_name || '—')}</td>
+        <td>${row.uses || 0}</td>
+        <td class="text-mono text-muted">${(row.last_used || '').slice(0, 10) || '—'}</td>
+        <td>${escapeHtml(row.note || '—')}</td>
+      </tr>
+    `).join('');
+  } catch(e) {}
 }
 
-// ── Twins ─────────────────────────────────────────────────────
-async function loadTwins(){
-  if(!currentGuild) return;
-  try{
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  TWINS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadTwins() {
+  if (!currentGuild) return;
+  try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/twins`);
-    const rows = await r.json();
+    const rows = r.ok ? await r.json() : [];
     const tbody = document.getElementById('twinsTable');
-    if(!rows.length) return;
-    const statusLabel = {0:'⏳ Pending',1:'✅ Confirmed',2:'❌ False positive'};
-    tbody.innerHTML = rows.map(row=>`
-      <tr>
-        <td>${row.user_a_name??row.user_a}</td>
-        <td>${row.user_b_name??row.user_b}</td>
-        <td style="font-family:'Space Mono',monospace;color:${row.similarity>=72?'var(--danger)':'var(--warning)'}">${row.similarity?.toFixed(1)}/100</td>
-        <td>${statusLabel[row.confirmed*1+(row.false_positive*2)]??'⏳ Pending'}</td>
-        <td>${row.detected_at?.slice(0,10)??'—'}</td>
-      </tr>`).join('');
-  }catch(e){}
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Твинков не обнаружено</div></div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(row => {
+      const status = row.confirmed ? 'approved' : (row.false_positive ? 'rejected' : 'pending');
+      const statusText = row.confirmed ? 'Подтверждён' : (row.false_positive ? 'Ложное' : 'Не проверен');
+      return `
+        <tr>
+          <td>#${row.id}</td>
+          <td>${escapeHtml(row.user_a_name || row.user_a)}</td>
+          <td>${escapeHtml(row.user_b_name || row.user_b)}</td>
+          <td><strong style="color: ${row.similarity >= 80 ? 'var(--danger)' : row.similarity >= 70 ? 'var(--warning)' : 'var(--muted)'};">
+            ${row.similarity.toFixed(0)}%
+          </strong></td>
+          <td><span class="status-pill ${status}">${statusText}</span></td>
+          <td class="text-mono text-muted">${(row.detected_at || '').slice(0, 10)}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch(e) {}
 }
 
-async function saveSecurity(){
-  if(!currentGuild) return;
-  const toggleIds = ['join','msg_delete','msg_edit','role_change','nick_change',
-                     'voice','invites','anti_raid','anti_spam','suspicious'];
-  const payload = {};
-  toggleIds.forEach(id=>{
-    const el = document.getElementById('sec-'+id);
-    if(el) payload[id] = el.classList.contains('on');
-  });
-  try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/security`,{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      credentials:'include', body:JSON.stringify(payload)
-    });
-    if(r.ok) showToast('✓ Security settings saved');
-    else showToast('Failed to save', true);
-  }catch(e){ showToast('Error', true) }
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  UTILS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-async function saveQuarantine(){
-  if(!currentGuild) return;
-  const role   = document.getElementById('cfg-quarantine-role')?.value;
-  const age    = document.getElementById('cfg-quarantine-age')?.value;
-  const hours  = document.getElementById('cfg-quarantine-hours')?.value;
-  try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`,{
-      method:'POST',
-      body: JSON.stringify({quarantine_role:role, quarantine_age:age, quarantine_hours:hours})
-    });
-    if(r.ok) showToast('✓ Quarantine saved');
-    else showToast('Failed', true);
-  }catch(e){ showToast('Error', true) }
-}
-
-async function saveWelcome(){
-  if(!currentGuild) return;
-  const payload = {
-    welcome_channel: document.getElementById('cfg-welcome-ch')?.value,
-    goodbye_channel: document.getElementById('cfg-goodbye-ch')?.value,
-    welcome_msg:     document.getElementById('cfg-welcome-msg')?.value,
-    goodbye_msg:     document.getElementById('cfg-goodbye-msg')?.value,
-  };
-  try{
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`,{
-      method:'POST', body: JSON.stringify(payload)
-    });
-    if(r.ok) showToast('✓ Welcome saved');
-    else showToast('Failed', true);
-  }catch(e){ showToast('Error', true) }
-}
-
-// Auto-role toggle show/hide
-document.addEventListener('click', e=>{
-  if(e.target.id==='tog-autorole'){
-    const row = document.getElementById('autorole-row');
-    if(row) row.style.display = e.target.classList.contains('on') ? 'grid' : 'none';
-  }
-});
-
-// ── Toast ─────────────────────────────────────────────────────
-function showToast(msg, err=false){
-  const t = document.createElement('div');
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
   t.textContent = msg;
-  Object.assign(t.style, {
-    position:'fixed',bottom:'2rem',right:'2rem',
-    background: err ? 'var(--danger)' : 'var(--success)',
-    color:'#000',padding:'.75rem 1.25rem',borderRadius:'8px',
-    fontWeight:'700',fontSize:'.9rem',zIndex:'9999',
-    animation:'fadeUp .3s ease',
-  });
-  document.body.appendChild(t);
-  setTimeout(()=>t.remove(), 3000);
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.classList.remove('show'), 2800);
 }
 
+// Start
 init();
 </script>
+
 </body>
 </html>
