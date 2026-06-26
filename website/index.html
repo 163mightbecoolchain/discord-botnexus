@@ -1,683 +1,582 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Witness — The Last Bot You'll Ever Need</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<title>Witness — Discord Moderation Bot</title>
+<meta name="description" content="Продвинутая модерация Discord: стилометрия твинков, апелляции, авто-наказания, анти-нюк">
+
 <style>
 :root {
-  --bg:       #080B10;
-  --surface:  #0E1318;
-  --border:   #1C2330;
-  --accent:   #00E5FF;
-  --accent2:  #FF6B35;
-  --gold:     #FFD166;
-  --text:     #E8EDF5;
-  --muted:    #5A6478;
-  --premium:  #00E5FF;
-  --security: #FF6B35;
-  --free:     #57F287;
+  --bg:        #0a0e14;
+  --bg-2:      #0f1419;
+  --bg-3:      #151b23;
+  --panel:     #1a2028;
+  --panel-2:   #232b35;
+  --border:    #2a3441;
+  --border-2:  #3a4554;
+  --text:      #e0e6ed;
+  --text-2:    #a8b3c1;
+  --muted:     #6b7785;
+  --accent:    #00d9a3;
+  --accent-2:  #00bfa5;
+  --accent-3:  #00a085;
+  --danger:    #ff5470;
+  --warning:   #ffaa00;
+  --info:      #5a9eff;
+  --mono:      'Space Mono', 'JetBrains Mono', 'Fira Code', monospace;
 }
-*{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{
-  background:var(--bg);
-  color:var(--text);
-  font-family:'Syne',sans-serif;
-  overflow-x:hidden;
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+  font-size: 15px;
 }
-/* ── NOISE OVERLAY ── */
-body::before{
-  content:'';
-  position:fixed;inset:0;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  pointer-events:none;z-index:0;opacity:.4;
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image:
+    linear-gradient(rgba(0,217,163,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,217,163,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
 }
-/* ── NAV ── */
-nav{
-  position:fixed;top:0;left:0;right:0;
-  display:flex;align-items:center;justify-content:space-between;
-  padding:1.2rem 4rem;
-  background:rgba(8,11,16,.85);
-  backdrop-filter:blur(12px);
-  border-bottom:1px solid var(--border);
-  z-index:100;
+
+body::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  height: 600px;
+  background: radial-gradient(ellipse at center, rgba(0,217,163,0.08) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
 }
-.nav-logo{
-  font-size:1.4rem;font-weight:800;letter-spacing:-.02em;
-  color:var(--accent);text-decoration:none;
-  display:flex;align-items:center;gap:.5rem;
+
+main, header, footer { position: relative; z-index: 1; }
+
+header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,14,20,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
 }
-.nav-logo span{color:var(--text)}
-.nav-links{display:flex;align-items:center;gap:2rem}
-.nav-links a{color:var(--muted);text-decoration:none;font-size:.9rem;
-  transition:color .2s;letter-spacing:.05em;text-transform:uppercase;}
-.nav-links a:hover{color:var(--text)}
-.btn{
-  display:inline-flex;align-items:center;gap:.5rem;
-  padding:.65rem 1.4rem;border-radius:6px;
-  font-family:'Syne',sans-serif;font-weight:700;font-size:.9rem;
-  text-decoration:none;transition:all .2s;cursor:pointer;border:none;
+
+.nav {
+  max-width: 1280px; margin: 0 auto;
+  padding: 1rem 1.5rem;
+  display: flex; align-items: center; justify-content: space-between;
 }
-.btn-accent{background:var(--accent);color:#000}
-.btn-accent:hover{background:#00c8e0;transform:translateY(-1px)}
-.btn-outline{background:transparent;color:var(--text);border:1px solid var(--border)}
-.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
-.btn-discord{background:#5865F2;color:#fff}
-.btn-discord:hover{background:#4752c4;transform:translateY(-1px)}
-/* ── HERO ── */
-.hero{
-  min-height:100vh;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  text-align:center;
-  padding:8rem 2rem 4rem;
-  position:relative;
+
+.logo {
+  display: flex; align-items: center; gap: .75rem;
+  font-family: var(--mono); font-weight: 700; font-size: 1.15rem;
+  letter-spacing: -.02em; text-decoration: none; color: inherit;
 }
-.hero-glow{
-  position:absolute;top:20%;left:50%;transform:translateX(-50%);
-  width:800px;height:400px;
-  background:radial-gradient(ellipse, rgba(0,229,255,.08) 0%, transparent 70%);
-  pointer-events:none;
+
+.logo-mark {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-3) 100%);
+  display: grid; place-items: center;
+  font-size: 1rem; font-weight: 900; color: #001a14;
+  box-shadow: 0 0 24px rgba(0,217,163,0.4);
 }
-.hero-badge{
-  display:inline-flex;align-items:center;gap:.5rem;
-  background:rgba(0,229,255,.08);
-  border:1px solid rgba(0,229,255,.2);
-  color:var(--accent);
-  padding:.4rem 1rem;border-radius:100px;
-  font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;
-  margin-bottom:2rem;
-  animation:fadeUp .6s ease both;
+
+.logo-text span { color: var(--accent); }
+
+.nav-links { display: flex; gap: 2rem; align-items: center; }
+
+.nav-links a {
+  color: var(--text-2); text-decoration: none;
+  font-size: .9rem; font-weight: 500; transition: color .15s;
 }
-@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-.hero h1{
-  font-size:clamp(3rem,8vw,7rem);
-  font-weight:800;line-height:.95;letter-spacing:-.04em;
-  animation:fadeUp .6s .1s ease both;
+
+.nav-links a:hover { color: var(--accent); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .65rem 1.25rem; border-radius: 8px;
+  font-size: .9rem; font-weight: 600;
+  text-decoration: none; transition: all .15s;
+  border: 1px solid transparent; cursor: pointer; font-family: inherit;
 }
-.hero h1 em{
-  font-style:normal;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+
+.btn-primary {
+  background: var(--accent); color: #001a14; border-color: var(--accent);
 }
-.hero-sub{
-  max-width:600px;
-  color:var(--muted);font-size:1.15rem;line-height:1.7;
-  margin:1.5rem auto 2.5rem;
-  animation:fadeUp .6s .2s ease both;
+
+.btn-primary:hover {
+  background: var(--accent-2); transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0,217,163,0.25);
 }
-.hero-cta{
-  display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;
-  animation:fadeUp .6s .3s ease both;
+
+.btn-ghost {
+  background: transparent; color: var(--text); border-color: var(--border-2);
 }
-.hero-stats{
-  display:flex;gap:4rem;margin-top:5rem;
-  animation:fadeUp .6s .4s ease both;
+
+.btn-ghost:hover {
+  background: var(--panel); border-color: var(--accent); color: var(--accent);
 }
-.stat-item{text-align:center}
-.stat-num{font-size:2.5rem;font-weight:800;color:var(--accent);font-family:'Space Mono',monospace;}
-.stat-label{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-top:.25rem}
-/* ── SECTION ── */
-section{padding:6rem 4rem;position:relative;z-index:1}
-.section-label{
-  font-size:.75rem;letter-spacing:.2em;text-transform:uppercase;
-  color:var(--accent);margin-bottom:1rem;
-  font-family:'Space Mono',monospace;
+
+.btn-lg { padding: 1rem 2rem; font-size: 1rem; }
+
+.hero {
+  max-width: 1280px; margin: 0 auto;
+  padding: 6rem 1.5rem 4rem; text-align: center;
 }
-.section-title{font-size:clamp(2rem,4vw,3.5rem);font-weight:800;letter-spacing:-.03em;line-height:1.1}
-.section-sub{color:var(--muted);font-size:1.1rem;margin-top:1rem;max-width:600px}
-/* ── FEATURES ── */
-.features-grid{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
-  gap:1px;background:var(--border);
-  border:1px solid var(--border);border-radius:12px;overflow:hidden;
-  margin-top:3rem;
+
+.hero-tag {
+  display: inline-flex; align-items: center; gap: .5rem;
+  background: rgba(0,217,163,0.08);
+  border: 1px solid rgba(0,217,163,0.2);
+  color: var(--accent);
+  padding: .4rem 1rem; border-radius: 999px;
+  font-size: .8rem; font-family: var(--mono); font-weight: 600;
+  margin-bottom: 1.5rem;
 }
-.feature-card{
-  background:var(--surface);padding:2rem;
-  transition:background .2s;
+
+.hero-tag::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  animation: pulse 2s ease infinite;
 }
-.feature-card:hover{background:#121820}
-.feature-icon{
-  width:44px;height:44px;border-radius:10px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:1.3rem;margin-bottom:1.2rem;
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
 }
-.icon-blue{background:rgba(0,229,255,.1)}
-.icon-orange{background:rgba(255,107,53,.1)}
-.icon-green{background:rgba(87,242,135,.1)}
-.icon-gold{background:rgba(255,209,102,.1)}
-.icon-purple{background:rgba(139,92,246,.1)}
-.icon-red{background:rgba(237,66,69,.1)}
-.feature-card h3{font-size:1.1rem;font-weight:700;margin-bottom:.5rem}
-.feature-card p{color:var(--muted);font-size:.9rem;line-height:1.6}
-.feature-badge{
-  display:inline-block;font-size:.7rem;padding:.2rem .6rem;
-  border-radius:4px;margin-top:.8rem;font-family:'Space Mono',monospace;
-  font-weight:700;
+
+.hero h1 {
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  font-weight: 800; line-height: 1.1;
+  letter-spacing: -.03em; margin-bottom: 1.5rem;
 }
-.badge-free{background:rgba(87,242,135,.1);color:var(--free)}
-.badge-premium{background:rgba(0,229,255,.1);color:var(--premium)}
-.badge-security{background:rgba(255,107,53,.1);color:var(--security)}
-/* ── COMMANDS ── */
-.commands-section{background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
-.commands-filter{
-  display:flex;gap:.5rem;flex-wrap:wrap;margin:2rem 0 1.5rem;
+
+.hero h1 .accent {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--info) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
 }
-.filter-btn{
-  padding:.5rem 1rem;border-radius:6px;font-size:.85rem;
-  background:transparent;border:1px solid var(--border);color:var(--muted);
-  cursor:pointer;transition:all .2s;font-family:'Syne',sans-serif;
+
+.hero-sub {
+  font-size: 1.15rem; color: var(--text-2);
+  max-width: 620px; margin: 0 auto 2.5rem; line-height: 1.7;
 }
-.filter-btn.active,.filter-btn:hover{
-  background:rgba(0,229,255,.1);border-color:var(--accent);color:var(--accent);
+
+.hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+.hero-stats {
+  display: flex; gap: 3rem; justify-content: center;
+  margin-top: 4rem; flex-wrap: wrap;
 }
-.commands-grid{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
-  gap:.75rem;
+
+.stat-num {
+  font-family: var(--mono); font-size: 2rem; font-weight: 700;
+  color: var(--accent); line-height: 1;
 }
-.cmd-card{
-  background:var(--bg);border:1px solid var(--border);
-  border-radius:8px;padding:1rem 1.2rem;
-  transition:border-color .2s,transform .2s;
+
+.stat-label {
+  font-size: .8rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em; margin-top: .5rem;
 }
-.cmd-card:hover{border-color:var(--accent);transform:translateY(-2px)}
-.cmd-name{
-  font-family:'Space Mono',monospace;color:var(--accent);
-  font-size:.9rem;font-weight:700;
+
+section { max-width: 1280px; margin: 0 auto; padding: 5rem 1.5rem; }
+
+.section-tag {
+  font-family: var(--mono); color: var(--accent);
+  font-size: .85rem; letter-spacing: .15em;
+  text-transform: uppercase; margin-bottom: 1rem; font-weight: 600;
 }
-.cmd-desc{color:var(--muted);font-size:.82rem;margin-top:.3rem;line-height:1.5}
-.cmd-tier{
-  font-size:.7rem;padding:.15rem .5rem;border-radius:3px;
-  font-family:'Space Mono',monospace;margin-top:.5rem;display:inline-block;
+
+.section-title {
+  font-size: clamp(2rem, 4vw, 2.75rem); font-weight: 700;
+  letter-spacing: -.02em; margin-bottom: 1rem; line-height: 1.2;
 }
-/* ── PRICING ── */
-.pricing-grid{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
-  gap:1.5rem;margin-top:3rem;
+
+.section-desc {
+  color: var(--text-2); font-size: 1.05rem;
+  max-width: 620px; line-height: 1.7;
 }
-.price-card{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:16px;padding:2rem;position:relative;overflow:hidden;
-  transition:transform .2s,border-color .2s;
+
+.section-head { text-align: center; margin-bottom: 4rem; }
+.section-head .section-desc { margin: 1rem auto 0; }
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
 }
-.price-card:hover{transform:translateY(-4px)}
-.price-card.featured{border-color:var(--accent)}
-.price-card.featured::before{
-  content:'MOST POPULAR';
-  position:absolute;top:1rem;right:-2rem;
-  background:var(--accent);color:#000;
-  font-size:.65rem;font-weight:700;letter-spacing:.1em;
-  padding:.3rem 3rem;transform:rotate(35deg);
+
+.feature {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 2rem;
+  transition: all .2s; position: relative; overflow: hidden;
 }
-.price-name{font-size:.75rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
-  font-family:'Space Mono',monospace;}
-.price-amount{
-  font-size:3.5rem;font-weight:800;margin:.75rem 0 .25rem;
-  font-family:'Space Mono',monospace;
+
+.feature::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0; transition: opacity .2s;
 }
-.price-amount span{font-size:1rem;color:var(--muted);font-weight:400}
-.price-desc{color:var(--muted);font-size:.9rem;margin-bottom:1.5rem}
-.price-features{list-style:none;display:flex;flex-direction:column;gap:.7rem}
-.price-features li{
-  display:flex;align-items:flex-start;gap:.6rem;
-  font-size:.9rem;color:var(--muted);
+
+.feature:hover {
+  border-color: var(--accent); transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
 }
-.price-features li::before{content:'✓';color:var(--free);flex-shrink:0;font-weight:700}
-.price-features li.no::before{content:'✗';color:var(--border)}
-.price-features li.no{opacity:.5}
-.price-cta{width:100%;margin-top:2rem;justify-content:center}
-/* ── HOW IT WORKS ── */
-.steps{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:2rem;margin-top:3rem;
+
+.feature:hover::before { opacity: 1; }
+
+.feature-icon {
+  width: 48px; height: 48px; border-radius: 10px;
+  background: rgba(0,217,163,0.1);
+  border: 1px solid rgba(0,217,163,0.2);
+  display: grid; place-items: center;
+  font-size: 1.5rem; margin-bottom: 1.25rem;
 }
-.step{position:relative;padding-left:3.5rem}
-.step-num{
-  position:absolute;left:0;top:0;
-  width:2.5rem;height:2.5rem;border-radius:8px;
-  background:rgba(0,229,255,.1);border:1px solid rgba(0,229,255,.2);
-  display:flex;align-items:center;justify-content:center;
-  font-family:'Space Mono',monospace;font-size:.9rem;color:var(--accent);font-weight:700;
+
+.feature h3 {
+  font-size: 1.15rem; font-weight: 700;
+  margin-bottom: .65rem; letter-spacing: -.01em;
 }
-.step h3{font-size:1rem;font-weight:700;margin-bottom:.5rem}
-.step p{color:var(--muted);font-size:.9rem;line-height:1.6}
-/* ── FOOTER ── */
-footer{
-  border-top:1px solid var(--border);
-  padding:3rem 4rem;
-  display:flex;align-items:center;justify-content:space-between;
-  flex-wrap:wrap;gap:2rem;
+
+.feature p {
+  color: var(--text-2); font-size: .95rem; line-height: 1.65;
 }
-.footer-logo{font-size:1.2rem;font-weight:800;color:var(--accent)}
-.footer-links{display:flex;gap:2rem}
-.footer-links a{color:var(--muted);text-decoration:none;font-size:.85rem;transition:color .2s}
-.footer-links a:hover{color:var(--text)}
-.footer-copy{color:var(--muted);font-size:.8rem}
-/* ── ALBION SECTION ── */
-.albion-section{
-  background:linear-gradient(135deg,rgba(0,229,255,.03) 0%,transparent 60%);
-  border-top:1px solid var(--border);
+
+.showcase {
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%);
+  padding: 5rem 0; margin: 2rem 0;
 }
-.albion-grid{
-  display:grid;grid-template-columns:1fr 1fr;gap:4rem;align-items:center;margin-top:3rem;
+
+.showcase-inner {
+  max-width: 1280px; margin: 0 auto; padding: 0 1.5rem;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 4rem; align-items: center;
 }
-.albion-commands{display:flex;flex-direction:column;gap:.75rem}
-.albion-cmd{
-  display:flex;align-items:center;gap:1rem;
-  background:var(--surface);border:1px solid var(--border);
-  padding:.9rem 1.2rem;border-radius:8px;
-  transition:border-color .2s;
+
+.console {
+  background: #050709; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+  font-family: var(--mono); font-size: .85rem;
 }
-.albion-cmd:hover{border-color:var(--accent)}
-.albion-cmd code{
-  font-family:'Space Mono',monospace;font-size:.85rem;color:var(--accent);
-  min-width:100px;
+
+.console-bar {
+  background: var(--bg-3); padding: .75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: .5rem;
 }
-.albion-cmd span{color:var(--muted);font-size:.85rem}
-/* ── SCROLL INDICATOR ── */
-.scroll-indicator{
-  position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);
-  display:flex;flex-direction:column;align-items:center;gap:.5rem;
-  color:var(--muted);font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;
-  animation:bounce 2s infinite;
+
+.console-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--border-2); }
+.console-dot:nth-child(1) { background: #ff5f56; }
+.console-dot:nth-child(2) { background: #ffbd2e; }
+.console-dot:nth-child(3) { background: #27c93f; }
+
+.console-title { margin-left: auto; color: var(--muted); font-size: .75rem; }
+.console-body { padding: 1.25rem; line-height: 1.8; }
+
+.line { display: block; }
+.cmd { color: var(--info); }
+.success { color: var(--accent); }
+.warn { color: var(--warning); }
+.dim { color: var(--muted); }
+.muted-text { color: var(--text-2); }
+
+.tech {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem; margin-top: 3rem;
 }
-@keyframes bounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-8px)}}
-.scroll-line{width:1px;height:40px;background:linear-gradient(to bottom,var(--accent),transparent)}
-@media(max-width:768px){
-  nav{padding:1rem 1.5rem}
-  section{padding:4rem 1.5rem}
-  .hero{padding:6rem 1.5rem 3rem}
-  .hero-stats{gap:2rem;flex-wrap:wrap;justify-content:center}
-  .albion-grid{grid-template-columns:1fr}
-  footer{padding:2rem 1.5rem;flex-direction:column;align-items:flex-start}
+
+.tech-item {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1.25rem;
+  display: flex; align-items: center; gap: .85rem;
+}
+
+.tech-item-icon {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: rgba(0,217,163,0.1);
+  display: grid; place-items: center; font-size: 1.1rem;
+}
+
+.tech-item-text strong { display: block; color: var(--text); font-size: .9rem; }
+.tech-item-text small { color: var(--muted); font-size: .75rem; }
+
+.cta {
+  background:
+    radial-gradient(circle at 20% 50%, rgba(0,217,163,0.15) 0%, transparent 50%),
+    radial-gradient(circle at 80% 50%, rgba(90,158,255,0.1) 0%, transparent 50%),
+    var(--panel);
+  border: 1px solid var(--border); border-radius: 20px;
+  padding: 4rem 3rem; text-align: center;
+  margin: 4rem auto; max-width: 1080px;
+}
+
+.cta h2 {
+  font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+  font-weight: 700; margin-bottom: 1rem; letter-spacing: -.02em;
+}
+
+.cta p { color: var(--text-2); margin-bottom: 2rem; font-size: 1.05rem; }
+
+footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-top: 2rem; }
+
+.footer-inner {
+  max-width: 1280px; margin: 0 auto;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 1.5rem;
+}
+
+.footer-links { display: flex; gap: 2rem; align-items: center; }
+
+.footer-links a {
+  color: var(--text-2); text-decoration: none; font-size: .9rem;
+}
+
+.footer-links a:hover { color: var(--accent); }
+
+.footer-copy { color: var(--muted); font-size: .85rem; font-family: var(--mono); }
+
+@media (max-width: 768px) {
+  .nav-links { display: none; }
+  .showcase-inner { grid-template-columns: 1fr; }
+  .hero-stats { gap: 2rem; }
+  .cta { padding: 2.5rem 1.5rem; }
 }
 </style>
 </head>
 <body>
 
-<!-- NAV -->
-<nav>
-  <a href="/" class="nav-logo">👁 <span>Witness</span></a>
-  <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#commands">Commands</a>
-    <a href="#pricing">Pricing</a>
-    <a href="#docs">Docs</a>
-  </div>
-  <div style="display:flex;gap:.75rem;align-items:center">
-    <a href="/login" class="btn btn-outline">Login</a>
-    <a href="__INVITE_URL__" class="btn btn-accent" target="_blank">Add to Server</a>
-  </div>
-</nav>
-
-<!-- HERO -->
-<section class="hero">
-  <div class="hero-glow"></div>
-  <div class="hero-badge">⚡ Now with AI Twin Detection</div>
-  <h1>See Everything.<br><em>Miss Nothing.</em></h1>
-  <p class="hero-sub">
-    The all-in-one Discord bot built for serious communities —
-    advanced security, Albion Online integration, and AI-powered moderation.
-  </p>
-  <div class="hero-cta">
-    <a href="__INVITE_URL__" class="btn btn-accent" target="_blank">➕ Add to Server — Free</a>
-    <a href="/login" class="btn btn-discord">🎮 Open Dashboard</a>
-    <a href="#features" class="btn btn-outline">Explore Features</a>
-  </div>
-  <div class="hero-stats">
-    <div class="stat-item">
-      <div class="stat-num" id="stat-servers">—</div>
-      <div class="stat-label">Servers</div>
-    </div>
-    <div class="stat-item">
-      <div class="stat-num" id="stat-members">—</div>
-      <div class="stat-label">Members Protected</div>
-    </div>
-    <div class="stat-item">
-      <div class="stat-num">75</div>
-      <div class="stat-label">Commands</div>
-    </div>
-    <div class="stat-item">
-      <div class="stat-num" id="stat-ping">—</div>
-      <div class="stat-label">Latency</div>
+<header>
+  <div class="nav">
+    <a href="/" class="logo">
+      <div class="logo-mark">W</div>
+      <div class="logo-text">Witness<span>.</span></div>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Возможности</a>
+      <a href="#tech">Под капотом</a>
+      <a href="__SUPPORT_URL__" target="_blank">Support</a>
+      <a href="/dashboard" class="btn btn-ghost">Dashboard</a>
+      <a href="__INVITE_URL__" class="btn btn-primary">+ Добавить</a>
     </div>
   </div>
-  <div class="scroll-indicator">
-    <div class="scroll-line"></div>
-    Scroll
-  </div>
-</section>
+</header>
 
-<!-- FEATURES -->
-<section id="features">
-  <div class="section-label">What makes us different</div>
-  <h2 class="section-title">Built for communities<br>that take security seriously</h2>
-  <p class="section-sub">Every feature is designed around one principle: see everything that happens on your server.</p>
+<main>
 
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="feature-icon icon-blue">🧬</div>
-      <h3>AI Twin Detection</h3>
-      <p>Analyzes writing style across 9 metrics — typos, punctuation, vocabulary, active hours. Auto-alerts when two accounts write identically.</p>
-      <span class="feature-badge badge-security">Security Plan</span>
+  <div class="hero">
+    <div class="hero-tag">SYSTEM ONLINE · v4.2</div>
+    <h1>Discord-модерация на<br><span class="accent">профессиональном уровне</span></h1>
+    <p class="hero-sub">
+      Стилометрия для детекта твинков, апелляционная система с авто-снятием наказаний,
+      прогрессивные наказания и анти-нюк. Всё что нужно команде модераторов в одном боте.
+    </p>
+    <div class="hero-cta">
+      <a href="__INVITE_URL__" class="btn btn-primary btn-lg">Добавить на сервер →</a>
+      <a href="/dashboard" class="btn btn-ghost btn-lg">Открыть Dashboard</a>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-orange">🛡️</div>
-      <h3>Advanced Security Suite</h3>
-      <p>Behavioral fingerprinting, social graph analysis, NLP toxicity detection via Groq AI, EXIF forensics, and cryptographic mod action signatures.</p>
-      <span class="feature-badge badge-security">-q prefix</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-blue">⚔️</div>
-      <h3>Albion Online Integration</h3>
-      <p>The only Discord bot with full Albion support. Stats, kills, deaths, Black Market arbitrage, Craft Calculator, and hourly player watch alerts.</p>
-      <span class="feature-badge badge-free">Free</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-green">🔐</div>
-      <h3>Signed Mod Actions</h3>
-      <p>Every kick, ban, and warn is cryptographically signed with HMAC-SHA256. Verify any action was genuine with <code>-q sig</code>.</p>
-      <span class="feature-badge badge-security">Security Plan</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-gold">📊</div>
-      <h3>17-Type Event Logging</h3>
-      <p>Messages, voice, invites, roles, channels, reactions, threads — everything logged with full before/after context per server.</p>
-      <span class="feature-badge badge-free">Free</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-purple">🤖</div>
-      <h3>AI Commands</h3>
-      <p>Powered by Groq (Llama 3.3 70B) with Gemini 2.0 Flash fallback. Ask anything, summarize chats, roast members, generate images.</p>
-      <span class="feature-badge badge-premium">Premium</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-orange">🚨</div>
-      <h3>Anti-Raid & Anti-Spam</h3>
-      <p>Auto-kick on 8+ joins in 10 seconds. Auto-timeout on spam. Invite tracking with notes shows exactly who brought who in.</p>
-      <span class="feature-badge badge-free">Free</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-red">⏱️</div>
-      <h3>Progressive Punishments</h3>
-      <p>Configure automatic escalation: 2 warns → mute 1h → 3 warns → mute 24h → 4 warns → kick → 5 warns → ban.</p>
-      <span class="feature-badge badge-free">Free</span>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon icon-green">💎</div>
-      <h3>Black Market Calc</h3>
-      <p>Find which Albion items are most profitable to sell on the Black Market right now. Sorted by % profit, updated every 15 minutes.</p>
-      <span class="feature-badge badge-premium">Premium</span>
+    <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-num">80+</div>
+        <div class="stat-label">Команд</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">24/7</div>
+        <div class="stat-label">Uptime</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">∞</div>
+        <div class="stat-label">Серверов</div>
+      </div>
     </div>
   </div>
-</section>
 
-<!-- ALBION SECTION -->
-<section class="albion-section" id="albion">
-  <div class="section-label">Albion Online</div>
-  <h2 class="section-title">The only bot built<br>for Albion communities</h2>
-  <p class="section-sub">Full Albion Online API integration — no other bot comes close.</p>
-
-  <div class="albion-grid">
-    <div class="albion-commands">
-      <div class="albion-cmd"><code>/stats</code><span>Player stats, K/D, fame, guild</span></div>
-      <div class="albion-cmd"><code>/kills</code><span>Recent kills with details</span></div>
-      <div class="albion-cmd"><code>/deaths</code><span>Recent deaths tracker</span></div>
-      <div class="albion-cmd"><code>/compare</code><span>Head-to-head player comparison</span></div>
-      <div class="albion-cmd"><code>/watch</code><span>Hourly alerts on player activity</span></div>
-      <div class="albion-cmd"><code>/blackmarket</code><span>BM profit finder by tier</span></div>
-      <div class="albion-cmd"><code>/craftcalc</code><span>Export craft table to Google Sheets</span></div>
-      <div class="albion-cmd"><code>/flipper</code><span>City price arbitrage finder</span></div>
-      <div class="albion-cmd"><code>/guildwar</code><span>Top guilds by ZvZ activity</span></div>
-      <div class="albion-cmd"><code>/register</code><span>Link Discord to Albion character</span></div>
-    </div>
-    <div>
-      <h3 style="font-size:1.5rem;font-weight:800;margin-bottom:1rem">Register once,<br>track forever</h3>
-      <p style="color:var(--muted);line-height:1.8;margin-bottom:1.5rem">
-        Use <code style="color:var(--accent);font-family:'Space Mono',monospace">/register player:YourNick</code> to link your Discord account to your Albion character. Then just type <code style="color:var(--accent);font-family:'Space Mono',monospace">/stats</code> — no arguments needed.
-      </p>
-      <p style="color:var(--muted);line-height:1.8">
-        Set up <code style="color:var(--accent);font-family:'Space Mono',monospace">/watch</code> on enemy guild members and get automatic alerts every hour when they get kills or die.
-      </p>
-    </div>
-  </div>
-</section>
-
-<!-- COMMANDS -->
-<section class="commands-section" id="commands">
-  <div class="section-label">Full command list</div>
-  <h2 class="section-title">75 commands.<br>All documented.</h2>
-
-  <div class="commands-filter">
-    <button class="filter-btn active" onclick="filterCmds('all')">All</button>
-    <button class="filter-btn" onclick="filterCmds('free')">🆓 Free</button>
-    <button class="filter-btn" onclick="filterCmds('premium')">⭐ Premium</button>
-    <button class="filter-btn" onclick="filterCmds('security')">🛡️ Security</button>
-    <button class="filter-btn" onclick="filterCmds('albion')">⚔️ Albion</button>
-    <button class="filter-btn" onclick="filterCmds('games')">🎮 Games</button>
-    <button class="filter-btn" onclick="filterCmds('moderation')">🔨 Moderation</button>
-    <button class="filter-btn" onclick="filterCmds('ai')">🤖 AI</button>
-  </div>
-
-  <div class="commands-grid" id="commandsGrid"></div>
-</section>
-
-<!-- PRICING -->
-<section id="pricing">
-  <div class="section-label">Simple pricing</div>
-  <h2 class="section-title">Start free.<br>Upgrade when you need it.</h2>
-
-  <div class="pricing-grid">
-    <div class="price-card">
-      <div class="price-name">Free Forever</div>
-      <div class="price-amount">€0</div>
-      <div class="price-desc">Everything you need to get started</div>
-      <ul class="price-features">
-        <li>Albion stats, kills, deaths, guild</li>
-        <li>All game commands (Val, CS2, LoL, OSRS, MC)</li>
-        <li>Basic Security — 17 event types</li>
-        <li>Anti-raid & anti-spam</li>
-        <li>Invite tracking with notes</li>
-        <li>Warn system with progressive punishments</li>
-        <li>Reaction roles</li>
-        <li>Poll, LFG, Birthday, Tickets</li>
-        <li class="no">Black Market & Craft Calc</li>
-        <li class="no">AI commands</li>
-        <li class="no">Advanced Security</li>
-      </ul>
-      <a href="__INVITE_URL__" class="btn btn-outline price-cta" target="_blank">Add for Free</a>
+  <section id="features">
+    <div class="section-head">
+      <div class="section-tag">// CORE FEATURES</div>
+      <h2 class="section-title">Всё что нужно для модерации</h2>
+      <p class="section-desc">Восемь модулей которые работают вместе.</p>
     </div>
 
-    <div class="price-card featured">
-      <div class="price-name">Premium</div>
-      <div class="price-amount">€2<span>.99/mo</span></div>
-      <div class="price-desc">For serious servers that want everything</div>
-      <ul class="price-features">
-        <li>Everything in Free</li>
-        <li>Black Market profit finder</li>
-        <li>Craft Calculator + Google Sheets export</li>
-        <li>City price flipper</li>
-        <li>AI — ask, summarize, roast, imagine</li>
-        <li>Giveaway system</li>
-        <li>Starboard</li>
-        <li>Server statistics</li>
-        <li>Albion player watch alerts</li>
-        <li>Albion Expert AI</li>
-        <li class="no">Advanced Security -q commands</li>
-      </ul>
-      <a href="/dashboard" class="btn btn-accent price-cta">Get Premium</a>
-    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🧬</div>
+        <h3>Стилометрия твинков</h3>
+        <p>Детект альт-аккаунтов по стилю письма: опечатки, биграммы, длина предложений, паттерны. Сравнение с базой забаненных.</p>
+      </div>
 
-    <div class="price-card" style="border-color:var(--security)">
-      <div class="price-name" style="color:var(--security)">Security</div>
-      <div class="price-amount">€4<span>.99/mo</span></div>
-      <div class="price-desc">Maximum protection for your server</div>
-      <ul class="price-features">
-        <li>Everything in Premium</li>
-        <li>-q scan — full threat intelligence</li>
-        <li>-q fp — behavioral fingerprinting</li>
-        <li>-q graph — social connection graph</li>
-        <li>-q nlp — AI toxicity analysis</li>
-        <li>-q forensics — EXIF & duplicates</li>
-        <li>-q sig — cryptographic signatures</li>
-        <li>AI Twin/Alt detection</li>
-        <li>Global threat database</li>
-      </ul>
-      <a href="/dashboard" class="btn price-cta" style="background:var(--security);color:#fff">Get Security</a>
+      <div class="feature">
+        <div class="feature-icon">⚖️</div>
+        <h3>Система апелляций</h3>
+        <p>Участник нажимает кнопку в DM, заполняет форму, модератор одобряет. Автоматическое снятие наказания при принятии.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">🎯</div>
+        <h3>Прогрессивные наказания</h3>
+        <p>3-варн система с настраиваемой длительностью. На 3-м варне выбор: авто-бан, мут или заявка на бан с одобрением.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">🛡️</div>
+        <h3>Анти-нюк защита</h3>
+        <p>Лимиты на массовые действия модераторов. При превышении — алерт владельцу и блокировка действия.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">🔗</div>
+        <h3>Invite tracking</h3>
+        <p>Кто кого пригласил, со счётчиком переходов и заметками. Авто-очистка инвайтов с 0 переходов раз в 2 дня.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">📊</div>
+        <h3>Mod log + дашборд</h3>
+        <p>Полная история действий модераторов в БД. Веб-дашборд с фильтрами, поиском и редактированием настроек.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">🤖</div>
+        <h3>AI-объяснение твинков</h3>
+        <p>Когда бот находит похожих участников, AI объясняет модератору человеческим языком почему совпадение.</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">🔒</div>
+        <h3>Карантин новых</h3>
+        <p>Авто-роль для аккаунтов младше N дней. Защита от рейдов и спам-аккаунтов на старте.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="showcase">
+    <div class="showcase-inner">
+      <div>
+        <div class="section-tag">// COMMAND CENTER</div>
+        <h2 class="section-title">Всё через дашборд</h2>
+        <p class="section-desc">
+          Не нужно помнить команды. Авторизуйся через Discord, получи полный контроль в браузере.
+        </p>
+        <br>
+        <a href="/dashboard" class="btn btn-primary">Открыть Dashboard →</a>
+      </div>
+
+      <div class="console">
+        <div class="console-bar">
+          <div class="console-dot"></div>
+          <div class="console-dot"></div>
+          <div class="console-dot"></div>
+          <div class="console-title">witness@bot ~ /moderate</div>
+        </div>
+        <div class="console-body">
+          <span class="line"><span class="dim">$</span> <span class="cmd">/warn</span> <span class="muted-text">@user "спам в общем"</span></span>
+          <span class="line"><span class="success">✓ Варн выдан (1/3)</span></span>
+          <span class="line"><span class="success">✓ Таймаут 7 дней автоматически</span></span>
+          <span class="line"><span class="success">✓ DM с кнопкой апелляции отправлен</span></span>
+          <span class="line">&nbsp;</span>
+          <span class="line"><span class="dim">$</span> <span class="cmd">/twincheck</span> <span class="muted-text">@user1 @user2</span></span>
+          <span class="line"><span class="warn">⚠ Сходство стиля: 87%</span></span>
+          <span class="line"><span class="muted-text">  Опечатки: кароч, потамушта, щас</span></span>
+          <span class="line"><span class="muted-text">  Биграммы: 91% совпадение</span></span>
+          <span class="line">&nbsp;</span>
+          <span class="line"><span class="dim">$</span> <span class="cmd">/appeal</span> <span class="muted-text">accept 42</span></span>
+          <span class="line"><span class="success">✓ Апелляция #42 принята</span></span>
+          <span class="line"><span class="success">✓ Участник разбанен автоматически</span></span>
+        </div>
+      </div>
     </div>
   </div>
-</section>
 
-<!-- HOW IT WORKS -->
-<section style="background:var(--surface);border-top:1px solid var(--border)">
-  <div class="section-label">Get started in 2 minutes</div>
-  <h2 class="section-title">Setup is dead simple</h2>
+  <section id="tech">
+    <div class="section-head">
+      <div class="section-tag">// UNDER THE HOOD</div>
+      <h2 class="section-title">Под капотом</h2>
+      <p class="section-desc">Современный стек, акцент на надёжности и скорости.</p>
+    </div>
 
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">01</div>
-      <h3>Add to Server</h3>
-      <p>Click "Add to Server", authorize with Discord. The bot is live instantly — no complex setup required.</p>
+    <div class="tech">
+      <div class="tech-item">
+        <div class="tech-item-icon">🐍</div>
+        <div class="tech-item-text">
+          <strong>Python + discord.py</strong>
+          <small>v2.x, slash commands</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">⚡</div>
+        <div class="tech-item-text">
+          <strong>aiohttp + aiosqlite</strong>
+          <small>Полностью асинхронно</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">🗜️</div>
+        <div class="tech-item-text">
+          <strong>zlib compression</strong>
+          <small>73% экономия на стилометрии</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">🧠</div>
+        <div class="tech-item-text">
+          <strong>Groq + Gemini</strong>
+          <small>Fallback цепочка AI</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">🔐</div>
+        <div class="tech-item-text">
+          <strong>OAuth2 + HMAC</strong>
+          <small>30-дневная сессия с refresh</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">🚀</div>
+        <div class="tech-item-text">
+          <strong>Railway hosting</strong>
+          <small>Auto-deploy, 99.9% uptime</small>
+        </div>
+      </div>
     </div>
-    <div class="step">
-      <div class="step-num">02</div>
-      <h3>Run /setup</h3>
-      <p>One command configures your log channel, security settings, and basic moderation. Takes 30 seconds.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">03</div>
-      <h3>Open Dashboard</h3>
-      <p>Login with Discord at witnessbot.gg/dashboard to fine-tune every setting without typing a single command.</p>
-    </div>
-    <div class="step">
-      <div class="step-num">04</div>
-      <h3>You're protected</h3>
-      <p>Witness starts logging, watching, and protecting immediately. Every event tracked, every action signed.</p>
+  </section>
+
+  <div class="cta">
+    <h2>Готов улучшить модерацию?</h2>
+    <p>Добавь Witness на свой сервер за 30 секунд</p>
+    <div class="hero-cta">
+      <a href="__INVITE_URL__" class="btn btn-primary btn-lg">+ Добавить на сервер</a>
+      <a href="__SUPPORT_URL__" class="btn btn-ghost btn-lg" target="_blank">Discord Support</a>
     </div>
   </div>
-</section>
 
-<!-- FOOTER -->
+</main>
+
 <footer>
-  <div class="footer-logo">👁 Witness</div>
-  <div class="footer-links">
-    <a href="#features">Features</a>
-    <a href="#commands">Commands</a>
-    <a href="#pricing">Pricing</a>
-    <a href="__SUPPORT_URL__" target="_blank">Support</a>
-    <a href="__INVITE_URL__" target="_blank">Add Bot</a>
+  <div class="footer-inner">
+    <a href="/" class="logo">
+      <div class="logo-mark">W</div>
+      <div class="logo-text">Witness<span>.</span></div>
+    </a>
+    <div class="footer-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="__SUPPORT_URL__" target="_blank">Support</a>
+      <a href="__INVITE_URL__">Invite</a>
+    </div>
+    <div class="footer-copy">© 2025 Witness · MIT License</div>
   </div>
-  <div class="footer-copy">© 2026 Witness Bot. Not affiliated with Discord Inc.</div>
 </footer>
 
-<script>
-// Fetch live stats from bot API
-fetch('/api/stats').then(r=>r.json()).then(d=>{
-  if(d.guilds)  document.getElementById('stat-servers').textContent = d.guilds.toLocaleString();
-  if(d.members) document.getElementById('stat-members').textContent = (d.members/1000).toFixed(1)+'K';
-  if(d.latency) document.getElementById('stat-ping').textContent = d.latency+'ms';
-}).catch(()=>{});
-
-// Commands data
-const COMMANDS = [
-  {name:'/stats',desc:'Albion player stats, K/D, fame',tier:'free',cat:'albion'},
-  {name:'/kills',desc:'Recent kills with victim details',tier:'free',cat:'albion'},
-  {name:'/deaths',desc:'Recent deaths tracker',tier:'free',cat:'albion'},
-  {name:'/guild',desc:'Guild info and top members',tier:'free',cat:'albion'},
-  {name:'/battle',desc:'Recent ZvZ battles',tier:'free',cat:'albion'},
-  {name:'/compare',desc:'Head-to-head player comparison',tier:'free',cat:'albion'},
-  {name:'/history',desc:'7-day activity summary',tier:'free',cat:'albion'},
-  {name:'/register',desc:'Link Discord to Albion character',tier:'free',cat:'albion'},
-  {name:'/watch',desc:'Hourly player activity alerts',tier:'premium',cat:'albion'},
-  {name:'/blackmarket',desc:'BM profit finder by tier',tier:'premium',cat:'albion'},
-  {name:'/craftcalc',desc:'Craft table → Google Sheets',tier:'premium',cat:'albion'},
-  {name:'/flipper',desc:'City price arbitrage finder',tier:'premium',cat:'albion'},
-  {name:'/guildwar',desc:'Top guilds by ZvZ activity',tier:'premium',cat:'albion'},
-  {name:'/party',desc:'Group composition analyzer',tier:'premium',cat:'albion'},
-  {name:'/askalbion',desc:'Albion Expert AI assistant',tier:'premium',cat:'albion'},
-  {name:'/val',desc:'Valorant rank & stats',tier:'free',cat:'games'},
-  {name:'/cs2',desc:'CS2 K/D, headshots, wins',tier:'free',cat:'games'},
-  {name:'/lol',desc:'League of Legends rank',tier:'free',cat:'games'},
-  {name:'/lostark',desc:'Lost Ark character info',tier:'free',cat:'games'},
-  {name:'/rs',desc:'OSRS skill levels',tier:'free',cat:'games'},
-  {name:'/mc',desc:'Minecraft server status',tier:'free',cat:'games'},
-  {name:'/warn',desc:'Warn a member with DM notification',tier:'free',cat:'moderation'},
-  {name:'/warnings',desc:'View warning history',tier:'free',cat:'moderation'},
-  {name:'/clearwarn',desc:'Remove a warning',tier:'free',cat:'moderation'},
-  {name:'/unmute',desc:'Remove timeout from member',tier:'free',cat:'moderation'},
-  {name:'/purge',desc:'Delete multiple messages',tier:'free',cat:'moderation'},
-  {name:'/tempban',desc:'Temporary ban with auto-unban',tier:'free',cat:'moderation'},
-  {name:'/modlog',desc:'Full moderation history per member',tier:'free',cat:'moderation'},
-  {name:'/lockdown',desc:'Lock/unlock channels',tier:'free',cat:'moderation'},
-  {name:'/slowmode',desc:'Set channel slow mode',tier:'free',cat:'moderation'},
-  {name:'/quarantine',desc:'Auto-role for new accounts',tier:'free',cat:'moderation'},
-  {name:'/punishments',desc:'Configure progressive punishments',tier:'free',cat:'moderation'},
-  {name:'/reactionrole',desc:'Reaction role setup',tier:'free',cat:'moderation'},
-  {name:'/invcheck',desc:'Invite code history',tier:'free',cat:'moderation'},
-  {name:'/invnote',desc:'Add note to invite code',tier:'free',cat:'moderation'},
-  {name:'/invnotes',desc:'List all invite notes',tier:'free',cat:'moderation'},
-  {name:'/invstats',desc:'Invite leaderboard',tier:'free',cat:'moderation'},
-  {name:'/report',desc:'Report a message',tier:'free',cat:'moderation'},
-  {name:'/ai',desc:'Ask AI anything (Groq/Gemini)',tier:'premium',cat:'ai'},
-  {name:'/summarize',desc:'AI summary of recent chat',tier:'premium',cat:'ai'},
-  {name:'/roast',desc:'AI roast a member',tier:'premium',cat:'ai'},
-  {name:'/imagine',desc:'AI image generation',tier:'premium',cat:'ai'},
-  {name:'/askalbion',desc:'Albion Online AI expert',tier:'premium',cat:'ai'},
-  {name:'/twincheck',desc:'Compare writing styles of two members',tier:'security',cat:'security'},
-  {name:'/twinlinks',desc:'View detected alt accounts',tier:'security',cat:'security'},
-  {name:'/styleprofile',desc:'View stylometry profile',tier:'security',cat:'security'},
-  {name:'/sechelp',desc:'Advanced Security -q help',tier:'security',cat:'security'},
-  {name:'/ping',desc:'Bot latency check',tier:'free',cat:'free'},
-  {name:'/userinfo',desc:'Detailed member info',tier:'free',cat:'free'},
-  {name:'/serverinfo',desc:'Server statistics',tier:'free',cat:'free'},
-  {name:'/rank',desc:'Your XP rank on this server',tier:'free',cat:'free'},
-  {name:'/leaderboard',desc:'Top active members',tier:'free',cat:'free'},
-  {name:'/coins',desc:'Your coin balance',tier:'free',cat:'free'},
-  {name:'/remind',desc:'Set a reminder with repeat',tier:'free',cat:'free'},
-  {name:'/poll',desc:'Create poll with auto-close',tier:'free',cat:'free'},
-  {name:'/lfg',desc:'Looking for group with join button',tier:'free',cat:'free'},
-  {name:'/weather',desc:'Current weather anywhere',tier:'free',cat:'free'},
-  {name:'/translate',desc:'Translate text to any language',tier:'free',cat:'free'},
-  {name:'/birthday',desc:'Birthday announcement system',tier:'free',cat:'free'},
-  {name:'/ticket',desc:'Support ticket system',tier:'free',cat:'free'},
-  {name:'/suggestion',desc:'Suggestion board',tier:'free',cat:'free'},
-  {name:'/giveaway',desc:'Run a giveaway',tier:'premium',cat:'free'},
-  {name:'/starboard',desc:'Starboard channel',tier:'premium',cat:'free'},
-  {name:'/invite',desc:'Get bot invite link',tier:'free',cat:'free'},
-  {name:'/vote',desc:'Vote for Witness on top.gg',tier:'free',cat:'free'},
-  {name:'/botinfo',desc:'Bot statistics and info',tier:'free',cat:'free'},
-];
-
-const tierColors = {
-  free:'#57F287',premium:'#00E5FF',security:'#FF6B35'
-};
-const tierLabels = {
-  free:'FREE',premium:'⭐ PREMIUM',security:'🛡️ SECURITY'
-};
-
-function renderCmds(filter='all'){
-  const grid = document.getElementById('commandsGrid');
-  const filtered = filter==='all' ? COMMANDS :
-    COMMANDS.filter(c=>c.tier===filter||c.cat===filter);
-  grid.innerHTML = filtered.map(c=>`
-    <div class="cmd-card">
-      <div class="cmd-name">${c.name}</div>
-      <div class="cmd-desc">${c.desc}</div>
-      <span class="cmd-tier" style="background:${tierColors[c.tier]}18;color:${tierColors[c.tier]}">${tierLabels[c.tier]}</span>
-    </div>
-  `).join('');
-}
-
-function filterCmds(f){
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-  event.target.classList.add('active');
-  renderCmds(f);
-}
-
-renderCmds();
-</script>
 </body>
 </html>
