@@ -1614,6 +1614,11 @@ async def on_ready():
     except Exception as ex:
         print(f"❌ Ошибка синхронизации: {ex}")
 
+    # ── Persistent views: восстанавливаем кнопки после рестарта ──
+    if not hasattr(bot, "_dynamic_items_added"):
+        bot._dynamic_items_added = True
+        bot.add_dynamic_items(AppealButton, BanApproveButton, BanRejectButton)
+
     # ── Запуск фоновых задач ─────────────────────────────────
     if not hasattr(bot, "_tasks_started"):
         bot._tasks_started = True
@@ -2465,23 +2470,19 @@ async def create_ban_request(guild: discord.Guild, member: discord.Member,
 
     return request_id
 
-class BanRequestView(discord.ui.View):
-    """Кнопки для рассмотрения заявки на бан"""
-    def __init__(self, request_id: int, user_id: int, guild_id: int):
-        super().__init__(timeout=None)
-        self.request_id = request_id
-        self.user_id    = user_id
-        self.guild_id   = guild_id
+class _BanRequestActions:
+    """Общая логика одобрения/отклонения заявки на бан.
+    Вынесена отдельно чтобы её использовали и DynamicItem-кнопки."""
 
-    @discord.ui.button(label="✅ Одобрить бан", style=discord.ButtonStyle.danger)
-    async def approve_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @staticmethod
+    async def approve(interaction: discord.Interaction,
+                      request_id: int, user_id: int, guild_id: int):
         if not interaction.user.guild_permissions.ban_members:
             return await interaction.response.send_message("❌ Нужно право Ban Members.", ephemeral=True)
         await interaction.response.defer()
-        # Проверяем что заявка ещё pending
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT status, reason FROM ban_requests WHERE id=?", (self.request_id,)
+                "SELECT status, reason FROM ban_requests WHERE id=?", (request_id,)
             ) as c:
                 row = await c.fetchone()
         if not row or row[0] != "pending":
@@ -2489,8 +2490,8 @@ class BanRequestView(discord.ui.View):
 
         reason  = row[1]
         guild   = interaction.guild
-        member  = guild.get_member(self.user_id)
-        ps      = await get_punishment_settings(self.guild_id)
+        member  = guild.get_member(user_id)
+        ps      = await get_punishment_settings(guild_id)
         ban_days = ps.get("ban3_days", 30)
         unban_at = (datetime.datetime.utcnow() + timedelta(days=ban_days)).isoformat()
 
@@ -2502,17 +2503,16 @@ class BanRequestView(discord.ui.View):
                                           f"Бан на {ban_days} дней · {reason}")
                 except Exception:
                     pass
-            user = member or await bot.fetch_user(self.user_id)
-            await guild.ban(user, reason=f"[Заявка #{self.request_id}] {reason}")
+            user = member or await bot.fetch_user(user_id)
+            await guild.ban(user, reason=f"[Заявка #{request_id}] {reason}")
             ban_ok = True
-            # Записываем как tempban
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute("""
                     INSERT INTO temp_bans (guild_id, user_id, mod_id, reason, unban_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(guild_id, user_id) DO UPDATE SET
                         unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
-                """, (self.guild_id, self.user_id, interaction.user.id, reason, unban_at))
+                """, (guild_id, user_id, interaction.user.id, reason, unban_at))
                 await db.commit()
         except discord.Forbidden:
             pass
@@ -2522,35 +2522,33 @@ class BanRequestView(discord.ui.View):
             await db.execute("""
                 UPDATE ban_requests SET status='approved', reviewer_id=?, reviewed_at=?
                 WHERE id=?
-            """, (interaction.user.id, now, self.request_id))
+            """, (interaction.user.id, now, request_id))
             await db.commit()
 
-        await add_modlog(self.guild_id, self.user_id, interaction.user.id,
+        await add_modlog(guild_id, user_id, interaction.user.id,
                          "AUTO_TEMPBAN", reason, f"{ban_days}d")
 
-        # Обновляем сообщение
-        e = interaction.message.embeds[0] if interaction.message.embeds else build_embed(C.SUCCESS)
-        e.color = discord.Color.green()
         new_e = build_embed(C.SUCCESS)
-        new_e.set_author(name=f"✅ Бан одобрен · #{self.request_id}")
+        new_e.set_author(name=f"✅ Бан одобрен · #{request_id}")
         new_e.add_field(name="Одобрил", value=interaction.user.mention, inline=True)
         new_e.add_field(name="Бан",     value=f"{ban_days} дней {'✅' if ban_ok else '⚠️ нет прав'}", inline=True)
-        for item in self.children:
-            item.disabled = True
-        await interaction.message.edit(embed=new_e, view=self)
+        try:
+            await interaction.message.edit(embed=new_e, view=None)
+        except Exception:
+            pass
         await interaction.followup.send(
             f"✅ Бан на **{ban_days} дней** {'выдан' if ban_ok else 'НЕ выдан (нет прав)'}.",
             ephemeral=True
         )
 
-    @discord.ui.button(label="❌ Отклонить", style=discord.ButtonStyle.secondary)
-    async def reject_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @staticmethod
+    async def reject(interaction: discord.Interaction,
+                     request_id: int, user_id: int, guild_id: int):
         if not interaction.user.guild_permissions.ban_members:
             return await interaction.response.send_message("❌ Нужно право Ban Members.", ephemeral=True)
-
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT status FROM ban_requests WHERE id=?", (self.request_id,)
+                "SELECT status FROM ban_requests WHERE id=?", (request_id,)
             ) as c:
                 row = await c.fetchone()
         if not row or row[0] != "pending":
@@ -2561,20 +2559,64 @@ class BanRequestView(discord.ui.View):
             await db.execute("""
                 UPDATE ban_requests SET status='rejected', reviewer_id=?, reviewed_at=?
                 WHERE id=?
-            """, (interaction.user.id, now, self.request_id))
+            """, (interaction.user.id, now, request_id))
             await db.commit()
 
         new_e = build_embed(C.MUTED)
-        new_e.set_author(name=f"❌ Бан отклонён · #{self.request_id}")
+        new_e.set_author(name=f"❌ Бан отклонён · #{request_id}")
         new_e.add_field(name="Отклонил", value=interaction.user.mention, inline=True)
-        for item in self.children:
-            item.disabled = True
-        await interaction.message.edit(embed=new_e, view=self)
+        try:
+            await interaction.message.edit(embed=new_e, view=None)
+        except Exception:
+            pass
         await interaction.response.send_message("Заявка отклонена.", ephemeral=True)
 
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
+
+class BanApproveButton(discord.ui.DynamicItem[discord.ui.Button],
+                        template=r"banreq_ok:(?P<rid>\d+):(?P<uid>\d+):(?P<gid>\d+)"):
+    """Persistent-кнопка одобрения — переживает рестарт бота"""
+    def __init__(self, request_id: int, user_id: int, guild_id: int):
+        self.request_id = request_id
+        self.user_id    = user_id
+        self.guild_id   = guild_id
+        super().__init__(discord.ui.Button(
+            label="✅ Одобрить бан", style=discord.ButtonStyle.danger,
+            custom_id=f"banreq_ok:{request_id}:{user_id}:{guild_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["rid"]), int(match["uid"]), int(match["gid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await _BanRequestActions.approve(interaction, self.request_id, self.user_id, self.guild_id)
+
+
+class BanRejectButton(discord.ui.DynamicItem[discord.ui.Button],
+                       template=r"banreq_no:(?P<rid>\d+):(?P<uid>\d+):(?P<gid>\d+)"):
+    """Persistent-кнопка отклонения — переживает рестарт бота"""
+    def __init__(self, request_id: int, user_id: int, guild_id: int):
+        self.request_id = request_id
+        self.user_id    = user_id
+        self.guild_id   = guild_id
+        super().__init__(discord.ui.Button(
+            label="❌ Отклонить", style=discord.ButtonStyle.secondary,
+            custom_id=f"banreq_no:{request_id}:{user_id}:{guild_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["rid"]), int(match["uid"]), int(match["gid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await _BanRequestActions.reject(interaction, self.request_id, self.user_id, self.guild_id)
+
+
+class BanRequestView(discord.ui.View):
+    """View с persistent-кнопками заявки на бан"""
+    def __init__(self, request_id: int, user_id: int, guild_id: int):
+        super().__init__(timeout=None)
+        self.add_item(BanApproveButton(request_id, user_id, guild_id))
+        self.add_item(BanRejectButton(request_id, user_id, guild_id))
+
 
 class AppealModal(discord.ui.Modal, title="Подать апелляцию"):
     """Discord Modal для ввода апелляции"""
@@ -2656,18 +2698,53 @@ class AppealModal(discord.ui.Modal, title="Подать апелляцию"):
                 pass
 
 
+class AppealButton(discord.ui.DynamicItem[discord.ui.Button],
+                   template=r"appeal:(?P<guild_id>\d+):(?P<action>\w+)"):
+    """
+    Persistent-кнопка апелляции. Данные закодированы в custom_id,
+    поэтому кнопка работает даже после перезапуска бота
+    (обычный View с timeout=None теряет callbacks при рестарте —
+    из-за этого люди получали "ошибка взаимодействия").
+    Причина наказания подтягивается из modlog при клике.
+    """
+    def __init__(self, guild_id: int, action_type: str):
+        self.guild_id    = guild_id
+        self.action_type = action_type
+        super().__init__(discord.ui.Button(
+            label="Подать апелляцию",
+            style=discord.ButtonStyle.primary,
+            emoji="📩",
+            custom_id=f"appeal:{guild_id}:{action_type}",
+        ))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["guild_id"]), match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        # Причину берём из последней записи modlog
+        reason = ""
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("""
+                    SELECT reason FROM modlog
+                    WHERE guild_id=? AND user_id=?
+                    ORDER BY id DESC LIMIT 1
+                """, (self.guild_id, interaction.user.id)) as c:
+                    row = await c.fetchone()
+            if row and row[0]:
+                reason = row[0]
+        except Exception:
+            pass
+        modal = AppealModal(self.guild_id, self.action_type, reason)
+        await interaction.response.send_modal(modal)
+
+
 class AppealButtonView(discord.ui.View):
-    """View с кнопкой 'Подать апелляцию' для DM"""
+    """View-обёртка для persistent кнопки апелляции"""
     def __init__(self, guild_id: int, action_type: str, original_reason: str = ""):
         super().__init__(timeout=None)
-        self.guild_id        = guild_id
-        self.action_type     = action_type
-        self.original_reason = original_reason
-
-    @discord.ui.button(label="Подать апелляцию", style=discord.ButtonStyle.primary, emoji="📩")
-    async def appeal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = AppealModal(self.guild_id, self.action_type, self.original_reason)
-        await interaction.response.send_modal(modal)
+        self.add_item(AppealButton(guild_id, action_type))
 
 
 async def send_appeal_dm(member, guild, action_type: str, reason: str = ""):
