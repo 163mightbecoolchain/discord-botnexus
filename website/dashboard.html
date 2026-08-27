@@ -173,6 +173,10 @@ body {
   overflow-x: hidden;
 }
 
+/* Страницы настроек — плотный центр вместо растягивания */
+.page-inner { max-width: 960px; }
+.page-inner-wide { max-width: 1200px; }
+
 .page-head {
   display: flex; justify-content: space-between; align-items: flex-end;
   margin-bottom: 2rem; padding-bottom: 1.25rem;
@@ -291,7 +295,7 @@ label {
 .toggle-desc { font-size: .77rem; color: var(--muted); margin-top: .15rem; }
 
 .toggle {
-  width: 38px; height: 22px; background: var(--border-2);
+  width: 38px; height: 22px; background: #4a5665;
   border-radius: 999px; position: relative; cursor: pointer;
   transition: background .15s; flex-shrink: 0;
 }
@@ -383,6 +387,20 @@ label {
 }
 
 .status-pill.pending { background: rgba(255,170,0,0.12); color: var(--warning); }
+.appeal-card { border-left: 3px solid var(--border-2); transition: border-color .15s, transform .1s; }
+.appeal-card:hover { transform: translateX(2px); }
+.appeal-card.pending  { border-left-color: var(--warning); }
+.appeal-card.accepted { border-left-color: var(--accent); }
+.appeal-card.rejected { border-left-color: var(--danger); }
+.appeals-stats {
+  display: flex; gap: 1rem; margin-bottom: 1.25rem;
+  font-family: var(--mono); font-size: .82rem;
+}
+.appeals-stats span {
+  background: var(--panel); border: 1px solid var(--border);
+  padding: .4rem .85rem; border-radius: 8px; color: var(--text-2);
+}
+.appeals-stats b { color: var(--text); }
 .status-pill.accepted, .status-pill.approved { background: rgba(0,217,163,0.12); color: var(--accent); }
 .status-pill.rejected { background: rgba(255,84,112,0.12); color: var(--danger); }
 
@@ -640,7 +658,7 @@ label {
     </div>
 
     <!-- GENERAL -->
-    <div id="content-general" class="page">
+    <div id="content-general" class="page"><div class="page-inner">
       <div class="page-head">
         <div>
           <div class="page-title">Общие настройки</div>
@@ -683,10 +701,23 @@ label {
           </div>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Текущая конфигурация</div>
+            <div class="card-desc">Сводка активных настроек сервера</div>
+          </div>
+        </div>
+        <div class="card-body" id="configSummary">
+          <div class="empty" style="padding:1.5rem;"><div class="empty-sub">Загрузка...</div></div>
+        </div>
+      </div>
+    </div>
     </div>
 
     <!-- LOGGING -->
-    <div id="content-logging" class="page">
+    <div id="content-logging" class="page"><div class="page-inner">
       <div class="page-head">
         <div>
           <div class="page-title">Логирование</div>
@@ -728,9 +759,10 @@ label {
         </div>
       </div>
     </div>
+    </div>
 
     <!-- MODERATION -->
-    <div id="content-moderation" class="page">
+    <div id="content-moderation" class="page"><div class="page-inner">
       <div class="page-head">
         <div>
           <div class="page-title">Модерация</div>
@@ -810,6 +842,7 @@ label {
         </div>
       </div>
     </div>
+    </div>
 
     <!-- MODLOG -->
     <div id="content-modlog" class="page">
@@ -837,7 +870,7 @@ label {
     </div>
 
     <!-- APPEALS -->
-    <div id="content-appeals" class="page">
+    <div id="content-appeals" class="page"><div class="page-inner-wide">
       <div class="page-head">
         <div>
           <div class="page-title">Апелляции</div>
@@ -854,9 +887,15 @@ label {
         </div>
       </div>
 
+      <div class="appeals-stats" id="appealsStats" style="display:none;">
+        <span>⏳ Ожидают: <b id="stPending">0</b></span>
+        <span>✅ Приняты: <b id="stAccepted">0</b></span>
+        <span>❌ Отклонены: <b id="stRejected">0</b></span>
+      </div>
       <div id="appealsList">
         <div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Загрузка...</div></div>
       </div>
+    </div>
     </div>
 
     <!-- INVITES -->
@@ -1128,7 +1167,7 @@ async function showPage(name) {
 
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
-  if (name === 'appeals') await loadAppeals();
+  if (name === 'appeals') { await loadAppeals(); }
   if (name === 'invites') await loadInvites('');
   if (name === 'twins') await loadTwins();
 }
@@ -1201,9 +1240,33 @@ async function loadSettings() {
     setSelect('mod-qrole', s.quarantine_role_id);
     setVal('mod-qage', s.quarantine_min_age ?? 7);
     setVal('mod-qhours', s.quarantine_hours ?? 24);
+
+    renderConfigSummary(s);
   } catch(e) {
     console.error('Settings load error:', e);
   }
+}
+
+function renderConfigSummary(s) {
+  const el = document.getElementById('configSummary');
+  if (!el) return;
+  const chName = id => {
+    const c = _channels.find(x => String(x.id) === String(id));
+    return c ? '#' + c.name : '—';
+  };
+  const w3 = {ban: '🔨 Авто-бан ' + (s.ban3_days ?? 30) + ' дн.',
+              mute: '🔇 Мут', request: '⚖️ Заявка на бан'}[s.warn3_type ?? 'ban'];
+  const rows = [
+    ['Лог-канал',        chName(s.log_channel)],
+    ['1-й / 2-й варн',   '🔇 ' + (s.mute1_days ?? 7) + ' дн. / ' + (s.mute2_days ?? 7) + ' дн.'],
+    ['3-й варн',         w3],
+    ['Карантин',         s.quarantine_enabled ? '✅ вкл · ' + (s.quarantine_min_age ?? 7) + ' дн. мин. возраст' : '⬚ выкл'],
+    ['Тикеты',           s.tickets_enabled ? '✅ вкл' : '⬚ выкл'],
+    ['Язык',             {ru:'Русский', en:'English', de:'Deutsch'}[s.lang] || s.lang || 'Русский'],
+  ];
+  el.innerHTML = '<table class="table">' + rows.map(([k,v]) =>
+    `<tr><td style="color:var(--muted); width:40%;">${k}</td><td>${v}</td></tr>`
+  ).join('') + '</table>';
 }
 
 function setVal(id, v) {
@@ -1360,6 +1423,34 @@ async function loadModlog() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let _appealsCache = [];
 
+async function refreshAppealsBadge() {
+  // Обновляет красный бейдж в сайдбаре (и статистику если открыта страница)
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals`);
+    const all = r.ok ? await r.json() : [];
+    const pending  = all.filter(a => a.status === 'pending').length;
+    const accepted = all.filter(a => a.status === 'accepted').length;
+    const rejected = all.filter(a => a.status === 'rejected').length;
+
+    const badge = document.getElementById('appealsBadge');
+    if (pending > 0) {
+      badge.textContent = pending;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+
+    const stats = document.getElementById('appealsStats');
+    if (stats) {
+      stats.style.display = 'flex';
+      document.getElementById('stPending').textContent  = pending;
+      document.getElementById('stAccepted').textContent = accepted;
+      document.getElementById('stRejected').textContent = rejected;
+    }
+  } catch(e) {}
+}
+
 async function loadAppeals() {
   if (!currentGuild) return;
   const status = document.getElementById('appealsFilter').value;
@@ -1368,13 +1459,14 @@ async function loadAppeals() {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals${qs}`);
     const rows = r.ok ? await r.json() : [];
     _appealsCache = rows;
+    refreshAppealsBadge();
     const list = document.getElementById('appealsList');
     if (!rows.length) {
       list.innerHTML = '<div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Нет апелляций</div><div class="empty-sub">с этим статусом</div></div>';
       return;
     }
     list.innerHTML = rows.map(a => `
-      <div class="card" style="cursor: pointer;" onclick="openAppealDetails(${a.id})">
+      <div class="card appeal-card ${a.status}" style="cursor: pointer;" onclick="openAppealDetails(${a.id})">
         <div class="card-body" style="display: flex; align-items: center; gap: 1rem;">
           <span class="status-pill ${a.status}">${a.status}</span>
           <div style="flex: 1;">
@@ -1466,7 +1558,7 @@ async function reviewAppeal(action) {
     if (r.ok) {
       showToast(action === 'accept' ? '✓ Апелляция принята' : '✗ Апелляция отклонена', 'success');
       closeAppealModal();
-      loadAppeals();
+      loadAppeals();  // перерисует список и обновит бейдж слева
     } else {
       const err = await r.json().catch(() => ({}));
       showToast('Ошибка: ' + (err.error || r.status), 'error');
