@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Witness · Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
@@ -143,6 +146,7 @@ body {
 .user-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   background: var(--bg-3); overflow: hidden;
+  display: grid; place-items: center;
 }
 .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
@@ -241,11 +245,6 @@ body {
 .stat-value {
   font-family: var(--mono); font-size: 1.6rem;
   font-weight: 700; line-height: 1;
-}
-
-.stat-change {
-  font-size: .75rem; margin-top: .35rem;
-  color: var(--text-2); font-family: var(--mono);
 }
 
 /* Forms */
@@ -488,15 +487,9 @@ label {
 /* Helpers */
 .hidden { display: none !important; }
 .flex { display: flex; }
-.flex-1 { flex: 1; }
 .gap-1 { gap: .5rem; }
-.gap-2 { gap: 1rem; }
 .text-mono { font-family: var(--mono); }
 .text-muted { color: var(--muted); }
-.mb-1 { margin-bottom: .5rem; }
-.mb-2 { margin-bottom: 1rem; }
-.mb-3 { margin-bottom: 1.5rem; }
-.mt-2 { margin-top: 1rem; }
 </style>
 </head>
 <body>
@@ -715,7 +708,7 @@ label {
             <select class="select" id="log-main">
               <option value="">— выбери канал —</option>
             </select>
-            <div class="input-help">Логи модерации, наказаний, апелляций</div>
+            <div class="input-help">Логи модерации, наказаний, апелляций, заявок на бан</div>
           </div>
 
           <div class="form-row">
@@ -940,9 +933,7 @@ label {
 
 <!-- APPEAL DETAILS MODAL -->
 <div class="modal-bg" id="appealModal" onclick="if(event.target===this)closeAppealModal()">
-  <div class="modal" id="appealModalContent">
-    <!-- filled by JS -->
-  </div>
+  <div class="modal" id="appealModalContent"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -952,8 +943,6 @@ label {
 //  STATE & AUTH
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const API = (function() {
-  const meta = document.querySelector('meta[name="bot-api"]');
-  if (meta && meta.content) return meta.content;
   if (window.location.hostname === 'localhost') return 'http://localhost:8080';
   return '__BOT_API_URL__';
 })();
@@ -1023,7 +1012,6 @@ function showApp() {
 //  INIT
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function init() {
-  // URL token (cross-domain login)
   const urlToken = new URLSearchParams(window.location.search).get('token');
   if (urlToken) {
     setToken(urlToken);
@@ -1034,7 +1022,6 @@ async function init() {
     return showLogin();
   }
 
-  // Verify token
   try {
     const r = await apiFetch('/api/me');
     if (!r.ok) return showLogin();
@@ -1053,7 +1040,6 @@ async function init() {
   showApp();
   await loadGuilds();
 
-  // Восстанавливаем последний выбранный сервер
   const savedGuild = localStorage.getItem('current_guild');
   if (savedGuild) {
     const g = userGuilds.find(x => x.id === savedGuild);
@@ -1180,15 +1166,12 @@ function fillChannelSelects() {
 }
 
 function fillRoleSelects() {
-  const ids = ['mod-qrole'];
-  for (const id of ids) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    const current = el.value;
-    el.innerHTML = '<option value="">— выбери роль —</option>' +
-      _roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
-    if (current) el.value = current;
-  }
+  const el = document.getElementById('mod-qrole');
+  if (!el) return;
+  const current = el.value;
+  el.innerHTML = '<option value="">— выбери роль —</option>' +
+    _roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+  if (current) el.value = current;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1201,23 +1184,19 @@ async function loadSettings() {
     if (!r.ok) return;
     const s = await r.json();
 
-    // General
     setVal('gen-lang', s.lang ?? 'ru');
     setSelect('gen-birthday-ch', s.birthday_channel);
     setToggle('tog-tickets', s.tickets_enabled);
 
-    // Logging
     setSelect('log-main', s.log_channel);
     setSelect('log-suggestion', s.suggestion_channel);
     setSelect('log-starboard', s.starboard_channel);
 
-    // Moderation - punishments
     setVal('mod-mute1', s.mute1_days ?? 7);
     setVal('mod-mute2', s.mute2_days ?? 7);
     setVal('mod-ban3', s.ban3_days ?? 30);
     setVal('mod-warn3type', s.warn3_type ?? 'ban');
 
-    // Moderation - quarantine
     setToggle('tog-quarantine', s.quarantine_enabled);
     setSelect('mod-qrole', s.quarantine_role_id);
     setVal('mod-qage', s.quarantine_min_age ?? 7);
@@ -1282,7 +1261,7 @@ function saveLogging() {
 }
 
 function saveModeration() {
-  const payload = {
+  saveSettings({
     mute1_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute1')) || 7)),
     mute2_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute2')) || 7)),
     ban3_days:  Math.max(1, parseInt(getVal('mod-ban3')) || 30),
@@ -1291,8 +1270,7 @@ function saveModeration() {
     quarantine_role_id: getVal('mod-qrole') || 0,
     quarantine_min_age: parseInt(getVal('mod-qage')) || 7,
     quarantine_hours: parseInt(getVal('mod-qhours')) || 24,
-  };
-  saveSettings(payload);
+  });
 }
 
 function getVal(id) {
@@ -1341,8 +1319,8 @@ async function loadOverview() {
       tbody.innerHTML = modlog.slice(0, 5).map(row => `
         <tr>
           <td><span class="code">${row.action || '?'}</span></td>
-          <td>${row.user_name || row.user_id || '—'}</td>
-          <td>${row.mod_name || row.mod_id || '—'}</td>
+          <td>${escapeHtml(row.user_name || row.user_id || '—')}</td>
+          <td>${escapeHtml(row.mod_name || row.mod_id || '—')}</td>
           <td>${escapeHtml(row.reason || '—').slice(0, 80)}</td>
           <td class="text-mono text-muted">${(row.created_at || '').slice(0, 10)}</td>
         </tr>
@@ -1367,10 +1345,10 @@ async function loadModlog() {
     tbody.innerHTML = rows.map(row => `
       <tr>
         <td><span class="code">${row.action || '?'}</span></td>
-        <td>${row.user_name || row.user_id || '—'}</td>
-        <td>${row.mod_name || '—'}</td>
+        <td>${escapeHtml(row.user_name || row.user_id || '—')}</td>
+        <td>${escapeHtml(row.mod_name || '—')}</td>
         <td>${escapeHtml(row.reason || '—').slice(0, 100)}</td>
-        <td>${row.duration || '—'}</td>
+        <td>${escapeHtml(row.duration || '—')}</td>
         <td class="text-mono text-muted">${(row.created_at || '').slice(0, 16).replace('T', ' ')}</td>
       </tr>
     `).join('');
@@ -1380,6 +1358,8 @@ async function loadModlog() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  APPEALS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _appealsCache = [];
+
 async function loadAppeals() {
   if (!currentGuild) return;
   const status = document.getElementById('appealsFilter').value;
@@ -1387,6 +1367,7 @@ async function loadAppeals() {
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals${qs}`);
     const rows = r.ok ? await r.json() : [];
+    _appealsCache = rows;
     const list = document.getElementById('appealsList');
     if (!rows.length) {
       list.innerHTML = '<div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Нет апелляций</div><div class="empty-sub">с этим статусом</div></div>';
@@ -1413,63 +1394,59 @@ async function loadAppeals() {
 
 let _currentAppealId = null;
 
-async function openAppealDetails(id) {
+function openAppealDetails(id) {
   _currentAppealId = id;
-  try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals`);
-    const rows = r.ok ? await r.json() : [];
-    const a = rows.find(x => x.id === id);
-    if (!a) return;
+  const a = _appealsCache.find(x => x.id === id);
+  if (!a) return;
 
-    const isPending = a.status === 'pending';
-    document.getElementById('appealModalContent').innerHTML = `
-      <div class="modal-title">Апелляция #${a.id}</div>
-      <div style="margin-bottom: 1rem;">
-        <span class="status-pill ${a.status}">${a.status}</span>
-      </div>
+  const isPending = a.status === 'pending';
+  document.getElementById('appealModalContent').innerHTML = `
+    <div class="modal-title">Апелляция #${a.id}</div>
+    <div style="margin-bottom: 1rem;">
+      <span class="status-pill ${a.status}">${a.status}</span>
+    </div>
 
-      <div class="form-group">
-        <label>Участник</label>
-        <div style="font-weight: 600;">${escapeHtml(a.username || a.user_id)}</div>
+    <div class="form-group">
+      <label>Участник</label>
+      <div style="font-weight: 600;">${escapeHtml(a.username || a.user_id)}</div>
+    </div>
+    <div class="form-group">
+      <label>Наказание</label>
+      <div><span class="code">${a.action_type}</span></div>
+    </div>
+    <div class="form-group">
+      <label>Объяснение</label>
+      <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px;
+                  font-size: .9rem; line-height: 1.6;">
+        ${escapeHtml(a.appeal_text || '—')}
       </div>
+    </div>
+    ${a.reviewer_note ? `
       <div class="form-group">
-        <label>Наказание</label>
-        <div><span class="code">${a.action_type}</span></div>
-      </div>
-      <div class="form-group">
-        <label>Объяснение</label>
-        <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px;
-                    font-size: .9rem; line-height: 1.6;">
-          ${escapeHtml(a.appeal_text || '—')}
+        <label>Комментарий модератора</label>
+        <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px; font-size: .9rem;">
+          ${escapeHtml(a.reviewer_note)}
         </div>
       </div>
-      ${a.reviewer_note ? `
-        <div class="form-group">
-          <label>Комментарий модератора</label>
-          <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px; font-size: .9rem;">
-            ${escapeHtml(a.reviewer_note)}
-          </div>
-        </div>
-      ` : ''}
+    ` : ''}
 
-      ${isPending ? `
-        <div class="form-group">
-          <label>Твой комментарий (опционально)</label>
-          <textarea class="textarea" id="appealNote" rows="2" placeholder="Будет показан участнику..."></textarea>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
-          <button class="btn btn-danger btn-sm" onclick="reviewAppeal('reject')">❌ Отклонить</button>
-          <button class="btn btn-success btn-sm" onclick="reviewAppeal('accept')">✅ Принять</button>
-        </div>
-      ` : `
-        <div class="modal-actions">
-          <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
-        </div>
-      `}
-    `;
-    document.getElementById('appealModal').classList.add('show');
-  } catch(e) {}
+    ${isPending ? `
+      <div class="form-group">
+        <label>Твой комментарий (опционально)</label>
+        <textarea class="textarea" id="appealNote" rows="2" placeholder="Будет показан участнику..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
+        <button class="btn btn-danger btn-sm" onclick="reviewAppeal('reject')">❌ Отклонить</button>
+        <button class="btn btn-success btn-sm" onclick="reviewAppeal('accept')">✅ Принять</button>
+      </div>
+    ` : `
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
+      </div>
+    `}
+  `;
+  document.getElementById('appealModal').classList.add('show');
 }
 
 function closeAppealModal() {
@@ -1491,7 +1468,8 @@ async function reviewAppeal(action) {
       closeAppealModal();
       loadAppeals();
     } else {
-      showToast('Ошибка', 'error');
+      const err = await r.json().catch(() => ({}));
+      showToast('Ошибка: ' + (err.error || r.status), 'error');
     }
   } catch(e) {
     showToast('Ошибка соединения', 'error');
@@ -1527,7 +1505,7 @@ async function loadInvites(q='') {
     }
     tbody.innerHTML = rows.map(row => `
       <tr>
-        <td><span class="code">${row.invite_code}</span></td>
+        <td><span class="code">${escapeHtml(row.invite_code)}</span></td>
         <td>${escapeHtml(row.inviter_name || '—')}</td>
         <td>${row.uses || 0}</td>
         <td class="text-mono text-muted">${(row.last_used || '').slice(0, 10) || '—'}</td>
@@ -1551,6 +1529,7 @@ async function loadTwins() {
       return;
     }
     tbody.innerHTML = rows.map(row => {
+      const sim = row.similarity || 0;
       const status = row.confirmed ? 'approved' : (row.false_positive ? 'rejected' : 'pending');
       const statusText = row.confirmed ? 'Подтверждён' : (row.false_positive ? 'Ложное' : 'Не проверен');
       return `
@@ -1558,8 +1537,8 @@ async function loadTwins() {
           <td>#${row.id}</td>
           <td>${escapeHtml(row.user_a_name || row.user_a)}</td>
           <td>${escapeHtml(row.user_b_name || row.user_b)}</td>
-          <td><strong style="color: ${row.similarity >= 80 ? 'var(--danger)' : row.similarity >= 70 ? 'var(--warning)' : 'var(--muted)'};">
-            ${row.similarity.toFixed(0)}%
+          <td><strong style="color: ${sim >= 80 ? 'var(--danger)' : sim >= 70 ? 'var(--warning)' : 'var(--muted)'};">
+            ${sim.toFixed(0)}%
           </strong></td>
           <td><span class="status-pill ${status}">${statusText}</span></td>
           <td class="text-mono text-muted">${(row.detected_at || '').slice(0, 10)}</td>
@@ -1586,7 +1565,6 @@ function showToast(msg, type='success') {
   setTimeout(() => t.classList.remove('show'), 2800);
 }
 
-// Start
 init();
 </script>
 
