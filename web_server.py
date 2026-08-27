@@ -222,7 +222,12 @@ async def handle_callback(request):
         raise response
 
 async def handle_logout(request):
-    response = web.HTTPFound('/')
+    # После логаута возвращаем на сайт (если он на отдельном домене)
+    if WEBSITE_URL:
+        base = WEBSITE_URL if WEBSITE_URL.startswith('http') else f'https://{WEBSITE_URL}'
+        response = web.HTTPFound(base)
+    else:
+        response = web.HTTPFound('/')
     response.del_cookie('ws_session', path='/')
     raise response
 
