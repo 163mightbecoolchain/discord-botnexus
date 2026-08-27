@@ -4,62 +4,45 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Witness — Discord Moderation Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <meta name="description" content="Продвинутая модерация Discord: стилометрия твинков, апелляции, авто-наказания, анти-нюк">
 
 <style>
 :root {
-  --bg:        #0a0e14;
-  --bg-2:      #0f1419;
-  --bg-3:      #151b23;
-  --panel:     #1a2028;
-  --panel-2:   #232b35;
-  --border:    #2a3441;
-  --border-2:  #3a4554;
-  --text:      #e0e6ed;
-  --text-2:    #a8b3c1;
-  --muted:     #6b7785;
-  --accent:    #00d9a3;
-  --accent-2:  #00bfa5;
-  --accent-3:  #00a085;
-  --danger:    #ff5470;
-  --warning:   #ffaa00;
-  --info:      #5a9eff;
-  --mono:      'Space Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
+  --panel: #1a2028; --panel-2: #232b35;
+  --border: #2a3441; --border-2: #3a4554;
+  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
+  --accent: #00d9a3; --accent-2: #00bfa5; --accent-3: #00a085;
+  --danger: #ff5470; --warning: #ffaa00; --info: #5a9eff;
+  --mono: 'Space Mono', 'JetBrains Mono', 'Fira Code', monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.6;
-  overflow-x: hidden;
-  font-size: 15px;
+  background: var(--bg); color: var(--text);
+  line-height: 1.6; overflow-x: hidden; font-size: 15px;
 }
 
 body::before {
-  content: '';
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
+  content: ''; position: fixed; inset: 0;
   background-image:
     linear-gradient(rgba(0,217,163,0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0,217,163,0.03) 1px, transparent 1px);
   background-size: 40px 40px;
-  pointer-events: none;
-  z-index: 0;
+  pointer-events: none; z-index: 0;
 }
 
 body::after {
-  content: '';
-  position: fixed;
-  top: 0; left: 50%;
-  transform: translateX(-50%);
-  width: 80%;
-  height: 600px;
+  content: ''; position: fixed;
+  top: 0; left: 50%; transform: translateX(-50%);
+  width: 80%; height: 600px;
   background: radial-gradient(ellipse at center, rgba(0,217,163,0.08) 0%, transparent 60%);
-  pointer-events: none;
-  z-index: 0;
+  pointer-events: none; z-index: 0;
 }
 
 main, header, footer { position: relative; z-index: 1; }
@@ -110,22 +93,14 @@ header {
   border: 1px solid transparent; cursor: pointer; font-family: inherit;
 }
 
-.btn-primary {
-  background: var(--accent); color: #001a14; border-color: var(--accent);
-}
-
+.btn-primary { background: var(--accent); color: #001a14; border-color: var(--accent); }
 .btn-primary:hover {
   background: var(--accent-2); transform: translateY(-1px);
   box-shadow: 0 8px 24px rgba(0,217,163,0.25);
 }
 
-.btn-ghost {
-  background: transparent; color: var(--text); border-color: var(--border-2);
-}
-
-.btn-ghost:hover {
-  background: var(--panel); border-color: var(--accent); color: var(--accent);
-}
+.btn-ghost { background: transparent; color: var(--text); border-color: var(--border-2); }
+.btn-ghost:hover { background: var(--panel); border-color: var(--accent); color: var(--accent); }
 
 .btn-lg { padding: 1rem 2rem; font-size: 1rem; }
 
@@ -150,10 +125,7 @@ header {
   animation: pulse 2s ease infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .4; }
-}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
 .hero h1 {
   font-size: clamp(2.5rem, 6vw, 4.5rem);
@@ -163,8 +135,7 @@ header {
 
 .hero h1 .accent {
   background: linear-gradient(135deg, var(--accent) 0%, var(--info) 100%);
-  -webkit-background-clip: text; background-clip: text;
-  color: transparent;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
 .hero-sub {
@@ -249,9 +220,7 @@ section { max-width: 1280px; margin: 0 auto; padding: 5rem 1.5rem; }
   margin-bottom: .65rem; letter-spacing: -.01em;
 }
 
-.feature p {
-  color: var(--text-2); font-size: .95rem; line-height: 1.65;
-}
+.feature p { color: var(--text-2); font-size: .95rem; line-height: 1.65; }
 
 .showcase {
   background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%);
@@ -339,13 +308,8 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
 }
 
 .footer-links { display: flex; gap: 2rem; align-items: center; }
-
-.footer-links a {
-  color: var(--text-2); text-decoration: none; font-size: .9rem;
-}
-
+.footer-links a { color: var(--text-2); text-decoration: none; font-size: .9rem; }
 .footer-links a:hover { color: var(--accent); }
-
 .footer-copy { color: var(--muted); font-size: .85rem; font-family: var(--mono); }
 
 @media (max-width: 768px) {
