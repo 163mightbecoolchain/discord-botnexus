@@ -4,7 +4,9 @@ Witness Website Server
 import os
 from aiohttp import web
 
-BOT_API_URL = os.getenv("BOT_API_URL", "")
+BOT_API_URL = os.getenv("BOT_API_URL", "").rstrip("/")
+if BOT_API_URL and not BOT_API_URL.startswith("http"):
+    BOT_API_URL = "https://" + BOT_API_URL
 BOT_ID      = os.getenv("BOT_ID", "")
 PORT        = int(os.getenv("PORT", 8080))
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +59,12 @@ async def handle_login(request):
         return web.Response(text="BOT_API_URL not set", status=500)
     raise web.HTTPFound(f"{BOT_API_URL}/login")
 
+async def handle_logout(request):
+    # Чистим cookie на боте и возвращаемся на главную сайта
+    if BOT_API_URL:
+        raise web.HTTPFound(f"{BOT_API_URL}/logout")
+    raise web.HTTPFound("/")
+
 async def handle_health(request):
     return web.Response(text="OK", status=200)
 
@@ -64,6 +72,7 @@ app = web.Application()
 app.router.add_get("/",          handle_index)
 app.router.add_get("/dashboard", handle_dashboard)
 app.router.add_get("/login",     handle_login)
+app.router.add_get("/logout",    handle_logout)
 app.router.add_get("/health",    handle_health)
 
 if __name__ == "__main__":
