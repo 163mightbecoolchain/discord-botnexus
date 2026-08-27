@@ -359,8 +359,8 @@ async def reminder_check_loop(bot_instance):
                         if ch:
                             u = await bot_instance.fetch_user(uid)
                             await ch.send(f"⏰ {u.mention if u else uid} {message}")
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        print(f"[REMINDER] Не доставлено {uid}: {ex}")
 
                 # Обновляем или помечаем как выполненное
                 async with aiosqlite.connect(DB_PATH) as db:
@@ -416,8 +416,8 @@ async def memory_cleanup_loop(bot_instance):
                     try:
                         await _save_style_profile(key[0], key[1], sp)
                         saved += 1
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        print(f"[STYLE] Save error {key}: {ex}")
                 _style_dirty.discard(key)
             if saved:
                 print(f"[CLEANUP] Saved {saved} style profiles to DB")
@@ -1104,6 +1104,20 @@ async def db_init():
             "ALTER TABLE punishment_settings ADD COLUMN warn3_type TEXT DEFAULT 'ban'",
             # Quarantine on/off тоггл (отдельно от роли — можно временно выключить)
             "ALTER TABLE guild_settings ADD COLUMN quarantine_enabled INTEGER DEFAULT 1",
+            # Стилометрия: колонки расширенного профиля.
+            # КРИТИЧНО чтобы были здесь: update_style_profile делает SELECT по ним
+            # при первом же сообщении — до первого вызова _save_style_profile
+            "ALTER TABLE style_profiles ADD COLUMN top_bigrams BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN word_bigrams BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN timing_delays BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN lexical_sig BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN extra_ratios BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN active_blocks BLOB",
+            "ALTER TABLE style_profiles ADD COLUMN ttr REAL DEFAULT 0",
+            "ALTER TABLE style_profiles ADD COLUMN median_timing REAL DEFAULT 0",
+            "ALTER TABLE style_profiles ADD COLUMN first_seen TEXT DEFAULT ''",
+            "ALTER TABLE style_profiles ADD COLUMN last_seen TEXT DEFAULT ''",
+            "ALTER TABLE style_profiles ADD COLUMN profile_maturity REAL DEFAULT 0",
         ]
         for sql in migrations:
             try:
@@ -1942,8 +1956,8 @@ async def on_member_update(before, after):
                             pass
                     # Снимаем флаг подавления после обработки
                     _suppress_next_timeout_dm.discard(skey)
-            except Exception:
-                pass
+            except Exception as ex:
+                print(f"[MUTE_LOG] on_member_update error: {ex}")
 
 
 @bot.event
@@ -4923,30 +4937,33 @@ async def birthday_check_loop():
     """Фоновая задача — проверяет дни рождения каждый день в 09:00 UTC."""
     await bot.wait_until_ready()
     while not bot.is_closed():
-        now = datetime.datetime.utcnow()
-        if now.hour == 9 and now.minute < 5:
-            today = f"{now.day:02d}.{now.month:02d}"
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute(
-                    "SELECT guild_id, user_id FROM birthdays WHERE birthday=?", (today,)
-                ) as c:
-                    rows = await c.fetchall()
-            for gid, uid in rows:
-                settings = await get_guild_settings(gid)
-                ch_id = settings.get("birthday_channel", 0)
-                guild = bot.get_guild(gid)
-                if not guild: continue
-                ch = guild.get_channel(ch_id) or discord.utils.get(guild.text_channels, name="general")
-                if not ch: continue
-                member = guild.get_member(uid)
-                if not member: continue
-                e = discord.Embed(title="🎂 День рождения!", color=0xFF69B4)
-                e.description = f"Сегодня день рождения у {member.mention}! 🎉\nПоздравьте его/её!"
-                e.set_thumbnail(url=member.display_avatar.url)
-                try:
-                    await ch.send(embed=e)
-                except Exception:
-                    pass
+        try:
+            now = datetime.datetime.utcnow()
+            if now.hour == 9 and now.minute < 5:
+                today = f"{now.day:02d}.{now.month:02d}"
+                async with aiosqlite.connect(DB_PATH) as db:
+                    async with db.execute(
+                        "SELECT guild_id, user_id FROM birthdays WHERE birthday=?", (today,)
+                    ) as c:
+                        rows = await c.fetchall()
+                for gid, uid in rows:
+                    settings = await get_guild_settings(gid)
+                    ch_id = settings.get("birthday_channel", 0)
+                    guild = bot.get_guild(gid)
+                    if not guild: continue
+                    ch = guild.get_channel(ch_id) or discord.utils.get(guild.text_channels, name="general")
+                    if not ch: continue
+                    member = guild.get_member(uid)
+                    if not member: continue
+                    e = discord.Embed(title="🎂 День рождения!", color=0xFF69B4)
+                    e.description = f"Сегодня день рождения у {member.mention}! 🎉\nПоздравьте его/её!"
+                    e.set_thumbnail(url=member.display_avatar.url)
+                    try:
+                        await ch.send(embed=e)
+                    except Exception as ex:
+                        print(f"[BIRTHDAY] Send error guild {gid}: {ex}")
+        except Exception as ex:
+            print(f"[BIRTHDAY] Loop error: {ex}")
         await asyncio.sleep(300)  # проверяем каждые 5 минут
 
 
@@ -5015,8 +5032,8 @@ async def _run_invite_autoclean(guild: discord.Guild, max_age_days: int, log_ch_
             _invite_cache.pop(f"{guild.id}:{inv.code}", None)
         except discord.Forbidden:
             failed.append(inv.code)
-        except Exception:
-            pass
+        except Exception as ex:
+            print(f"[INVITE_CLEAN] Delete error {inv.code}: {ex}")
 
     if not deleted:
         return
@@ -5029,8 +5046,8 @@ async def _run_invite_autoclean(guild: discord.Guild, max_age_days: int, log_ch_
                 f"🔗 Авто-очистка инвайтов: было удалено **{len(deleted)}** инвайт "
                 f"{'код' if len(deleted) == 1 else 'кодов' if 5 <= len(deleted) % 100 <= 20 or len(deleted) % 10 >= 5 or len(deleted) % 10 == 0 else 'кода'}."
             )
-        except Exception:
-            pass
+        except Exception as ex:
+            print(f"[INVITE_CLEAN] Лог не отправлен: {ex}")
 
     print(f"[INVITE_CLEAN] {guild.name}: удалено {len(deleted)} инвайтов")
 
@@ -6764,8 +6781,8 @@ async def albion_watch_loop(bot_instance):
                             "UPDATE albion_watch SET last_check=? WHERE id=?", (now_iso, wid)
                         )
                         await db.commit()
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print(f"[ALBION] Watch save error: {ex}")
 
         except Exception as ex:
             print(f"[ALBION WATCH] Error: {ex}")
@@ -7241,8 +7258,8 @@ async def get_server_vocab(guild_id: int) -> set:
             try:
                 for w in (_decompress(wjson) or []):
                     word_counts[w] = word_counts.get(w, 0) + 1
-            except Exception:
-                pass
+            except Exception as ex:
+                print(f"[STYLE] server_vocab битая строка: {ex}")
         # Топ SERVER_VOCAB_SIZE слов = общие для сервера = не уникальные
         vocab = {w for w, _ in sorted(word_counts.items(),
                                        key=lambda x: x[1], reverse=True)[:SERVER_VOCAB_SIZE]}
@@ -7463,8 +7480,8 @@ async def record_interaction(guild_id: int, user_a: int, user_b: int,
                     {col} = {col} + 1, last_seen = excluded.last_seen
             """, (guild_id, a, b, now))
             await db.commit()
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[STYLE] record_interaction error: {ex}")
 
 
 async def get_interaction_score(guild_id: int, user_a: int, user_b: int) -> dict:
@@ -7570,8 +7587,8 @@ async def compare_with_banned(guild: discord.Guild, sp_dict: dict,
                 best = score
                 best_name = uname or str(uid)
                 best_reasons = reasons
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[BAN_EVASION] Compare error: {ex}")
     return best, best_name, best_reasons
 
 
@@ -7606,8 +7623,8 @@ async def save_banned_profile(guild_id: int, user_id: int, username: str,
                     ban_reason=excluded.ban_reason
             """, (guild_id, user_id, username, style_blob, now, reason))
             await db.commit()
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[BAN_EVASION] Не сохранён профиль забаненного {user_id}: {ex}")
 
 
 async def _check_ban_evasion(member):
@@ -7633,8 +7650,8 @@ async def _check_ban_evasion(member):
                 ON CONFLICT(guild_id, user_id) DO NOTHING
             """, (gid, member.id, now))
             await db.commit()
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[BAN_EVASION] Watchlist insert error {member.id}: {ex}")
 
 
 async def ai_explain_twin(name_a: str, name_b: str, reasons: list,
@@ -7666,24 +7683,29 @@ async def get_twin_threshold(guild_id: int) -> int:
                 row = await c.fetchone()
         if row and row[0]:
             return int(row[0])
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[STYLE] get_twin_threshold error (используется дефолт): {ex}")
     return TWIN_THRESHOLD
 
 
 async def update_style_profile(guild_id: int, user_id: int, message: discord.Message):
     key = (guild_id, user_id)
     if key not in _style_cache:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                "SELECT msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,emoji_ratio,"
-                "no_punct_ratio,common_words,common_typos,sentence_enders,active_hours,"
-                "COALESCE(top_bigrams,x'') ,COALESCE(timing_delays,x''),"
-                "COALESCE(first_seen,'') "
-                "FROM style_profiles WHERE guild_id=? AND user_id=?",
-                (guild_id, user_id)
-            ) as c:
-                row = await c.fetchone()
+        row = None
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT msg_count,avg_word_len,avg_msg_len,punct_ratio,caps_ratio,emoji_ratio,"
+                    "no_punct_ratio,common_words,common_typos,sentence_enders,active_hours,"
+                    "COALESCE(top_bigrams,x'') ,COALESCE(timing_delays,x''),"
+                    "COALESCE(first_seen,'') "
+                    "FROM style_profiles WHERE guild_id=? AND user_id=?",
+                    (guild_id, user_id)
+                ) as c:
+                    row = await c.fetchone()
+        except Exception as ex:
+            # Не даём ошибке схемы убить стилометрию — стартуем с пустого профиля
+            print(f"[STYLE] Load error (профиль начат заново): {ex}")
         sp = StyleProfile()
         if row:
             sp.msg_count       = row[0]
@@ -7760,8 +7782,8 @@ async def _run_ban_evasion_check(guild, user_id: int, sp):
                 (gid, user_id)
             )
             await db.commit()
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"[BAN_EVASION] Watchlist delete error {user_id}: {ex}")
 
     if score >= TWIN_THRESHOLD and banned_name:
         ch = await get_log_ch(guild)
@@ -7788,24 +7810,7 @@ async def _save_style_profile(guild_id: int, user_id: int, sp: StyleProfile):
     d   = sp.to_storage()   # сжатые данные для БД
     now = datetime.datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
-        # Миграция — добавляем новые колонки если их нет
-        for col_sql in [
-            "ALTER TABLE style_profiles ADD COLUMN top_bigrams BLOB",
-            "ALTER TABLE style_profiles ADD COLUMN word_bigrams BLOB",
-            "ALTER TABLE style_profiles ADD COLUMN timing_delays BLOB",
-            "ALTER TABLE style_profiles ADD COLUMN lexical_sig BLOB",
-            "ALTER TABLE style_profiles ADD COLUMN extra_ratios BLOB",
-            "ALTER TABLE style_profiles ADD COLUMN active_blocks BLOB",
-            "ALTER TABLE style_profiles ADD COLUMN ttr REAL DEFAULT 0",
-            "ALTER TABLE style_profiles ADD COLUMN median_timing REAL DEFAULT 0",
-            "ALTER TABLE style_profiles ADD COLUMN first_seen TEXT DEFAULT ''",
-            "ALTER TABLE style_profiles ADD COLUMN last_seen TEXT DEFAULT ''",
-            "ALTER TABLE style_profiles ADD COLUMN profile_maturity REAL DEFAULT 0",
-        ]:
-            try:
-                await db.execute(col_sql)
-            except Exception:
-                pass
+        # Колонки создаются миграциями в init_db при старте бота
         await db.execute("""
             INSERT INTO style_profiles
                 (guild_id,user_id,msg_count,avg_word_len,avg_msg_len,
@@ -8550,8 +8555,8 @@ async def on_app_command_error(interaction: discord.Interaction,
                 await interaction.followup.send(msg, ephemeral=True)
             else:
                 await interaction.response.send_message(msg, ephemeral=True)
-        except Exception:
-            pass
+        except Exception as ex:
+            print(f"[CMD_ERROR] Не удалось отправить сообщение об ошибке: {ex} · исходная ошибка: {error}")
 
 
 if __name__ == "__main__":
