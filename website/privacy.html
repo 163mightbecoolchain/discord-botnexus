@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Политика конфиденциальности — Witness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
+  --panel: #1a2028; --border: #2a3441; --border-2: #3a4554;
+  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
+  --accent: #00d9a3; --accent-3: #00a085; --danger: #ff5470;
+  --mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.7; font-size: 15px;
+}
+header {
+  border-bottom: 1px solid var(--border);
+  background: rgba(10,14,20,.85); backdrop-filter: blur(12px);
+  position: sticky; top: 0; z-index: 10;
+}
+.nav {
+  max-width: 860px; margin: 0 auto; padding: 1rem 1.5rem;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.logo {
+  display: flex; align-items: center; gap: .75rem;
+  font-family: var(--mono); font-weight: 700; font-size: 1.1rem;
+  text-decoration: none; color: inherit;
+}
+.logo-mark {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-3));
+  display: grid; place-items: center; color: #001a14;
+  font-weight: 900; font-size: .95rem;
+  box-shadow: 0 0 22px rgba(0,217,163,.35);
+}
+.logo span { color: var(--accent); }
+.nav a.back { color: var(--text-2); text-decoration: none; font-size: .9rem; }
+.nav a.back:hover { color: var(--accent); }
+
+main { max-width: 860px; margin: 0 auto; padding: 3.5rem 1.5rem 5rem; }
+h1 { font-size: 2.1rem; font-weight: 800; letter-spacing: -.02em; margin-bottom: .6rem; }
+.updated { color: var(--muted); font-family: var(--mono); font-size: .82rem; margin-bottom: 2.5rem; }
+h2 {
+  font-size: 1.25rem; font-weight: 700; margin: 2.5rem 0 .9rem;
+  padding-top: 1.6rem; border-top: 1px solid var(--border);
+  letter-spacing: -.01em;
+}
+h2:first-of-type { border-top: 0; padding-top: 0; margin-top: 2rem; }
+h3 { font-size: 1rem; font-weight: 600; margin: 1.4rem 0 .5rem; color: var(--accent); }
+p { color: var(--text-2); margin-bottom: 1rem; }
+ul { margin: 0 0 1.2rem 1.2rem; color: var(--text-2); }
+li { margin-bottom: .5rem; }
+strong { color: var(--text); }
+code {
+  font-family: var(--mono); font-size: .85rem; color: var(--accent);
+  background: rgba(0,217,163,.08); padding: .12rem .4rem; border-radius: 4px;
+}
+.callout {
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px; padding: 1.1rem 1.3rem; margin: 1.5rem 0;
+}
+.callout.warn { border-left-color: var(--danger); }
+.callout p:last-child { margin-bottom: 0; }
+table {
+  width: 100%; border-collapse: collapse; margin: 1.2rem 0;
+  font-size: .88rem; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+}
+th {
+  text-align: left; padding: .7rem 1rem; background: var(--bg-3);
+  font-size: .73rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); border-bottom: 1px solid var(--border);
+}
+td { padding: .7rem 1rem; border-bottom: 1px solid var(--border); color: var(--text-2); }
+tr:last-child td { border-bottom: 0; }
+footer {
+  border-top: 1px solid var(--border); padding: 2rem 1.5rem;
+  text-align: center; color: var(--muted); font-size: .85rem;
+}
+footer a { color: var(--text-2); text-decoration: none; margin: 0 .6rem; }
+footer a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="nav">
+    <a href="/" class="logo">
+      <div class="logo-mark">W</div>
+      <div>Witness<span>.</span></div>
+    </a>
+    <a href="/" class="back">← На главную</a>
+  </div>
+</header>
+
+<main>
+  <h1>Политика конфиденциальности</h1>
+  <div class="updated">Последнее обновление: 29 августа 2026</div>
+
+  <p>
+    Witness — бот для модерации Discord-серверов. Этот документ описывает, какие данные
+    бот обрабатывает, зачем, как долго хранит и как их удалить. Используя Witness,
+    администратор сервера соглашается с описанным порядком обработки данных.
+  </p>
+
+  <div class="callout">
+    <p>
+      <strong>Главное в двух предложениях.</strong> Witness не сохраняет тексты сообщений —
+      сообщения анализируются в оперативной памяти и сразу отбрасываются, в базу попадают
+      только числовые характеристики стиля. Данные не продаются, не передаются третьим
+      лицам и используются исключительно для модерации того сервера, где они собраны.
+    </p>
+  </div>
+
+  <h2>1. Какие данные обрабатываются</h2>
+
+  <h3>Идентификаторы</h3>
+  <ul>
+    <li><strong>Discord User ID и отображаемое имя</strong> — чтобы связать нарушение с участником</li>
+    <li><strong>Guild ID (ID сервера)</strong> — настройки хранятся отдельно для каждого сервера</li>
+    <li><strong>Channel ID и Role ID</strong> — для настроек логирования и карантина</li>
+  </ul>
+
+  <h3>Записи модерации</h3>
+  <ul>
+    <li>Предупреждения, муты, кики, баны: кто, кому, когда, причина, срок</li>
+    <li>Апелляции: текст обращения участника и решение модератора</li>
+    <li>Заявки на бан, созданные при накоплении предупреждений</li>
+  </ul>
+
+  <h3>Характеристики стиля письма (стилометрия)</h3>
+  <p>
+    Для выявления обхода блокировки через дополнительные аккаунты бот строит
+    статистический профиль манеры письма. В профиль входят:
+  </p>
+  <ul>
+    <li>частоты служебных слов и характерных опечаток</li>
+    <li>доли сообщений с пунктуацией, заглавными буквами, эмодзи</li>
+    <li>средняя длина слова и сообщения, лексическое разнообразие</li>
+    <li>интервалы между сообщениями и распределение активности по часам</li>
+    <li>сжатые n-граммы (последовательности символов и слов)</li>
+  </ul>
+
+  <div class="callout warn">
+    <p>
+      <strong>Тексты сообщений в базу данных не записываются.</strong>
+      Сообщение обрабатывается в оперативной памяти, из него извлекаются перечисленные
+      числовые признаки, после чего текст отбрасывается. Восстановить исходное сообщение
+      из профиля невозможно.
+    </p>
+  </div>
+
+  <h3>Служебные данные</h3>
+  <ul>
+    <li>Учёт приглашений: код инвайта, кто создал, сколько переходов</li>
+    <li>Даты рождения — только если участник указал их добровольно командой</li>
+    <li>Токены авторизации веб-панели — в подписанной cookie у пользователя, не в базе</li>
+  </ul>
+
+  <h2>2. Зачем это нужно</h2>
+  <table>
+    <tr><th>Данные</th><th>Назначение</th></tr>
+    <tr><td>Профили стиля</td><td>Обнаружение дополнительных аккаунтов заблокированных участников</td></tr>
+    <tr><td>Журнал модерации</td><td>История решений, прозрачность работы команды модераторов</td></tr>
+    <tr><td>Апелляции</td><td>Возможность оспорить наказание</td></tr>
+    <tr><td>Учёт приглашений</td><td>Отслеживание источников трафика и рейдов</td></tr>
+    <tr><td>Настройки сервера</td><td>Работа функций бота согласно правилам сервера</td></tr>
+  </table>
+  <p>
+    Данные не используются для рекламы, обучения моделей машинного обучения
+    и не объединяются между разными серверами.
+  </p>
+
+  <h2>3. Сроки хранения</h2>
+  <table>
+    <tr><th>Тип записи</th><th>Срок</th></tr>
+    <tr><td>Журнал приглашений</td><td>90 дней</td></tr>
+    <tr><td>Автоматические записи модерации</td><td>180 дней</td></tr>
+    <tr><td>Профили стиля</td><td>Пока участник состоит на сервере</td></tr>
+    <tr><td>Профили заблокированных</td><td>До снятия блокировки</td></tr>
+    <tr><td>Настройки сервера</td><td>Пока бот находится на сервере</td></tr>
+    <tr><td>Сессия веб-панели</td><td>30 дней</td></tr>
+  </table>
+  <p>
+    Удаление бота с сервера прекращает сбор данных. Для полного удаления
+    накопленных записей администратор может обратиться в поддержку.
+  </p>
+
+  <h2>4. Где и как хранятся данные</h2>
+  <p>
+    База данных <code>SQLite</code> размещается на приватном томе хостинга Railway
+    и доступна только процессу бота. Внешнего доступа к базе нет.
+    Соединение с веб-панелью защищено HTTPS, авторизация выполняется через
+    официальный OAuth2 Discord — пароль от Discord боту не передаётся и ему неизвестен.
+  </p>
+
+  <h2>5. Передача третьим лицам</h2>
+  <p>Данные <strong>не продаются и не передаются</strong>. Ограниченные исключения:</p>
+  <ul>
+    <li><strong>Discord</strong> — как платформа, через которую бот работает</li>
+    <li><strong>Railway</strong> — хостинг-провайдер, где размещены бот и база</li>
+    <li>
+      <strong>Groq и Google Gemini</strong> — при использовании функций с искусственным
+      интеллектом им передаются агрегированные показатели сходства профилей.
+      Тексты сообщений участников этим сервисам не отправляются.
+    </li>
+  </ul>
+
+  <h2>6. Права участников</h2>
+  <ul>
+    <li><strong>Узнать, какие данные собраны</strong> — командой профиля или через администратора сервера</li>
+    <li><strong>Оспорить наказание</strong> — через систему апелляций в личных сообщениях бота</li>
+    <li><strong>Потребовать удаления данных</strong> — обратившись к администратору сервера или в поддержку</li>
+    <li><strong>Отказаться от сбора</strong> — покинув сервер, где работает бот</li>
+  </ul>
+
+  <h2>7. Несовершеннолетние</h2>
+  <p>
+    Discord запрещает использование сервиса лицами младше 13 лет
+    (в отдельных странах — младше установленного местным законом возраста).
+    Witness намеренно не собирает данные таких пользователей. При поступлении
+    сведений о том, что данные принадлежат лицу, не достигшему допустимого возраста,
+    они будут удалены.
+  </p>
+
+  <h2>8. Изменения политики</h2>
+  <p>
+    При существенных изменениях дата в начале страницы обновляется,
+    а уведомление публикуется на сервере поддержки. Продолжение использования
+    бота после изменений означает согласие с новой редакцией.
+  </p>
+
+  <h2>9. Контакты</h2>
+  <p>
+    По вопросам обработки данных и запросам на удаление —
+    <a href="__SUPPORT_URL__" style="color: var(--accent);">сервер поддержки Witness</a>.
+  </p>
+</main>
+
+<footer>
+  <a href="/">Главная</a>
+  <a href="/dashboard">Панель управления</a>
+  <a href="__SUPPORT_URL__">Поддержка</a>
+  <div style="margin-top:.8rem; font-family: var(--mono); font-size:.8rem;">© 2026 Witness</div>
+</footer>
+
+</body>
+</html>
