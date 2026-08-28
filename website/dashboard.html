@@ -645,6 +645,122 @@ input[type="color"] {
   cursor: pointer; padding: 2px;
 }
 
+/* ─── Группы тумблеров логирования ─── */
+.log-group { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem; }
+.log-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.log-group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.log-group-title {
+  font-size: .72rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.log-group-all {
+  font-size: .74rem; color: var(--accent); cursor: pointer;
+  background: none; border: 0; font-family: inherit; font-weight: 600;
+  padding: .2rem .45rem; border-radius: 4px; transition: background .15s;
+}
+.log-group-all:hover { background: rgba(var(--accent-rgb), .1); }
+.log-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 1.5rem; }
+@media (max-width: 700px) { .log-grid { grid-template-columns: 1fr; } }
+.log-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .42rem 0; gap: .75rem;
+}
+.log-row-label { font-size: .86rem; }
+
+/* ─── Бургер для мобильной версии ─── */
+.burger {
+  display: none; position: fixed; top: .8rem; left: .8rem; z-index: 300;
+  width: 40px; height: 40px; border-radius: 9px;
+  background: var(--panel); border: 1px solid var(--border-2);
+  color: var(--text); cursor: pointer;
+  align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3);
+}
+.sidebar-scrim {
+  display: none; position: fixed; inset: 0; z-index: 150;
+  background: rgba(0,0,0,.5); animation: fadeIn .2s ease;
+}
+.sidebar-scrim.show { display: block; }
+@media (max-width: 768px) {
+  .burger { display: flex; }
+  .main { padding-top: 4rem; }
+  .sidebar { box-shadow: 8px 0 30px rgba(0,0,0,.4); }
+}
+
+/* ─── Кастомный выпадающий список ─── */
+.cs-wrap { position: relative; }
+.cs-wrap > select { display: none !important; }
+
+.cs-trigger {
+  width: 100%; padding: .6rem .75rem;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text);
+  font-size: .87rem; font-family: inherit;
+  display: flex; align-items: center; gap: .5rem;
+  cursor: pointer; text-align: left;
+  transition: border-color .18s, box-shadow .18s, background .15s;
+}
+.cs-trigger:hover { border-color: var(--border-2); }
+.cs-trigger.open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .14);
+}
+.cs-trigger .cs-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-trigger .cs-label.placeholder { color: var(--muted); }
+.cs-trigger .cs-arrow {
+  flex-shrink: 0; opacity: .55;
+  transition: transform .2s cubic-bezier(.34,1.4,.64,1);
+}
+.cs-trigger.open .cs-arrow { transform: rotate(180deg); opacity: 1; }
+
+.cs-panel {
+  position: fixed; z-index: 900;
+  background: var(--panel); border: 1px solid var(--border-2);
+  border-radius: 9px; overflow: hidden;
+  box-shadow: 0 16px 44px rgba(0,0,0,.45);
+  animation: csIn .16s cubic-bezier(.34,1.4,.64,1);
+  display: flex; flex-direction: column;
+  max-height: 320px;
+}
+@keyframes csIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+.cs-panel.up { animation-name: csInUp; }
+@keyframes csInUp { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+
+.cs-search {
+  padding: .5rem; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cs-search input {
+  width: 100%; padding: .45rem .6rem;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text);
+  font-size: .84rem; font-family: inherit; outline: none;
+}
+.cs-search input:focus { border-color: var(--accent); }
+
+.cs-list { overflow-y: auto; padding: .3rem; }
+.cs-list::-webkit-scrollbar { width: 8px; }
+.cs-list::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+
+.cs-opt {
+  padding: .5rem .6rem; border-radius: 5px;
+  font-size: .86rem; cursor: pointer;
+  display: flex; align-items: center; gap: .5rem;
+  transition: background .1s;
+}
+.cs-opt:hover, .cs-opt.cursor { background: var(--panel-2); }
+.cs-opt.sel { color: var(--accent); background: rgba(var(--accent-rgb), .09); }
+.cs-opt .cs-hash { color: var(--muted); flex-shrink: 0; font-weight: 600; }
+.cs-opt.sel .cs-hash { color: var(--accent); }
+.cs-opt .cs-txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-opt .cs-check { flex-shrink: 0; opacity: 0; }
+.cs-opt.sel .cs-check { opacity: 1; }
+
+.cs-empty { padding: 1.2rem; text-align: center; color: var(--muted); font-size: .82rem; }
+
 /* Skeleton-загрузка */
 .skeleton {
   background: linear-gradient(90deg,
@@ -736,7 +852,15 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 <!-- MAIN LAYOUT -->
 <div id="page-app" class="layout hidden">
 
-  <aside class="sidebar">
+  <button class="burger" onclick="toggleSidebar(event)" aria-label="Меню">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/>
+      <line x1="3" y1="18" x2="21" y2="18"/>
+    </svg>
+  </button>
+  <div class="sidebar-scrim" id="sidebarScrim" onclick="toggleSidebar()"></div>
+
+  <aside class="sidebar" id="sidebar">
     <div class="sidebar-head">
       <a href="/" class="logo">
         <div class="logo-mark">W</div>
@@ -786,6 +910,10 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-item" data-perm="manage_messages" data-page="appeals" onclick="showPage('appeals')">
         <span class="icon">⚖️</span> Апелляции
         <span class="badge hidden" id="appealsBadge">0</span>
+      </div>
+      <div class="nav-item" data-perm="ban_members" data-page="banreq" onclick="showPage('banreq')">
+        <span class="icon">🔨</span> Заявки на бан
+        <span class="badge hidden" id="banreqBadge">0</span>
       </div>
       <div class="nav-item" data-perm="manage_messages" data-page="invites" onclick="showPage('invites')">
         <span class="icon">🔗</span> Инвайты
@@ -965,6 +1093,16 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Какие события логировать</div>
+            <div class="card-desc">Бот пишет в главный лог-канал только отмеченные события</div>
+          </div>
+        </div>
+        <div class="card-body" id="logToggles"></div>
       </div>
     </div>
     </div>
@@ -1231,6 +1369,35 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
       </div>
     </div>
     </div>
+
+    <!-- BAN REQUESTS -->
+    <div id="content-banreq" class="page"><div class="page-inner-wide">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Заявки на бан</div>
+          <div class="page-subtitle">Созданы при 3-м варне · решение за администратором</div>
+        </div>
+        <div class="flex gap-1">
+          <select class="select" id="banreqFilter" onchange="loadBanRequests()" style="width: 180px;">
+            <option value="pending">⏳ Ожидают</option>
+            <option value="approved">✅ Одобренные</option>
+            <option value="rejected">❌ Отклонённые</option>
+            <option value="">Все</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadBanRequests()">⟳</button>
+        </div>
+      </div>
+
+      <div class="appeals-stats" id="banreqStats" style="display:none;">
+        <span>⏳ Ожидают: <b id="brPending">0</b></span>
+        <span>✅ Одобрено: <b id="brApproved">0</b></span>
+        <span>❌ Отклонено: <b id="brRejected">0</b></span>
+      </div>
+
+      <div id="banreqList">
+        <div class="empty"><div class="empty-icon">🔨</div><div class="empty-title">Загрузка...</div></div>
+      </div>
+    </div></div>
 
     <!-- INVITES -->
     <div id="content-invites" class="page">
@@ -1763,6 +1930,22 @@ function logout() {
   window.location.href = '/logout';
 }
 
+function toggleSidebar(e) {
+  if (e) e.stopPropagation();
+  const sb = document.getElementById('sidebar');
+  const sc = document.getElementById('sidebarScrim');
+  const open = !sb.classList.contains('open');
+  sb.classList.toggle('open', open);
+  sc.classList.toggle('show', open);
+}
+
+function closeSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (sb) sb.classList.remove('open');
+  const sc = document.getElementById('sidebarScrim');
+  if (sc) sc.classList.remove('show');
+}
+
 function showLogin() {
   document.getElementById('page-login').classList.remove('hidden');
   document.getElementById('page-app').classList.add('hidden');
@@ -1931,12 +2114,14 @@ async function selectGuild(g) {
   await loadChannelsRoles();
   await loadSettings();
   await showPage('overview');
+  refreshBanreqBadge();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  PAGES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function showPage(name) {
+  closeSidebar();
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === name);
   });
@@ -1957,6 +2142,7 @@ async function showPage(name) {
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
   if (name === 'appeals') { await loadAppeals(); }
+  if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') await loadInvites('');
   if (name === 'twins') await loadTwins();
 }
@@ -1977,6 +2163,7 @@ async function loadChannelsRoles() {
     _roles = data.roles || [];
     fillChannelSelects();
     fillRoleSelects();
+    csSync();
   } catch(e) {}
 }
 
@@ -2000,6 +2187,77 @@ function fillRoleSelects() {
   el.innerHTML = '<option value="">— выбери роль —</option>' +
     _roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
   if (current) el.value = current;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ЛОГИРОВАНИЕ — тумблеры событий
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const LOG_GROUPS = [
+  { title: 'Участники', items: [
+    ['joins',         'Входы на сервер'],
+    ['leaves',        'Выходы с сервера'],
+    ['nick_change',   'Смена никнейма'],
+    ['avatar_change', 'Смена аватара'],
+    ['role_change',   'Изменение ролей'],
+    ['voice',         'Голосовые каналы'],
+  ]},
+  { title: 'Сообщения', items: [
+    ['msg_delete',    'Удаление сообщений'],
+    ['msg_edit',      'Правка сообщений'],
+    ['reactions',     'Реакции'],
+    ['threads',       'Ветки'],
+  ]},
+  { title: 'Модерация и безопасность', items: [
+    ['bans',           'Баны'],
+    ['timeouts',       'Таймауты'],
+    ['anti_raid',      'Анти-рейд'],
+    ['anti_spam',      'Анти-спам'],
+    ['suspicious',     'Подозрительные аккаунты'],
+    ['invites',        'Инвайты'],
+  ]},
+  { title: 'Сервер', items: [
+    ['channels',       'Создание/удаление каналов'],
+    ['roles',          'Создание/удаление ролей'],
+    ['server_edit',    'Изменение сервера'],
+    ['slash_commands', 'Использование команд'],
+  ]},
+];
+
+let _secSettings = {};
+
+function renderLogToggles() {
+  const box = document.getElementById('logToggles');
+  if (!box) return;
+  box.innerHTML = LOG_GROUPS.map((g, gi) => `
+    <div class="log-group">
+      <div class="log-group-head">
+        <div class="log-group-title">${g.title}</div>
+        <button class="log-group-all" onclick="toggleLogGroup(${gi})">вкл/выкл все</button>
+      </div>
+      <div class="log-grid">
+        ${g.items.map(([key, label]) => `
+          <div class="log-row">
+            <div class="log-row-label">${label}</div>
+            <div class="toggle ${_secSettings[key] ? 'on' : ''}"
+                 data-log="${key}" onclick="toggleLog('${key}', this)"></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleLog(key, el) {
+  _secSettings[key] = !_secSettings[key];
+  el.classList.toggle('on', !!_secSettings[key]);
+}
+
+function toggleLogGroup(gi) {
+  const g = LOG_GROUPS[gi];
+  // если хоть один выключен — включаем все, иначе выключаем все
+  const anyOff = g.items.some(([k]) => !_secSettings[k]);
+  g.items.forEach(([k]) => { _secSettings[k] = anyOff; });
+  renderLogToggles();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2030,6 +2288,10 @@ async function loadSettings() {
     setVal('mod-qage', s.quarantine_min_age ?? 7);
     setVal('mod-qhours', s.quarantine_hours ?? 24);
 
+    _secSettings = s.security || {};
+    renderLogToggles();
+
+    csSync();
     renderConfigSummary(s);
   } catch(e) {
     console.error('Settings load error:', e);
@@ -2060,11 +2322,11 @@ function renderConfigSummary(s) {
 
 function setVal(id, v) {
   const el = document.getElementById(id);
-  if (el && v !== undefined && v !== null) el.value = String(v);
+  if (el && v !== undefined && v !== null) { el.value = String(v); csSyncOne(el); }
 }
 function setSelect(id, v) {
   const el = document.getElementById(id);
-  if (el && v) el.value = String(v);
+  if (el && v) { el.value = String(v); csSyncOne(el); }
 }
 function setToggle(id, v) {
   const el = document.getElementById(id);
@@ -2076,7 +2338,7 @@ function setToggle(id, v) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  SAVE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function saveSettings(payload) {
+async function saveSettings(payload, silent=false) {
   if (!currentGuild) return false;
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/settings`, {
@@ -2085,11 +2347,11 @@ async function saveSettings(payload) {
       body: JSON.stringify(payload)
     });
     if (r.ok) {
-      showToast('✓ Сохранено', 'success');
+      if (!silent) showToast('✓ Сохранено', 'success');
       return true;
     }
     const err = await r.json().catch(() => ({}));
-    showToast('Ошибка: ' + (err.error || r.status), 'error');
+    if (!silent) showToast('Ошибка: ' + (err.error || r.status), 'error');
   } catch(e) {
     showToast('Ошибка соединения', 'error');
   }
@@ -2104,12 +2366,25 @@ function saveGeneral() {
   });
 }
 
-function saveLogging() {
-  return saveSettings({
+async function saveLogging() {
+  const okSettings = await saveSettings({
     log_channel: getVal('log-main') || 0,
     suggestion_channel: getVal('log-suggestion') || 0,
     starboard_channel: getVal('log-starboard') || 0,
-  });
+  }, true);   // тихо — тост покажем один раз в конце
+  let okSec = true;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/security`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_secSettings)
+    });
+    okSec = r.ok;
+  } catch(e) { okSec = false; }
+
+  if (okSettings && okSec) { showToast('✓ Сохранено', 'success'); return true; }
+  showToast('Не удалось сохранить часть настроек', 'error');
+  return false;
 }
 
 function saveModeration() {
@@ -2384,6 +2659,103 @@ async function reviewAppeal(action) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ЗАЯВКИ НА БАН
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _banreqCache = [];
+
+async function refreshBanreqBadge() {
+  if (!currentGuild || !hasPerm('ban_members')) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/banrequests`);
+    if (!r.ok) return;
+    const all = await r.json();
+    const pending  = all.filter(x => x.status === 'pending').length;
+    const badge = document.getElementById('banreqBadge');
+    if (badge) {
+      badge.textContent = pending;
+      badge.classList.toggle('hidden', pending === 0);
+    }
+    const stats = document.getElementById('banreqStats');
+    if (stats) {
+      stats.style.display = 'flex';
+      document.getElementById('brPending').textContent  = pending;
+      document.getElementById('brApproved').textContent = all.filter(x => x.status === 'approved').length;
+      document.getElementById('brRejected').textContent = all.filter(x => x.status === 'rejected').length;
+    }
+  } catch(e) {}
+}
+
+async function loadBanRequests() {
+  if (!currentGuild) return;
+  document.getElementById('banreqList').innerHTML = skeletonCards(3);
+  const status = document.getElementById('banreqFilter').value;
+  const qs = status ? `?status=${status}` : '';
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/banrequests${qs}`);
+    const rows = r.ok ? await r.json() : [];
+    _banreqCache = rows;
+    refreshBanreqBadge();
+    const list = document.getElementById('banreqList');
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty"><div class="empty-icon">🔨</div><div class="empty-title">Нет заявок</div><div class="empty-sub">с этим статусом</div></div>';
+      return;
+    }
+    const pill = { pending: 'pending', approved: 'approved', rejected: 'rejected' };
+    list.innerHTML = rows.map((b, i) => `
+      <div class="card appeal-card ${pill[b.status]} stagger-in" data-br-id="${b.id}"
+           style="animation-delay:${Math.min(i,12)*45}ms">
+        <div class="card-body">
+          <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+            <span class="status-pill ${pill[b.status]}">${b.status}</span>
+            <div style="flex:1; min-width:200px;">
+              <div style="font-weight:600;">#${b.id} · ${escapeHtml(b.username || b.user_id)}</div>
+              <div style="font-size:.8rem; color:var(--muted); margin-top:.2rem;">
+                Варнов: <b>${b.warn_count}/3</b> · ${escapeHtml(b.reason || '—')}
+              </div>
+              <div style="font-size:.76rem; color:var(--muted); margin-top:.2rem;">
+                Инициатор: ${escapeHtml(b.mod_name || '—')}
+                ${b.reviewer_name ? ' · Решил: ' + escapeHtml(b.reviewer_name) : ''}
+              </div>
+            </div>
+            <div class="text-mono text-muted" style="font-size:.75rem;">
+              ${(b.created_at || '').slice(0,10)}
+            </div>
+          </div>
+          ${b.status === 'pending' && hasPerm('ban_members') ? `
+            <div class="flex gap-1" style="margin-top:.9rem; justify-content:flex-end;">
+              <button class="btn btn-ghost btn-sm" onclick="reviewBanReq(${b.id}, 'reject')">❌ Отклонить</button>
+              <button class="btn btn-danger btn-sm" onclick="reviewBanReq(${b.id}, 'approve')">🔨 Одобрить бан</button>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+async function reviewBanReq(id, action) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/banrequest/${id}/${action}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+    });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showToast(action === 'approve'
+        ? (d.banned ? `🔨 Бан на ${d.ban_days} дней выдан` : '⚠️ Одобрено, но бан не выдан (нет прав у бота)')
+        : '✗ Заявка отклонена', d.banned === false && action === 'approve' ? 'error' : 'success');
+      const card = document.querySelector(`[data-br-id="${id}"]`);
+      if (card) {
+        card.classList.add(action === 'approve' ? 'card-exit-reject' : 'card-exit-accept');
+        setTimeout(() => loadBanRequests(), 480);
+      } else loadBanRequests();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      showToast('Ошибка: ' + (err.error || r.status), 'error');
+    }
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  INVITES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let _inviteSearchTimer = null;
@@ -2460,6 +2832,140 @@ async function loadTwins() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  UTILS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  КАСТОМНЫЕ ВЫПАДАЮЩИЕ СПИСКИ
+//  Нативный <select> остаётся в DOM (скрытый) и служит источником
+//  правды — поэтому весь остальной код (.value, fillChannelSelects,
+//  onchange) работает без изменений.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _csOpen = null;   // { sel, trigger, panel }
+
+function csInit() {
+  document.querySelectorAll('select.select').forEach(sel => {
+    if (sel.parentElement.classList.contains('cs-wrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'cs-wrap';
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);
+
+    const trg = document.createElement('button');
+    trg.type = 'button';
+    trg.className = 'cs-trigger';
+    trg.innerHTML = `<span class="cs-label"></span>
+      <svg class="cs-arrow" width="13" height="13" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>`;
+    trg.onclick = e => { e.stopPropagation(); csToggle(sel, trg); };
+    wrap.appendChild(trg);
+    csSyncOne(sel);
+  });
+}
+
+function csSyncOne(sel) {
+  const trg = sel.parentElement && sel.parentElement.querySelector('.cs-trigger');
+  if (!trg) return;
+  const opt = sel.options[sel.selectedIndex];
+  const lbl = trg.querySelector('.cs-label');
+  const txt = opt ? opt.textContent : '';
+  lbl.textContent = txt || '— не выбрано —';
+  lbl.classList.toggle('placeholder', !opt || !opt.value);
+}
+
+function csSync() {
+  document.querySelectorAll('select.select').forEach(csSyncOne);
+}
+
+function csToggle(sel, trg) {
+  if (_csOpen && _csOpen.sel === sel) return csClose();
+  csClose();
+
+  const panel = document.createElement('div');
+  panel.className = 'cs-panel';
+
+  const opts = Array.from(sel.options);
+  const withSearch = opts.length > 7;
+
+  if (withSearch) {
+    const s = document.createElement('div');
+    s.className = 'cs-search';
+    s.innerHTML = '<input type="text" placeholder="Поиск..." autocomplete="off">';
+    panel.appendChild(s);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'cs-list';
+  panel.appendChild(list);
+
+  const render = (q='') => {
+    const ql = q.toLowerCase();
+    const shown = opts.filter(o => !ql || o.textContent.toLowerCase().includes(ql));
+    if (!shown.length) {
+      list.innerHTML = '<div class="cs-empty">Ничего не найдено</div>';
+      return;
+    }
+    list.innerHTML = shown.map(o => {
+      const t = o.textContent;
+      const isCh = t.startsWith('#');
+      return `<div class="cs-opt ${o.value === sel.value ? 'sel' : ''}" data-v="${escapeHtml(o.value)}">
+        ${isCh ? '<span class="cs-hash">#</span>' : ''}
+        <span class="cs-txt">${escapeHtml(isCh ? t.slice(1) : t)}</span>
+        <svg class="cs-check" width="13" height="13" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.cs-opt').forEach(el => {
+      el.onclick = () => {
+        sel.value = el.dataset.v;
+        csSyncOne(sel);
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        csClose();
+      };
+    });
+  };
+  render();
+
+  panel.onclick = e => e.stopPropagation();   // клик внутри панели её не закрывает
+  document.body.appendChild(panel);
+  trg.classList.add('open');
+  _csOpen = { sel, trigger: trg, panel };
+  csPosition();
+
+  if (withSearch) {
+    const inp = panel.querySelector('.cs-search input');
+    inp.oninput = () => render(inp.value);
+    inp.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); csClose(); } };
+    setTimeout(() => inp.focus(), 20);
+  }
+}
+
+function csPosition() {
+  if (!_csOpen) return;
+  const { trigger, panel } = _csOpen;
+  const r = trigger.getBoundingClientRect();
+  const h = panel.offsetHeight;
+  const below = window.innerHeight - r.bottom;
+  const up = below < h + 12 && r.top > below;
+  panel.classList.toggle('up', up);
+  panel.style.width = r.width + 'px';
+  panel.style.left = r.left + 'px';
+  panel.style.top = up ? (r.top - h - 5) + 'px' : (r.bottom + 5) + 'px';
+}
+
+function csClose() {
+  if (!_csOpen) return;
+  _csOpen.trigger.classList.remove('open');
+  _csOpen.panel.remove();
+  _csOpen = null;
+}
+
+document.addEventListener('click', () => csClose());
+document.addEventListener('keydown', e => { if (e.key === 'Escape') csClose(); });
+window.addEventListener('resize', csClose);
+window.addEventListener('scroll', e => {
+  // прокрутка внутри самого списка опций не закрывает панель
+  if (_csOpen && _csOpen.panel.contains(e.target)) return;
+  csClose();
+}, true);
+
 function skeletonRows(cols, n=5) {
   return Array.from({length: n}, () =>
     '<tr>' + Array.from({length: cols}, () =>
@@ -2546,6 +3052,7 @@ document.addEventListener('click', e => {
   setTimeout(() => r.remove(), 550);
 });
 
+csInit();
 init();
 </script>
 
