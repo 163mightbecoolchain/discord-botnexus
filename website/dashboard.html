@@ -6,7 +6,7 @@
 <title>Witness · Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --accent-rgb: 0,217,163;
@@ -16,7 +16,7 @@
   --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
   --accent: #00d9a3; --accent-2: #00bfa5;
   --danger: #ff5470; --warning: #ffaa00; --info: #5a9eff;
-  --mono: 'Space Mono', 'JetBrains Mono', monospace;
+  --mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -99,7 +99,6 @@ body {
 }
 .guild-info .members {
   font-size: .7rem; color: var(--muted);
-  font-family: var(--mono);
 }
 
 .nav-section {
@@ -174,7 +173,7 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .user-info .role {
-  font-size: .68rem; color: var(--muted); font-family: var(--mono);
+  font-size: .68rem; color: var(--muted);
 }
 
 .logout-btn {
@@ -208,7 +207,7 @@ body {
 
 .page-subtitle {
   color: var(--muted); font-size: .85rem;
-  margin-top: .25rem; font-family: var(--mono);
+  margin-top: .25rem;
 }
 
 /* Cards */
@@ -447,7 +446,7 @@ label {
 .appeal-card.rejected { border-left-color: var(--danger); }
 .appeals-stats {
   display: flex; gap: 1rem; margin-bottom: 1.25rem;
-  font-family: var(--mono); font-size: .82rem;
+  font-size: .82rem;
 }
 .appeals-stats span {
   background: var(--panel); border: 1px solid var(--border);
@@ -768,7 +767,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Обзор сервера</div>
-          <div class="page-subtitle">// real-time stats</div>
+          <div class="page-subtitle">Статистика сервера в реальном времени</div>
         </div>
       </div>
 
@@ -820,7 +819,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Общие настройки</div>
-          <div class="page-subtitle">// general configuration</div>
+          <div class="page-subtitle">Язык, тикеты и базовые каналы</div>
         </div>
         <button class="btn btn-primary" onclick="saveGeneral()">Сохранить</button>
       </div>
@@ -879,7 +878,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Логирование</div>
-          <div class="page-subtitle">// log channels</div>
+          <div class="page-subtitle">Куда бот пишет события</div>
         </div>
         <button class="btn btn-primary" onclick="saveLogging()">Сохранить</button>
       </div>
@@ -924,7 +923,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Модерация</div>
-          <div class="page-subtitle">// punishments and quarantine</div>
+          <div class="page-subtitle">Наказания и карантин</div>
         </div>
         <button class="btn btn-primary" onclick="saveModeration()">Сохранить</button>
       </div>
@@ -1007,7 +1006,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Внешний вид</div>
-          <div class="page-subtitle">// личная тема — хранится в этом браузере</div>
+          <div class="page-subtitle">Личная тема — хранится в этом браузере</div>
         </div>
         <button class="btn btn-ghost" onclick="resetTheme()">Сбросить</button>
       </div>
@@ -1133,7 +1132,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Mod Log</div>
-          <div class="page-subtitle">// последние 100 действий модерации</div>
+          <div class="page-subtitle">Последние 100 действий модерации</div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="loadModlog()">⟳ Обновить</button>
       </div>
@@ -1158,7 +1157,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Апелляции</div>
-          <div class="page-subtitle">// pending / accepted / rejected</div>
+          <div class="page-subtitle">Заявки участников на снятие наказаний</div>
         </div>
         <div class="flex gap-1">
           <select class="select" id="appealsFilter" onchange="loadAppeals()" style="width: 180px;">
@@ -1187,7 +1186,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Инвайты</div>
-          <div class="page-subtitle">// кто кого пригласил</div>
+          <div class="page-subtitle">Кто кого пригласил на сервер</div>
         </div>
       </div>
 
@@ -1218,7 +1217,7 @@ input[type="color"] {
       <div class="page-head">
         <div>
           <div class="page-title">Стилометрия</div>
-          <div class="page-subtitle">// возможные альт-аккаунты</div>
+          <div class="page-subtitle">Возможные альт-аккаунты по стилю письма</div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="loadTwins()">⟳ Обновить</button>
       </div>
