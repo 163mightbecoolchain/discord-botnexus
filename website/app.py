@@ -51,6 +51,9 @@ async def html_response(filename: str) -> web.Response:
 async def handle_index(request):
     return await html_response("index.html")
 
+async def handle_privacy(request):
+    return await html_response("privacy.html")
+
 async def handle_dashboard(request):
     return await html_response("dashboard.html")
 
@@ -71,6 +74,7 @@ async def handle_health(request):
 app = web.Application()
 app.router.add_get("/",          handle_index)
 app.router.add_get("/dashboard", handle_dashboard)
+app.router.add_get("/privacy",   handle_privacy)
 app.router.add_get("/login",     handle_login)
 app.router.add_get("/logout",    handle_logout)
 app.router.add_get("/health",    handle_health)
