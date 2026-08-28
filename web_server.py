@@ -302,7 +302,10 @@ async def api_guilds(request):
         gid  = int(ug['id'])
         perms = int(ug.get('permissions', 0))
         if gid not in bot_guild_ids: continue
-        if not (perms & 0x8 or perms & 0x20): continue
+        # 0x8 Admin · 0x20 Manage Guild · 0x2000 Manage Messages · 0x10000000000 Moderate Members
+        is_admin = bool(perms & 0x8 or perms & 0x20)
+        is_mod   = bool(perms & 0x2000 or perms & 0x10000000000)
+        if not (is_admin or is_mod): continue
         tier = 0
         try:
             async with aiosqlite.connect(DB_PATH) as db:
@@ -313,6 +316,8 @@ async def api_guilds(request):
             pass
         bg = bot.get_guild(gid)
         result.append({
+            'can_manage': is_admin,
+            'perms':      str(perms),  # строкой — биты выше 2^53 не влезают в JS number
             'id':           ug['id'],
             'name':         ug['name'],
             'icon':         ug.get('icon'),
@@ -618,7 +623,7 @@ async def api_invites(request):
     if not bg:
         return web.json_response([])
     member = bg.get_member(int(s['user_id']))
-    if not member or not member.guild_permissions.manage_guild:
+    if not member or not member.guild_permissions.manage_messages:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
     q = request.rel_url.query.get('q', '').lower().strip()
@@ -720,7 +725,7 @@ async def api_appeal_action(request):
     if not bg:
         return web.json_response({'error': 'Guild not found'}, status=404)
     member = bg.get_member(int(s['user_id']))
-    if not member or not member.guild_permissions.manage_messages:
+    if not member:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
     try:
@@ -741,6 +746,18 @@ async def api_appeal_action(request):
         uid, atype, status = row
         if status != 'pending':
             return web.json_response({'error': 'already_reviewed'}, status=400)
+
+        # Право на решение зависит от типа наказания
+        p = member.guild_permissions
+        if atype in ('BAN', 'TEMPBAN'):
+            allowed = p.ban_members
+        elif atype == 'MUTE':
+            allowed = p.moderate_members or p.ban_members
+        else:  # WARN, KICK и прочее
+            allowed = p.manage_messages or p.moderate_members or p.ban_members
+        if not (allowed or p.administrator or p.manage_guild):
+            return web.json_response(
+                {'error': 'missing_permission', 'need': atype}, status=403)
 
         now = datetime.datetime.utcnow().isoformat()
         new_status = 'accepted' if action == 'accept' else 'rejected'
