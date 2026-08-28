@@ -764,13 +764,13 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 
     <div class="nav-section">
       <div class="nav-label">Настройки</div>
-      <div class="nav-item" data-page="general" onclick="showPage('general')">
+      <div class="nav-item" data-perm="manage_guild" data-page="general" onclick="showPage('general')">
         <span class="icon">⚙️</span> Общие
       </div>
-      <div class="nav-item" data-page="logging" onclick="showPage('logging')">
+      <div class="nav-item" data-perm="manage_guild" data-page="logging" onclick="showPage('logging')">
         <span class="icon">📝</span> Логирование
       </div>
-      <div class="nav-item" data-page="moderation" onclick="showPage('moderation')">
+      <div class="nav-item" data-perm="manage_guild" data-page="moderation" onclick="showPage('moderation')">
         <span class="icon">⚖️</span> Модерация
       </div>
       <div class="nav-item" data-page="appearance" onclick="showPage('appearance')">
@@ -780,17 +780,17 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 
     <div class="nav-section">
       <div class="nav-label">Данные</div>
-      <div class="nav-item" data-page="modlog" onclick="showPage('modlog')">
+      <div class="nav-item" data-perm="manage_messages" data-page="modlog" onclick="showPage('modlog')">
         <span class="icon">📋</span> Mod Log
       </div>
-      <div class="nav-item" data-page="appeals" onclick="showPage('appeals')">
+      <div class="nav-item" data-perm="manage_messages" data-page="appeals" onclick="showPage('appeals')">
         <span class="icon">⚖️</span> Апелляции
         <span class="badge hidden" id="appealsBadge">0</span>
       </div>
-      <div class="nav-item" data-page="invites" onclick="showPage('invites')">
+      <div class="nav-item" data-perm="manage_messages" data-page="invites" onclick="showPage('invites')">
         <span class="icon">🔗</span> Инвайты
       </div>
-      <div class="nav-item" data-page="twins" onclick="showPage('twins')">
+      <div class="nav-item" data-perm="manage_messages" data-page="twins" onclick="showPage('twins')">
         <span class="icon">🧬</span> Стилометрия
       </div>
     </div>
@@ -1860,9 +1860,64 @@ async function selectGuildById(id) {
   if (g) await selectGuild(g);
 }
 
+// ━━━ Права пользователя на выбранном сервере (битовая маска Discord) ━━━
+const PERM_BITS = {
+  administrator:    1n << 3n,
+  manage_guild:     1n << 5n,
+  kick_members:     1n << 1n,
+  ban_members:      1n << 2n,
+  manage_messages:  1n << 13n,
+  moderate_members: 1n << 40n,
+};
+
+let userPerms = { raw: 0n };
+
+function hasPerm(name) {
+  // Админ и Manage Server видят всё
+  if (userPerms.administrator || userPerms.manage_guild) return true;
+  return !!userPerms[name];
+}
+
+function computePerms(g) {
+  let raw = 0n;
+  try { raw = BigInt(g.perms ?? '0'); } catch(e) {}
+  const p = { raw };
+  for (const [k, bit] of Object.entries(PERM_BITS)) {
+    p[k] = (raw & bit) === bit;
+  }
+  // Обратная совместимость: старый API без perms, но с can_manage
+  if (raw === 0n && g.can_manage !== false) {
+    p.administrator = true;
+  }
+  // moderate_members даёт базовый модерский доступ к данным
+  if (p.moderate_members) p.manage_messages = p.manage_messages || true;
+  return p;
+}
+
+function applyPermsToUI() {
+  document.querySelectorAll('[data-perm]').forEach(el => {
+    el.style.display = hasPerm(el.dataset.perm) ? '' : 'none';
+  });
+  const roleEl = document.querySelector('.user-info .role');
+  if (roleEl) {
+    roleEl.textContent =
+      (userPerms.administrator || userPerms.manage_guild) ? 'Administrator' :
+      (userPerms.ban_members) ? 'Senior Moderator' :
+      (userPerms.manage_messages || userPerms.moderate_members) ? 'Moderator' : 'Viewer';
+  }
+  // Стоим на недоступной странице — уводим на Обзор
+  const active = document.querySelector('.nav-item.active');
+  if (active && active.dataset.perm && !hasPerm(active.dataset.perm)) {
+    showPage('overview');
+  }
+}
+
 async function selectGuild(g) {
   currentGuild = g;
   localStorage.setItem('current_guild', g.id);
+
+  userPerms = computePerms(g);
+  applyPermsToUI();
 
   document.getElementById('guildName').textContent = g.name;
   document.getElementById('guildMembers').textContent = `${g.member_count || 0} участников`;
@@ -1892,6 +1947,12 @@ async function showPage(name) {
   if (name === 'appearance') return renderThemePage();
 
   if (!currentGuild) return;
+
+  // Страница закрыта по правам — на Обзор
+  const navEl = document.querySelector(`.nav-item[data-page="${name}"]`);
+  if (navEl && navEl.dataset.perm && !hasPerm(navEl.dataset.perm)) {
+    return showPage('overview');
+  }
 
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
@@ -2223,6 +2284,11 @@ function openAppealDetails(id) {
   if (!a) return;
 
   const isPending = a.status === 'pending';
+  // Право решать зависит от типа наказания (как на бэке)
+  const canDecide =
+    (a.action_type === 'BAN' || a.action_type === 'TEMPBAN') ? hasPerm('ban_members') :
+    (a.action_type === 'MUTE') ? (hasPerm('moderate_members') || hasPerm('ban_members')) :
+    hasPerm('manage_messages');
   document.getElementById('appealModalContent').innerHTML = `
     <div class="modal-title">Апелляция #${a.id}</div>
     <div style="margin-bottom: 1rem;">
@@ -2253,7 +2319,17 @@ function openAppealDetails(id) {
       </div>
     ` : ''}
 
-    ${isPending ? `
+    ${isPending && !canDecide ? `
+      <div class="input-help" style="padding:.6rem .75rem; background:var(--bg-3); border-radius:6px;">
+        🔒 Для решения по типу <b>${a.action_type}</b> нужно право
+        ${a.action_type==='BAN'||a.action_type==='TEMPBAN' ? '«Банить участников»' :
+          a.action_type==='MUTE' ? '«Модерировать участников»' : '«Управлять сообщениями»'} на сервере
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
+      </div>
+    ` : ''}
+    ${isPending && canDecide ? `
       <div class="form-group">
         <label>Твой комментарий (опционально)</label>
         <textarea class="textarea" id="appealNote" rows="2" placeholder="Будет показан участнику..."></textarea>
@@ -2263,11 +2339,12 @@ function openAppealDetails(id) {
         <button class="btn btn-danger btn-sm" onclick="reviewAppeal('reject')">❌ Отклонить</button>
         <button class="btn btn-success btn-sm" onclick="reviewAppeal('accept')">✅ Принять</button>
       </div>
-    ` : `
+    ` : ''}
+    ${!isPending ? `
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
       </div>
-    `}
+    ` : ''}
   `;
   document.getElementById('appealModal').classList.add('show');
 }
