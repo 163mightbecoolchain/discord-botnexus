@@ -1247,8 +1247,14 @@ async def get_user_invites(gid, inviter_id):
 #  BOT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=["-", "!"], intents=intents)
+intents = discord.Intents.default()
+intents.members         = True   # Privileged: on_member_join/update, карантин, ban evasion, DM при таймауте
+intents.message_content = True   # Privileged: стилометрия, антиспам, автомод, префикс-команды
+# intents.presences НЕ запрашиваем — бот не использует статусы/активности
+# Префикс-команд больше нет: чтение чужих сообщений ради префикса требует
+# Message Content Intent, а весь функционал переехал на слэш-команды.
+# Префикс задан заведомо недостижимым — команды по тексту не сработают.
+bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 OWNER_IDS = set()  # {YOUR_USER_ID}
 
 def upsell_embed(req):
@@ -1698,7 +1704,7 @@ async def on_message(message):
                     e.add_field(name=t(gid, "action"), value=t(gid, "timeout_auto"))
                     await ch.send(embed=e)
             except Exception: pass
-    await bot.process_commands(message)
+    # process_commands больше не нужен — префикс-команд нет
 
 @bot.event
 async def on_member_join(member):
