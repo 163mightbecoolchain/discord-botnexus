@@ -167,6 +167,10 @@ async def refresh_discord_token(refresh_token: str) -> dict | None:
 # ── Page handlers ─────────────────────────────────────────────
 
 async def handle_index(request):
+    # Корень бот-API: отправляем людей на сайт
+    if WEBSITE_URL:
+        base = WEBSITE_URL if WEBSITE_URL.startswith('http') else f'https://{WEBSITE_URL}'
+        raise web.HTTPFound(base)
     try:
         return web.Response(text=await read_template('index.html'), content_type='text/html')
     except FileNotFoundError:
@@ -708,6 +712,130 @@ async def api_twins(request):
     except Exception:
         return web.json_response([])
 
+# ── API: ban requests ─────────────────────────────────────────
+
+@require_auth
+async def api_ban_requests(request):
+    """GET /api/guild/:id/banrequests?status=pending"""
+    guild_id = int(request.match_info['guild_id'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response([], status=200)
+    member = bg.get_member(int(s['user_id']))
+    p = member.guild_permissions if member else None
+    if not p or not (p.ban_members or p.administrator or p.manage_guild):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    status = request.query.get('status', '')
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            if status:
+                q = """SELECT id,user_id,username,mod_id,reason,warn_count,status,
+                              reviewer_id,created_at,reviewed_at
+                       FROM ban_requests WHERE guild_id=? AND status=?
+                       ORDER BY id DESC LIMIT 100"""
+                args = (guild_id, status)
+            else:
+                q = """SELECT id,user_id,username,mod_id,reason,warn_count,status,
+                              reviewer_id,created_at,reviewed_at
+                       FROM ban_requests WHERE guild_id=?
+                       ORDER BY id DESC LIMIT 100"""
+                args = (guild_id,)
+            async with db.execute(q, args) as c:
+                rows = await c.fetchall()
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+    out = []
+    for rid, uid, uname, mid, reason, wc, st, rev, created, reviewed in rows:
+        mod = bg.get_member(mid)
+        reviewer = bg.get_member(rev) if rev else None
+        out.append({
+            'id': rid, 'user_id': str(uid), 'username': uname,
+            'mod_id': str(mid), 'mod_name': mod.display_name if mod else str(mid),
+            'reason': reason, 'warn_count': wc, 'status': st,
+            'reviewer_name': reviewer.display_name if reviewer else '',
+            'created_at': created, 'reviewed_at': reviewed,
+        })
+    return web.json_response(out)
+
+
+@require_auth
+async def api_ban_request_action(request):
+    """POST /api/guild/:id/banrequest/:rid/[approve|reject]"""
+    guild_id = int(request.match_info['guild_id'])
+    rid      = int(request.match_info['rid'])
+    action   = request.match_info['action']
+    if action not in ('approve', 'reject'):
+        return web.json_response({'error': 'invalid_action'}, status=400)
+
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    member = bg.get_member(int(s['user_id']))
+    p = member.guild_permissions if member else None
+    if not p or not (p.ban_members or p.administrator):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT user_id, reason, status FROM ban_requests WHERE id=? AND guild_id=?",
+                (rid, guild_id)
+            ) as c:
+                row = await c.fetchone()
+        if not row:
+            return web.json_response({'error': 'not_found'}, status=404)
+        uid, reason, status = row
+        if status != 'pending':
+            return web.json_response({'error': 'already_reviewed'}, status=400)
+
+        now = datetime.datetime.utcnow().isoformat()
+        ban_ok = False
+        ban_days = 30
+
+        if action == 'approve':
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT ban3_days FROM punishment_settings WHERE guild_id=?", (guild_id,)
+                ) as c:
+                    pr = await c.fetchone()
+            ban_days = (pr[0] if pr and pr[0] else 30)
+            unban_at = (datetime.datetime.utcnow() +
+                        datetime.timedelta(days=ban_days)).isoformat()
+            try:
+                target = bg.get_member(uid) or await bot.fetch_user(uid)
+                await bg.ban(target, reason=f"[Заявка #{rid}] {reason}")
+                ban_ok = True
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("""
+                        INSERT INTO temp_bans (guild_id, user_id, mod_id, reason, unban_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                            unban_at=excluded.unban_at, unbanned=0, reason=excluded.reason
+                    """, (guild_id, uid, int(s['user_id']), reason, unban_at))
+                    await db.commit()
+            except Exception as ex:
+                print(f"[BANREQ] Бан не выдан #{rid}: {ex}")
+
+        new_status = 'approved' if action == 'approve' else 'rejected'
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                UPDATE ban_requests SET status=?, reviewer_id=?, reviewed_at=?
+                WHERE id=? AND guild_id=?
+            """, (new_status, int(s['user_id']), now, rid, guild_id))
+            await db.commit()
+
+        return web.json_response({'ok': True, 'status': new_status,
+                                  'banned': ban_ok, 'ban_days': ban_days})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+
 # ── API: appeal accept/reject ─────────────────────────────────
 
 @require_auth
@@ -909,6 +1037,8 @@ def create_app(bot) -> web.Application:
     app.router.add_get('/api/guild/{guild_id}/twins',             api_twins)
     app.router.add_get('/api/guild/{guild_id}/appeals',           api_appeals)
     app.router.add_post('/api/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action)
+    app.router.add_get('/api/guild/{guild_id}/banrequests',                   api_ban_requests)
+    app.router.add_post('/api/guild/{guild_id}/banrequest/{rid}/{action}',    api_ban_request_action)
 
     return app
 
