@@ -516,8 +516,8 @@ label {
 }
 body.has-bg #bgImage, body.has-bg #bgDim { display: block; }
 body.has-bg::before, body.has-bg::after { display: none; }  /* сетка и glow не нужны поверх фото */
-body.has-bg .layout { position: relative; z-index: 1; }
-body.has-bg .login-page { position: relative; z-index: 1; }
+body.has-bg .layout, body.fx-on .layout { position: relative; z-index: 1; }
+body.has-bg .login-page, body.fx-on .login-page { position: relative; z-index: 1; }
 
 /* Стеклянные панели — фон просвечивает сквозь карточки */
 body.glass .card,
@@ -595,6 +595,7 @@ input[type="color"] {
 
 <div id="bgImage"></div>
 <div id="bgDim"></div>
+<canvas id="fxCanvas" style="position:fixed; inset:0; z-index:0; pointer-events:none; display:none;"></canvas>
 
 <!-- LOGIN PAGE -->
 <div id="page-login" class="login-page hidden">
@@ -994,6 +995,32 @@ input[type="color"] {
       <div class="card">
         <div class="card-head">
           <div>
+            <div class="card-title">Анимация</div>
+            <div class="card-desc">Живой фон в стиле выбранной темы</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Тематическая анимация</div>
+              <div class="toggle-desc" id="animDesc">Emerald — матричный дождь · Frost — снег · Crimson — угли...</div>
+            </div>
+            <div class="toggle" id="tog-anim" onclick="toggleAnim()"></div>
+          </div>
+          <div class="form-group" id="animIntensityRow" style="display:none; margin-top: .75rem;">
+            <label>Интенсивность</label>
+            <div class="range-row">
+              <input type="range" min="1" max="10" value="4" id="animIntensity"
+                     oninput="setAnimIntensity(this.value)">
+              <span class="range-val" id="animIntVal">4</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
             <div class="card-title">Свои цвета</div>
             <div class="card-desc">Тонкая настройка поверх выбранной темы</div>
           </div>
@@ -1227,6 +1254,7 @@ function selectPreset(key) {
   saveTheme(t);
   applyTheme(t);
   applyBg();  // пересчитать panel-rgb для стеклянных панелей
+  if (_fx.running) { stopFx(); startFx(); }  // режим анимации зависит от темы
   renderThemePage();
 }
 
@@ -1249,6 +1277,18 @@ function resetTheme() {
 
 function renderThemePage() {
   renderBgControls();
+  const animOn = localStorage.getItem('ws_anim') === '1';
+  const ta = document.getElementById('tog-anim');
+  if (ta) {
+    ta.classList.toggle('on', animOn);
+    document.getElementById('animIntensityRow').style.display = animOn ? 'block' : 'none';
+    const iv = localStorage.getItem('ws_anim_int') ?? '4';
+    document.getElementById('animIntensity').value = iv;
+    document.getElementById('animIntVal').textContent = iv;
+    const mode = THEME_ANIM[currentTheme().preset || 'custom'] || 'drift';
+    document.getElementById('animDesc').textContent =
+      'Текущая тема → ' + (ANIM_NAMES[mode] || mode);
+  }
   const grid = document.getElementById('themeGrid');
   if (!grid) return;
   const cur = currentTheme();
@@ -1373,8 +1413,174 @@ function renderBgControls() {
 }
 
 // Применяем тему сразу, до загрузки остального — чтобы не мигало дефолтом
+// ━━━ Тематические анимации ━━━
+// Режимы: matrix (падающие символы), snow, embers (угли вверх),
+// bubbles (пузыри вверх), fireflies (светлячки), drift (дрейф частиц)
+const THEME_ANIM = {
+  emerald: 'matrix', violet: 'drift',   ocean: 'bubbles',
+  crimson: 'embers', amber: 'fireflies', frost: 'snow',
+  mono: 'drift', light: 'drift', custom: 'drift',
+};
+const ANIM_NAMES = {
+  matrix: 'матричный дождь', snow: 'снегопад', embers: 'угли',
+  bubbles: 'пузыри', fireflies: 'светлячки', drift: 'частицы',
+};
+
+let _fx = { running: false, raf: 0, parts: [], mode: '', ctx: null };
+
+function _fxColor(alpha) {
+  return `rgba(${getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim()},${alpha})`;
+}
+
+function _fxSpawn(w, h, mode, intensity) {
+  const count = intensity * (mode === 'matrix' ? 8 : 12);
+  const parts = [];
+  const CHARS = 'アイウエオ01WITNESS';
+  for (let i = 0; i < count; i++) {
+    const p = {
+      x: Math.random() * w, y: Math.random() * h,
+      s: .5 + Math.random() * 1.5,          // скорость
+      r: 1 + Math.random() * 2.5,           // размер
+      a: .15 + Math.random() * .45,         // прозрачность
+      ph: Math.random() * Math.PI * 2,      // фаза
+      ch: CHARS[Math.floor(Math.random() * CHARS.length)],
+    };
+    parts.push(p);
+  }
+  return parts;
+}
+
+function _fxFrame() {
+  if (!_fx.running) return;
+  const cv = document.getElementById('fxCanvas');
+  const ctx = _fx.ctx;
+  const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  const t = performance.now() / 1000;
+
+  for (const p of _fx.parts) {
+    switch (_fx.mode) {
+      case 'matrix':
+        p.y += p.s * 3.2;
+        if (p.y > h) { p.y = -20; p.x = Math.random() * w; }
+        ctx.font = `${10 + p.r * 3}px monospace`;
+        ctx.fillStyle = _fxColor(p.a);
+        ctx.fillText(p.ch, p.x, p.y);
+        break;
+      case 'snow':
+        p.y += p.s * 1.1;
+        p.x += Math.sin(t + p.ph) * .5;
+        if (p.y > h) { p.y = -8; p.x = Math.random() * w; }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, 7);
+        ctx.fillStyle = _fxColor(p.a * .9);
+        ctx.fill();
+        break;
+      case 'embers':
+        p.y -= p.s * 1.4;
+        p.x += Math.sin(t * 2 + p.ph) * .8;
+        if (p.y < -10) { p.y = h + 10; p.x = Math.random() * w; }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * (0.7 + 0.3 * Math.sin(t * 6 + p.ph)), 0, 7);
+        ctx.fillStyle = _fxColor(p.a * (0.5 + 0.5 * Math.sin(t * 5 + p.ph)));
+        ctx.fill();
+        break;
+      case 'bubbles':
+        p.y -= p.s * .9;
+        p.x += Math.sin(t + p.ph) * .4;
+        if (p.y < -12) { p.y = h + 12; p.x = Math.random() * w; }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 2, 0, 7);
+        ctx.strokeStyle = _fxColor(p.a * .7);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        break;
+      case 'fireflies': {
+        p.x += Math.sin(t * .8 + p.ph) * .9;
+        p.y += Math.cos(t * .6 + p.ph * 2) * .7;
+        if (p.x < 0) p.x = w; if (p.x > w) p.x = 0;
+        if (p.y < 0) p.y = h; if (p.y > h) p.y = 0;
+        const glow = 0.3 + 0.7 * Math.abs(Math.sin(t * 1.5 + p.ph));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, 7);
+        ctx.fillStyle = _fxColor(p.a * glow);
+        ctx.shadowBlur = 8 * glow;
+        ctx.shadowColor = _fxColor(.8);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        break;
+      }
+      default: // drift
+        p.x += Math.sin(t * .5 + p.ph) * .3;
+        p.y -= p.s * .35;
+        if (p.y < -6) { p.y = h + 6; p.x = Math.random() * w; }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, 7);
+        ctx.fillStyle = _fxColor(p.a * .6);
+        ctx.fill();
+    }
+  }
+  _fx.raf = requestAnimationFrame(_fxFrame);
+}
+
+function startFx() {
+  const cv = document.getElementById('fxCanvas');
+  if (!cv) return;
+  cv.width  = window.innerWidth;
+  cv.height = window.innerHeight;
+  _fx.ctx = cv.getContext('2d');
+  const preset = currentTheme().preset || 'custom';
+  _fx.mode = THEME_ANIM[preset] || 'drift';
+  const intensity = parseInt(localStorage.getItem('ws_anim_int') ?? '4');
+  _fx.parts = _fxSpawn(cv.width, cv.height, _fx.mode, intensity);
+  cv.style.display = 'block';
+  document.body.classList.add('fx-on');
+  if (!_fx.running) {
+    _fx.running = true;
+    _fxFrame();
+  }
+}
+
+function stopFx() {
+  _fx.running = false;
+  cancelAnimationFrame(_fx.raf);
+  const cv = document.getElementById('fxCanvas');
+  if (cv) { cv.style.display = 'none'; }
+  document.body.classList.remove('fx-on');
+}
+
+function applyAnim() {
+  if (localStorage.getItem('ws_anim') === '1') startFx();
+  else stopFx();
+}
+
+function toggleAnim() {
+  const on = localStorage.getItem('ws_anim') !== '1';
+  localStorage.setItem('ws_anim', on ? '1' : '0');
+  document.getElementById('tog-anim').classList.toggle('on', on);
+  document.getElementById('animIntensityRow').style.display = on ? 'block' : 'none';
+  applyAnim();
+}
+
+function setAnimIntensity(v) {
+  localStorage.setItem('ws_anim_int', v);
+  document.getElementById('animIntVal').textContent = v;
+  if (_fx.running) { stopFx(); startFx(); }
+}
+
+// Пауза когда вкладка не видна — не жрём батарею
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (_fx.running) { cancelAnimationFrame(_fx.raf); _fx.running = false; _fx._paused = true; } }
+  else if (_fx._paused) { _fx._paused = false; _fx.running = true; _fxFrame(); }
+});
+
+window.addEventListener('resize', () => {
+  if (_fx.running) { stopFx(); startFx(); }
+});
+
 applyTheme(currentTheme());
 applyBg();
+applyAnim();
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  STATE & AUTH
