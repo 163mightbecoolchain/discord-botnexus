@@ -645,6 +645,57 @@ input[type="color"] {
   cursor: pointer; padding: 2px;
 }
 
+/* Skeleton-загрузка */
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--bg-3) 25%, var(--panel-2) 50%, var(--bg-3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: 5px;
+  height: 14px;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* Каскадное появление */
+.stagger-in {
+  opacity: 0;
+  animation: staggerIn .32s ease forwards;
+}
+@keyframes staggerIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Уход карточки апелляции */
+.card-exit-accept, .card-exit-reject {
+  animation: cardExit .45s ease forwards;
+  pointer-events: none;
+}
+.card-exit-accept { border-left-color: var(--accent) !important; background: rgba(var(--accent-rgb), .08); }
+.card-exit-reject { border-left-color: var(--danger) !important; background: rgba(255,84,112,.08); }
+@keyframes cardExit {
+  40% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(40px); max-height: 0; margin-bottom: 0;
+         padding-top: 0; padding-bottom: 0; }
+}
+
+/* Спиннер в кнопке */
+.btn .spin {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid rgba(0,0,0,.25); border-top-color: currentColor;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.btn.btn-done { background: var(--accent) !important; color: #001a14 !important; }
+
+/* Плавная смена темы */
+html.theme-anim, html.theme-anim body,
+html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
+  transition: background-color .4s ease, border-color .4s ease,
+              color .4s ease, box-shadow .4s ease !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;
@@ -821,7 +872,7 @@ input[type="color"] {
           <div class="page-title">Общие настройки</div>
           <div class="page-subtitle">Язык, тикеты и базовые каналы</div>
         </div>
-        <button class="btn btn-primary" onclick="saveGeneral()">Сохранить</button>
+        <button class="btn btn-primary" onclick="btnBusy(this, saveGeneral)">Сохранить</button>
       </div>
 
       <div class="card">
@@ -880,7 +931,7 @@ input[type="color"] {
           <div class="page-title">Логирование</div>
           <div class="page-subtitle">Куда бот пишет события</div>
         </div>
-        <button class="btn btn-primary" onclick="saveLogging()">Сохранить</button>
+        <button class="btn btn-primary" onclick="btnBusy(this, saveLogging)">Сохранить</button>
       </div>
 
       <div class="card">
@@ -925,7 +976,7 @@ input[type="color"] {
           <div class="page-title">Модерация</div>
           <div class="page-subtitle">Наказания и карантин</div>
         </div>
-        <button class="btn btn-primary" onclick="saveModeration()">Сохранить</button>
+        <button class="btn btn-primary" onclick="btnBusy(this, saveModeration)">Сохранить</button>
       </div>
 
       <div class="card">
@@ -1321,6 +1372,8 @@ function saveTheme(t) {
 function selectPreset(key) {
   const t = { preset: key, ...THEMES[key] };
   saveTheme(t);
+  document.documentElement.classList.add('theme-anim');
+  setTimeout(() => document.documentElement.classList.remove('theme-anim'), 450);
   applyTheme(t);
   applyBg();  // пересчитать panel-rgb для стеклянных панелей
   if (_fx.running) { stopFx(); startFx(); }  // режим анимации зависит от темы
@@ -1983,7 +2036,7 @@ async function saveSettings(payload) {
 }
 
 function saveGeneral() {
-  saveSettings({
+  return saveSettings({
     lang: getVal('gen-lang'),
     tickets_enabled: getToggle('tog-tickets'),
     birthday_channel: getVal('gen-birthday-ch') || 0,
@@ -1991,7 +2044,7 @@ function saveGeneral() {
 }
 
 function saveLogging() {
-  saveSettings({
+  return saveSettings({
     log_channel: getVal('log-main') || 0,
     suggestion_channel: getVal('log-suggestion') || 0,
     starboard_channel: getVal('log-starboard') || 0,
@@ -1999,7 +2052,7 @@ function saveLogging() {
 }
 
 function saveModeration() {
-  saveSettings({
+  return saveSettings({
     mute1_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute1')) || 7)),
     mute2_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute2')) || 7)),
     ban3_days:  Math.max(1, parseInt(getVal('mod-ban3')) || 30),
@@ -2025,7 +2078,7 @@ function getToggle(id) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function loadOverview() {
   if (!currentGuild) return;
-  document.getElementById('ovMembers').textContent = currentGuild.member_count || '—';
+  animateNum(document.getElementById('ovMembers'), currentGuild.member_count || 0);
 
   try {
     const [modlogR, appealsR, twinsR] = await Promise.all([
@@ -2038,9 +2091,9 @@ async function loadOverview() {
     const appeals = appealsR.ok ? await appealsR.json() : [];
     const twins = twinsR.ok ? await twinsR.json() : [];
 
-    document.getElementById('ovModlog').textContent = modlog.length;
-    document.getElementById('ovAppeals').textContent = appeals.length;
-    document.getElementById('ovTwins').textContent = twins.filter(t => !t.confirmed && !t.false_positive).length;
+    animateNum(document.getElementById('ovModlog'), modlog.length);
+    animateNum(document.getElementById('ovAppeals'), appeals.length);
+    animateNum(document.getElementById('ovTwins'), twins.filter(t => !t.confirmed && !t.false_positive).length);
 
     const badge = document.getElementById('appealsBadge');
     if (appeals.length > 0) {
@@ -2054,8 +2107,8 @@ async function loadOverview() {
     if (!modlog.length) {
       tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Пока пусто</div></div></td></tr>';
     } else {
-      tbody.innerHTML = modlog.slice(0, 5).map(row => `
-        <tr>
+      tbody.innerHTML = modlog.slice(0, 5).map((row, i) => `
+        <tr class="stagger-in" style="animation-delay:${i*45}ms">
           <td><span class="code">${row.action || '?'}</span></td>
           <td>${escapeHtml(row.user_name || row.user_id || '—')}</td>
           <td>${escapeHtml(row.mod_name || row.mod_id || '—')}</td>
@@ -2072,6 +2125,7 @@ async function loadOverview() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function loadModlog() {
   if (!currentGuild) return;
+  document.getElementById('modlogTable').innerHTML = skeletonRows(6, 6);
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/modlog`);
     const rows = r.ok ? await r.json() : [];
@@ -2080,8 +2134,8 @@ async function loadModlog() {
       tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Mod log пуст</div></div></td></tr>';
       return;
     }
-    tbody.innerHTML = rows.map(row => `
-      <tr>
+    tbody.innerHTML = rows.map((row, i) => `
+      <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
         <td><span class="code">${row.action || '?'}</span></td>
         <td>${escapeHtml(row.user_name || row.user_id || '—')}</td>
         <td>${escapeHtml(row.mod_name || '—')}</td>
@@ -2128,6 +2182,7 @@ async function refreshAppealsBadge() {
 
 async function loadAppeals() {
   if (!currentGuild) return;
+  document.getElementById('appealsList').innerHTML = skeletonCards(3);
   const status = document.getElementById('appealsFilter').value;
   const qs = status ? `?status=${status}` : '';
   try {
@@ -2140,8 +2195,9 @@ async function loadAppeals() {
       list.innerHTML = '<div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Нет апелляций</div><div class="empty-sub">с этим статусом</div></div>';
       return;
     }
-    list.innerHTML = rows.map(a => `
-      <div class="card appeal-card ${a.status}" style="cursor: pointer;" onclick="openAppealDetails(${a.id})">
+    list.innerHTML = rows.map((a, i) => `
+      <div class="card appeal-card ${a.status} stagger-in" data-appeal-id="${a.id}"
+           style="cursor: pointer; animation-delay:${Math.min(i,12)*45}ms" onclick="openAppealDetails(${a.id})">
         <div class="card-body" style="display: flex; align-items: center; gap: 1rem;">
           <span class="status-pill ${a.status}">${a.status}</span>
           <div style="flex: 1;">
@@ -2232,8 +2288,15 @@ async function reviewAppeal(action) {
     });
     if (r.ok) {
       showToast(action === 'accept' ? '✓ Апелляция принята' : '✗ Апелляция отклонена', 'success');
+      const card = document.querySelector(`[data-appeal-id="${_currentAppealId}"]`);
       closeAppealModal();
-      loadAppeals();  // перерисует список и обновит бейдж слева
+      if (card) {
+        // Карточка окрашивается и уезжает, потом список обновляется
+        card.classList.add(action === 'accept' ? 'card-exit-accept' : 'card-exit-reject');
+        setTimeout(() => loadAppeals(), 480);
+      } else {
+        loadAppeals();
+      }
     } else {
       const err = await r.json().catch(() => ({}));
       showToast('Ошибка: ' + (err.error || r.status), 'error');
@@ -2257,6 +2320,7 @@ function debounceInviteSearch() {
 
 async function loadInvites(q='') {
   if (!currentGuild) return;
+  document.getElementById('invitesTable').innerHTML = skeletonRows(5, 6);
   try {
     const url = `/api/guild/${currentGuild.id}/invites` + (q ? `?q=${encodeURIComponent(q)}` : '');
     const r = await apiFetch(url);
@@ -2270,8 +2334,8 @@ async function loadInvites(q='') {
       </div></td></tr>`;
       return;
     }
-    tbody.innerHTML = rows.map(row => `
-      <tr>
+    tbody.innerHTML = rows.map((row, i) => `
+      <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
         <td><span class="code">${escapeHtml(row.invite_code)}</span></td>
         <td>${escapeHtml(row.inviter_name || '—')}</td>
         <td>${row.uses || 0}</td>
@@ -2287,6 +2351,7 @@ async function loadInvites(q='') {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function loadTwins() {
   if (!currentGuild) return;
+  document.getElementById('twinsTable').innerHTML = skeletonRows(6, 4);
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/twins`);
     const rows = r.ok ? await r.json() : [];
@@ -2295,12 +2360,12 @@ async function loadTwins() {
       tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Твинков не обнаружено</div></div></td></tr>';
       return;
     }
-    tbody.innerHTML = rows.map(row => {
+    tbody.innerHTML = rows.map((row, i) => {
       const sim = row.similarity || 0;
       const status = row.confirmed ? 'approved' : (row.false_positive ? 'rejected' : 'pending');
       const statusText = row.confirmed ? 'Подтверждён' : (row.false_positive ? 'Ложное' : 'Не проверен');
       return `
-        <tr>
+        <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
           <td>#${row.id}</td>
           <td>${escapeHtml(row.user_a_name || row.user_a)}</td>
           <td>${escapeHtml(row.user_b_name || row.user_b)}</td>
@@ -2318,6 +2383,63 @@ async function loadTwins() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  UTILS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function skeletonRows(cols, n=5) {
+  return Array.from({length: n}, () =>
+    '<tr>' + Array.from({length: cols}, () =>
+      `<td><div class="skeleton" style="width:${55 + Math.random()*40|0}%"></div></td>`
+    ).join('') + '</tr>'
+  ).join('');
+}
+
+function skeletonCards(n=3) {
+  return Array.from({length: n}, () => `
+    <div class="card"><div class="card-body" style="display:flex; gap:1rem; align-items:center;">
+      <div class="skeleton" style="width:70px; height:22px; border-radius:999px;"></div>
+      <div style="flex:1;">
+        <div class="skeleton" style="width:40%; margin-bottom:.5rem;"></div>
+        <div class="skeleton" style="width:75%; height:10px;"></div>
+      </div>
+    </div></div>
+  `).join('');
+}
+
+function animateNum(el, target) {
+  target = parseInt(target) || 0;
+  if (target === 0) { el.textContent = '0'; return; }
+  const dur = 500, start = performance.now();
+  const step = now => {
+    const p = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(target * eased).toLocaleString('ru');
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+async function btnBusy(btn, fn) {
+  // Кнопка: спиннер → ✓ Готово → возврат
+  if (!btn || btn.dataset.busy) return fn();
+  const orig = btn.innerHTML;
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Сохраняю...';
+  const ok = await fn();
+  if (ok !== false) {
+    btn.classList.add('btn-done');
+    btn.innerHTML = '✓ Готово';
+    setTimeout(() => {
+      btn.classList.remove('btn-done');
+      btn.innerHTML = orig;
+      btn.disabled = false;
+      delete btn.dataset.busy;
+    }, 1300);
+  } else {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+    delete btn.dataset.busy;
+  }
+}
+
 function escapeHtml(s) {
   if (s === null || s === undefined) return '';
   return String(s)
