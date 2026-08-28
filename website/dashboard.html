@@ -76,7 +76,12 @@ body {
   cursor: pointer; transition: border-color .15s;
 }
 
-.guild-selector:hover { border-color: var(--accent); }
+.guild-selector:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .1);
+}
+.guild-selector:active { transform: scale(.98); }
+.guild-selector { transition: border-color .15s, box-shadow .2s, transform .1s; }
 
 .guild-icon {
   width: 32px; height: 32px; border-radius: 8px;
@@ -112,13 +117,19 @@ body {
   padding: .55rem .65rem; border-radius: 6px;
   color: var(--text-2); text-decoration: none;
   font-size: .88rem; font-weight: 500;
-  cursor: pointer; transition: all .12s;
+  cursor: pointer;
+  transition: background .15s, color .15s, padding-left .18s ease, border-color .15s;
   border: 1px solid transparent;
 }
 
+.nav-item .icon { transition: transform .18s cubic-bezier(.34,1.56,.64,1); }
+
 .nav-item:hover {
   background: var(--panel); color: var(--text);
+  padding-left: .95rem;
 }
+
+.nav-item:hover .icon { transform: scale(1.2) rotate(-6deg); }
 
 .nav-item.active {
   background: rgba(var(--accent-rgb),0.08);
@@ -136,6 +147,12 @@ body {
   background: var(--danger); color: white;
   padding: .1rem .4rem; border-radius: 999px;
   font-size: .65rem; font-weight: 700;
+  animation: badgePulse 2.4s ease infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,84,112,.5); }
+  50%      { box-shadow: 0 0 0 5px rgba(255,84,112,0); }
 }
 
 .user-card {
@@ -199,7 +216,10 @@ body {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 10px; margin-bottom: 1.25rem;
   overflow: hidden;
+  transition: border-color .2s, box-shadow .25s;
 }
+
+.card:hover { border-color: var(--border-2); }
 
 .card-head {
   padding: 1rem 1.25rem;
@@ -229,6 +249,13 @@ body {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 10px; padding: 1.25rem;
   position: relative; overflow: hidden;
+  transition: transform .18s ease, border-color .18s, box-shadow .22s;
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--border-2);
+  box-shadow: 0 10px 24px rgba(0,0,0,.25);
 }
 
 .stat-card::before {
@@ -275,8 +302,11 @@ label {
   transition: border-color .15s;
 }
 
+.input, .select, .textarea { transition: border-color .18s, box-shadow .18s; }
+
 .input:focus, .select:focus, .textarea:focus {
   outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .14);
 }
 
 .input-help {
@@ -305,8 +335,11 @@ label {
   content: ''; position: absolute;
   top: 2px; left: 2px;
   width: 18px; height: 18px; background: white;
-  border-radius: 50%; transition: transform .15s;
+  border-radius: 50%;
+  transition: transform .28s cubic-bezier(.34,1.8,.64,1);
 }
+
+.toggle:active::after { width: 22px; transition: width .1s, transform .28s cubic-bezier(.34,1.8,.64,1); }
 
 .toggle.on { background: var(--accent); }
 .toggle.on::after { transform: translateX(16px); }
@@ -317,14 +350,32 @@ label {
   padding: .55rem 1rem; border-radius: 6px;
   font-size: .85rem; font-weight: 600;
   border: 1px solid transparent; cursor: pointer;
-  font-family: inherit; transition: all .15s;
+  font-family: inherit;
+  transition: transform .16s cubic-bezier(.34,1.56,.64,1),
+              box-shadow .2s, background .15s, border-color .15s, color .15s;
   text-decoration: none;
+  position: relative; overflow: hidden;
 }
+
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: translateY(0) scale(.97); transition-duration: .06s; }
+
+/* Ripple при клике */
+.btn .ripple {
+  position: absolute; border-radius: 50%;
+  background: rgba(255,255,255,.35);
+  transform: scale(0); pointer-events: none;
+  animation: ripple .5s ease-out forwards;
+}
+@keyframes ripple { to { transform: scale(3); opacity: 0; } }
 
 .btn-primary {
   background: var(--accent); color: #001a14; border-color: var(--accent);
 }
-.btn-primary:hover { background: var(--accent-2); }
+.btn-primary:hover {
+  background: var(--accent-2);
+  box-shadow: 0 6px 20px rgba(var(--accent-rgb), .35);
+}
 
 .btn-ghost {
   background: transparent; color: var(--text); border-color: var(--border-2);
@@ -371,7 +422,8 @@ label {
 }
 
 .table tr:last-child td { border-bottom: 0; }
-.table tr:hover { background: rgba(255,255,255,0.02); }
+.table tbody tr { transition: background .12s, transform .12s; }
+.table tr:hover { background: rgba(var(--accent-rgb),0.04); }
 
 .code {
   font-family: var(--mono); color: var(--accent);
@@ -462,7 +514,11 @@ label {
 
 /* Hidden page */
 .page { display: none; }
-.page.active { display: block; }
+.page.active { display: block; animation: pageIn .25s ease; }
+
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(8px); }
+}
 
 /* Modal */
 .modal-bg {
@@ -471,13 +527,20 @@ label {
   display: none; place-items: center;
   z-index: 500; padding: 1rem;
 }
-.modal-bg.show { display: grid; }
+.modal-bg.show { display: grid; animation: fadeIn .18s ease; }
+
+@keyframes fadeIn { from { opacity: 0; } }
 
 .modal {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 12px; padding: 1.5rem;
   max-width: 540px; width: 100%;
   max-height: 85vh; overflow-y: auto;
+  animation: modalIn .22s cubic-bezier(.34,1.4,.64,1);
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(.92) translateY(12px); }
 }
 
 .modal-title {
@@ -581,6 +644,13 @@ input[type="color"] {
   width: 44px; height: 30px; border: 1px solid var(--border-2);
   border-radius: 6px; background: var(--bg-3);
   cursor: pointer; padding: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 /* Helpers */
@@ -2262,6 +2332,21 @@ function showToast(msg, type='success') {
   t.className = 'toast show ' + type;
   setTimeout(() => t.classList.remove('show'), 2800);
 }
+
+// Ripple-эффект на кнопках
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const d = Math.max(rect.width, rect.height);
+  const r = document.createElement('span');
+  r.className = 'ripple';
+  r.style.width = r.style.height = d + 'px';
+  r.style.left = (e.clientX - rect.left - d/2) + 'px';
+  r.style.top  = (e.clientY - rect.top  - d/2) + 'px';
+  btn.appendChild(r);
+  setTimeout(() => r.remove(), 550);
+});
 
 init();
 </script>
