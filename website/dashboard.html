@@ -645,6 +645,62 @@ input[type="color"] {
   cursor: pointer; padding: 2px;
 }
 
+/* ─── Командная палитра (Ctrl+K) ─── */
+.cmdk-bg {
+  position: fixed; inset: 0; z-index: 800;
+  background: rgba(0,0,0,.55); display: none;
+  align-items: flex-start; justify-content: center;
+  padding-top: 12vh; animation: fadeIn .15s ease;
+}
+.cmdk-bg.show { display: flex; }
+.cmdk {
+  width: 100%; max-width: 520px;
+  background: var(--panel); border: 1px solid var(--border-2);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  animation: modalIn .18s cubic-bezier(.34,1.4,.64,1);
+}
+.cmdk input {
+  width: 100%; padding: .95rem 1.1rem;
+  background: transparent; border: 0; border-bottom: 1px solid var(--border);
+  color: var(--text); font-size: 1rem; font-family: inherit; outline: none;
+}
+.cmdk-list { max-height: 340px; overflow-y: auto; padding: .35rem; }
+.cmdk-item {
+  padding: .6rem .75rem; border-radius: 6px; cursor: pointer;
+  display: flex; align-items: center; gap: .7rem; font-size: .9rem;
+}
+.cmdk-item:hover, .cmdk-item.cursor { background: var(--panel-2); }
+.cmdk-item .k { margin-left: auto; font-size: .72rem; color: var(--muted); font-family: var(--mono); }
+.cmdk-sec { padding: .5rem .75rem .3rem; font-size: .68rem; color: var(--muted);
+            text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+
+/* ─── Досье участника ─── */
+.member-head {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+}
+.member-av {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--bg-3); overflow: hidden; flex-shrink: 0;
+}
+.member-av img { width: 100%; height: 100%; object-fit: cover; }
+.member-chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+.chip {
+  font-size: .72rem; padding: .2rem .55rem; border-radius: 999px;
+  background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border);
+}
+.chip.warn { background: rgba(255,170,0,.12); color: var(--warning); border-color: transparent; }
+.chip.danger { background: rgba(255,84,112,.12); color: var(--danger); border-color: transparent; }
+.chip.ok { background: rgba(var(--accent-rgb),.12); color: var(--accent); border-color: transparent; }
+
+.search-result {
+  padding: .6rem .75rem; border-radius: 7px; cursor: pointer;
+  display: flex; align-items: center; gap: .7rem;
+  border: 1px solid transparent;
+}
+.search-result:hover { background: var(--panel-2); border-color: var(--border-2); }
+.search-result img { width: 30px; height: 30px; border-radius: 50%; }
+
 /* ─── Группы тумблеров логирования ─── */
 .log-group { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem; }
 .log-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
@@ -897,6 +953,12 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-item" data-perm="manage_guild" data-page="moderation" onclick="showPage('moderation')">
         <span class="icon">⚖️</span> Модерация
       </div>
+      <div class="nav-item" data-perm="manage_guild" data-page="automation" onclick="showPage('automation')">
+        <span class="icon">🤖</span> Автоматизация
+      </div>
+      <div class="nav-item" data-perm="manage_guild" data-page="security" onclick="showPage('security')">
+        <span class="icon">🛡️</span> Безопасность
+      </div>
       <div class="nav-item" data-page="appearance" onclick="showPage('appearance')">
         <span class="icon">🎨</span> Внешний вид
       </div>
@@ -904,6 +966,9 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 
     <div class="nav-section">
       <div class="nav-label">Данные</div>
+      <div class="nav-item" data-perm="manage_messages" data-page="member" onclick="showPage('member')">
+        <span class="icon">🔍</span> Поиск участника
+      </div>
       <div class="nav-item" data-perm="manage_messages" data-page="modlog" onclick="showPage('modlog')">
         <span class="icon">📋</span> Mod Log
       </div>
@@ -1316,6 +1381,162 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
       </div>
     </div></div>
 
+    <!-- AUTOMATION -->
+    <div id="content-automation" class="page"><div class="page-inner">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Автоматизация</div>
+          <div class="page-subtitle">Фоновые задачи бота</div>
+        </div>
+        <button class="btn btn-primary" onclick="btnBusy(this, saveAutomation)">Сохранить</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Автоочистка инвайтов</div>
+            <div class="card-desc">Раз в 2 дня удаляет приглашения без единого перехода</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Включена</div>
+              <div class="toggle-desc">Удаляются только инвайты с 0 переходов</div>
+            </div>
+            <div class="toggle" id="tog-invclean" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="form-row" style="margin-top:1rem;">
+            <div class="form-group">
+              <label>Удалять старше (дней)</label>
+              <input type="number" class="input" id="auto-invdays" value="14" min="1" max="365">
+            </div>
+            <div class="form-group">
+              <label>Канал для отчёта</label>
+              <select class="select" id="auto-invch"><option value="">— нет —</option></select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Starboard</div>
+            <div class="card-desc">Сообщения с реакциями ⭐ попадают в отдельный канал</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Канал starboard</label>
+              <select class="select" id="auto-starch"><option value="">— выключено —</option></select>
+            </div>
+            <div class="form-group">
+              <label>Порог звёзд</label>
+              <input type="number" class="input" id="auto-starthr" value="3" min="1" max="100">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Дни рождения</div>
+            <div class="card-desc">Бот поздравляет участников в 09:00 UTC</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="form-group" style="margin:0;">
+            <label>Канал для поздравлений</label>
+            <select class="select" id="auto-bdaych"><option value="">— выключено —</option></select>
+          </div>
+        </div>
+      </div>
+    </div></div>
+
+    <!-- SECURITY -->
+    <div id="content-security" class="page"><div class="page-inner">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Безопасность</div>
+          <div class="page-subtitle">Анти-нюк и стилометрия</div>
+        </div>
+        <button class="btn btn-primary" onclick="btnBusy(this, saveSecurityPage)">Сохранить</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Порог определения твинков</div>
+            <div class="card-desc">Насколько похожим должен быть стиль письма для срабатывания</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="form-group" style="margin:0;">
+            <label>Сходство от, %</label>
+            <div class="range-row">
+              <input type="range" min="50" max="99" value="80" id="sec-twinthr"
+                     oninput="document.getElementById('twinThrVal').textContent=this.value+'%'">
+              <span class="range-val" id="twinThrVal">80%</span>
+            </div>
+            <div class="input-help">
+              Ниже — больше находок и ложных срабатываний, выше — только явные совпадения.
+              Рекомендуется 75–85%.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Анти-нюк</div>
+            <div class="card-desc">Лимиты на массовые действия модераторов</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Действие</th><th>Лимит</th><th>За период</th></tr></thead>
+              <tbody>
+                <tr><td>Баны</td><td>5</td><td>30 сек</td></tr>
+                <tr><td>Кики</td><td>5</td><td>30 сек</td></tr>
+                <tr><td>Муты</td><td>8</td><td>30 сек</td></tr>
+                <tr><td>Удаление каналов</td><td>3</td><td>20 сек</td></tr>
+                <tr><td>Удаление ролей</td><td>3</td><td>20 сек</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="input-help" style="margin-top:.75rem;">
+            При превышении действие блокируется, а владелец сервера получает уведомление.
+            Владелец сервера из проверки исключён.
+          </div>
+        </div>
+      </div>
+    </div></div>
+
+    <!-- MEMBER LOOKUP -->
+    <div id="content-member" class="page"><div class="page-inner">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Поиск участника</div>
+          <div class="page-subtitle">Полное досье: наказания, апелляции, твинки</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <input type="text" class="input" id="memberSearch"
+                 placeholder="Ник или ID участника..." oninput="debounceMemberSearch()">
+          <div id="memberResults" style="margin-top:.6rem;"></div>
+        </div>
+      </div>
+
+      <div id="memberCard"></div>
+    </div></div>
+
     <!-- MODLOG -->
     <div id="content-modlog" class="page">
       <div class="page-head">
@@ -1474,6 +1695,14 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 <!-- APPEAL DETAILS MODAL -->
 <div class="modal-bg" id="appealModal" onclick="if(event.target===this)closeAppealModal()">
   <div class="modal" id="appealModalContent"></div>
+</div>
+
+<div class="cmdk-bg" id="cmdkBg" onclick="if(event.target===this)closeCmdk()">
+  <div class="cmdk">
+    <input type="text" id="cmdkInput" placeholder="Переход по разделам или поиск участника..."
+           autocomplete="off">
+    <div class="cmdk-list" id="cmdkList"></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -2142,6 +2371,7 @@ async function showPage(name) {
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
   if (name === 'appeals') { await loadAppeals(); }
+  if (name === 'automation' || name === 'security') await loadAutomation();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') await loadInvites('');
   if (name === 'twins') await loadTwins();
@@ -2168,7 +2398,8 @@ async function loadChannelsRoles() {
 }
 
 function fillChannelSelects() {
-  const ids = ['gen-birthday-ch', 'log-main', 'log-suggestion', 'log-starboard'];
+  const ids = ['gen-birthday-ch', 'log-main', 'log-suggestion', 'log-starboard',
+               'auto-invch', 'auto-starch', 'auto-bdaych'];
   for (const id of ids) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -2659,6 +2890,255 @@ async function reviewAppeal(action) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  АВТОМАТИЗАЦИЯ И БЕЗОПАСНОСТЬ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadAutomation() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/automation`);
+    if (!r.ok) return;
+    const a = await r.json();
+    setToggle('tog-invclean', a.invclean_enabled);
+    setVal('auto-invdays', a.invclean_days ?? 14);
+    setSelect('auto-invch',  a.invclean_channel);
+    setSelect('auto-starch', a.starboard_channel);
+    setVal('auto-starthr', a.starboard_threshold ?? 3);
+    setSelect('auto-bdaych', a.birthday_channel);
+    const thr = a.twin_threshold ?? 80;
+    setVal('sec-twinthr', thr);
+    const tv = document.getElementById('twinThrVal');
+    if (tv) tv.textContent = thr + '%';
+    csSync();
+  } catch(e) {}
+}
+
+async function postAutomation(payload) {
+  if (!currentGuild) return false;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/automation`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) { showToast('✓ Сохранено', 'success'); return true; }
+    const err = await r.json().catch(() => ({}));
+    showToast('Ошибка: ' + (err.error || r.status), 'error');
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+  return false;
+}
+
+function saveAutomation() {
+  return postAutomation({
+    invclean_enabled: getToggle('tog-invclean'),
+    invclean_days:    parseInt(getVal('auto-invdays')) || 14,
+    invclean_channel: getVal('auto-invch') || 0,
+    starboard_channel:   getVal('auto-starch') || 0,
+    starboard_threshold: parseInt(getVal('auto-starthr')) || 3,
+    birthday_channel:    getVal('auto-bdaych') || 0,
+  });
+}
+
+function saveSecurityPage() {
+  return postAutomation({
+    twin_threshold: parseInt(getVal('sec-twinthr')) || 80,
+  });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ПОИСК УЧАСТНИКА
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _memberTimer = null;
+function debounceMemberSearch() {
+  clearTimeout(_memberTimer);
+  _memberTimer = setTimeout(runMemberSearch, 350);
+}
+
+async function runMemberSearch() {
+  const q = (document.getElementById('memberSearch')?.value || '').trim();
+  const box = document.getElementById('memberResults');
+  if (!box || !currentGuild) return;
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/members/search?q=${encodeURIComponent(q)}`);
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) {
+      box.innerHTML = '<div class="input-help">Никого не найдено</div>';
+      return;
+    }
+    box.innerHTML = rows.map(m => `
+      <div class="search-result" onclick="openMember('${m.id}')">
+        <img src="${m.avatar}" alt="">
+        <div>
+          <div style="font-weight:600; font-size:.88rem;">${escapeHtml(m.name)}</div>
+          <div style="font-size:.75rem; color:var(--muted);" class="text-mono">${escapeHtml(m.tag)}</div>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+async function openMember(uid) {
+  const box = document.getElementById('memberCard');
+  if (!box) return;
+  box.innerHTML = skeletonCards(2);
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}`);
+    if (!r.ok) { box.innerHTML = '<div class="empty"><div class="empty-title">Не удалось загрузить</div></div>'; return; }
+    const m = await r.json();
+    const d = s => (s || '').slice(0,10);
+    const chips = [];
+    if (!m.on_server) chips.push('<span class="chip danger">не на сервере</span>');
+    if (m.timed_out)  chips.push('<span class="chip warn">в муте</span>');
+    if (m.warns)      chips.push(`<span class="chip ${m.warns>=3?'danger':'warn'}">варнов: ${m.warns}/3</span>`);
+    if (!m.warns && m.on_server) chips.push('<span class="chip ok">без нарушений</span>');
+
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-body">
+          <div class="member-head">
+            <div class="member-av">${m.avatar ? `<img src="${m.avatar}" alt="">` : '?'}</div>
+            <div style="flex:1; min-width:200px;">
+              <div style="font-size:1.15rem; font-weight:700;">${escapeHtml(m.name || m.user_id)}</div>
+              <div class="text-mono" style="font-size:.78rem; color:var(--muted);">
+                ${escapeHtml(m.tag || '')} · ID ${m.user_id}
+              </div>
+              <div class="member-chips">${chips.join('')}</div>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:1.2rem;">
+            <div><label>Аккаунт создан</label><div class="text-mono">${d(m.created) || '—'}</div></div>
+            <div><label>На сервере с</label><div class="text-mono">${d(m.joined) || '—'}</div></div>
+          </div>
+          ${m.invited_by ? `<div class="form-group"><label>Пригласил</label>
+            <div>${escapeHtml(m.invited_by.name)} · <span class="code">${escapeHtml(m.invited_by.code)}</span></div></div>` : ''}
+          ${m.active_mute ? `<div class="form-group"><label>Активный мут до</label>
+            <div class="text-mono">${m.active_mute.until.slice(0,16).replace('T',' ')}</div>
+            <div class="input-help">${escapeHtml(m.active_mute.reason || '')}</div></div>` : ''}
+          ${m.roles && m.roles.length ? `<div class="form-group" style="margin:0;"><label>Роли</label>
+            <div class="member-chips">${m.roles.map(r=>`<span class="chip">${escapeHtml(r)}</span>`).join('')}</div></div>` : ''}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">История наказаний</div></div></div>
+        <div class="table-wrap" style="border:0; border-radius:0;">
+          <table class="table">
+            <thead><tr><th>Действие</th><th>Причина</th><th>Срок</th><th>Когда</th></tr></thead>
+            <tbody>${
+              (m.history && m.history.length) ? m.history.map(h=>`
+                <tr><td><span class="code">${h.action||'?'}</span></td>
+                <td>${escapeHtml(h.reason||'—')}</td>
+                <td>${escapeHtml(h.duration||'—')}</td>
+                <td class="text-mono text-muted">${d(h.created_at)}</td></tr>`).join('')
+              : '<tr><td colspan="4"><div class="empty" style="padding:1.5rem;"><div class="empty-sub">Наказаний не было</div></div></td></tr>'
+            }</tbody>
+          </table>
+        </div>
+      </div>
+
+      ${(m.twins && m.twins.length) ? `
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Возможные твинки</div></div></div>
+        <div class="table-wrap" style="border:0; border-radius:0;">
+          <table class="table">
+            <thead><tr><th>Участник</th><th>Сходство</th><th>Статус</th></tr></thead>
+            <tbody>${m.twins.map(t=>`
+              <tr><td>${escapeHtml(t.name)}</td>
+              <td><strong style="color:${t.similarity>=80?'var(--danger)':'var(--warning)'}">${(t.similarity||0).toFixed(0)}%</strong></td>
+              <td>${t.confirmed?'<span class="status-pill approved">Подтверждён</span>'
+                    :t.false_positive?'<span class="status-pill rejected">Ложное</span>'
+                    :'<span class="status-pill pending">Не проверен</span>'}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}
+
+      ${(m.appeals && m.appeals.length) ? `
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Апелляции</div></div></div>
+        <div class="table-wrap" style="border:0; border-radius:0;">
+          <table class="table">
+            <thead><tr><th>#</th><th>Наказание</th><th>Статус</th><th>Подана</th></tr></thead>
+            <tbody>${m.appeals.map(a=>`
+              <tr><td>#${a.id}</td><td><span class="code">${a.action_type}</span></td>
+              <td><span class="status-pill ${a.status}">${a.status}</span></td>
+              <td class="text-mono text-muted">${d(a.submitted_at)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}
+    `;
+  } catch(e) {}
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  КОМАНДНАЯ ПАЛИТРА (Ctrl+K)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const CMDK_PAGES = [
+  ['overview','📊','Обзор'], ['general','⚙️','Общие'],
+  ['logging','📝','Логирование'], ['moderation','⚖️','Модерация'],
+  ['automation','🤖','Автоматизация'], ['security','🛡️','Безопасность'],
+  ['member','🔍','Поиск участника'], ['modlog','📋','Mod Log'],
+  ['appeals','⚖️','Апелляции'], ['banreq','🔨','Заявки на бан'],
+  ['invites','🔗','Инвайты'], ['twins','🧬','Стилометрия'],
+  ['appearance','🎨','Внешний вид'],
+];
+
+function openCmdk() {
+  document.getElementById('cmdkBg').classList.add('show');
+  const inp = document.getElementById('cmdkInput');
+  inp.value = '';
+  renderCmdk('');
+  setTimeout(() => inp.focus(), 30);
+}
+function closeCmdk() {
+  document.getElementById('cmdkBg').classList.remove('show');
+}
+
+async function renderCmdk(q) {
+  const list = document.getElementById('cmdkList');
+  const ql = q.toLowerCase().trim();
+  const pages = CMDK_PAGES.filter(([id, ic, name]) => {
+    const nav = document.querySelector(`.nav-item[data-page="${id}"]`);
+    if (nav && nav.dataset.perm && !hasPerm(nav.dataset.perm)) return false;
+    return !ql || name.toLowerCase().includes(ql);
+  });
+  let html = '';
+  if (pages.length) {
+    html += '<div class="cmdk-sec">Разделы</div>' + pages.map(([id, ic, name]) => `
+      <div class="cmdk-item" onclick="closeCmdk(); showPage('${id}')">
+        <span>${ic}</span><span>${name}</span>
+      </div>`).join('');
+  }
+  list.innerHTML = html || '<div class="cmdk-sec">Ничего не найдено</div>';
+
+  // Поиск участников — если запрос достаточно длинный
+  if (ql.length >= 2 && currentGuild && hasPerm('manage_messages')) {
+    try {
+      const r = await apiFetch(`/api/guild/${currentGuild.id}/members/search?q=${encodeURIComponent(ql)}`);
+      const rows = r.ok ? await r.json() : [];
+      if (rows.length && document.getElementById('cmdkBg').classList.contains('show')) {
+        list.innerHTML = html + '<div class="cmdk-sec">Участники</div>' +
+          rows.slice(0,6).map(m => `
+            <div class="cmdk-item" onclick="closeCmdk(); showPage('member'); openMember('${m.id}')">
+              <img src="${m.avatar}" style="width:22px;height:22px;border-radius:50%;">
+              <span>${escapeHtml(m.name)}</span>
+              <span class="k">${escapeHtml(m.tag)}</span>
+            </div>`).join('');
+      }
+    } catch(e) {}
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    const bg = document.getElementById('cmdkBg');
+    if (bg.classList.contains('show')) closeCmdk(); else openCmdk();
+  }
+  if (e.key === 'Escape') closeCmdk();
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  ЗАЯВКИ НА БАН
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let _banreqCache = [];
@@ -3053,6 +3533,8 @@ document.addEventListener('click', e => {
 });
 
 csInit();
+const _ci = document.getElementById('cmdkInput');
+if (_ci) _ci.addEventListener('input', e => renderCmdk(e.target.value));
 init();
 </script>
 
