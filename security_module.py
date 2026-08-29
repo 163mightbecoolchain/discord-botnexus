@@ -1744,4 +1744,4 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(AdvancedSecurityCog(bot))
     # Запускаем фоновое обслуживание
     bot.loop.create_task(security_maintenance_loop(bot))
-    print("✅ Advanced Security Module loaded · prefix: -q")
+    print("✅ Advanced Security Module loaded · команда: /q")
