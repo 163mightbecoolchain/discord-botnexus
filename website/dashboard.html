@@ -645,6 +645,28 @@ input[type="color"] {
   cursor: pointer; padding: 2px;
 }
 
+/* ─── Индикатор автообновления ─── */
+.live-dot {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .72rem; color: var(--muted); font-family: var(--mono);
+  padding: .35rem .6rem; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--border);
+}
+.live-dot::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 6px var(--accent);
+  animation: livePulse 2s ease infinite;
+}
+.live-dot.paused::before { background: var(--muted); box-shadow: none; animation: none; }
+@keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* Мигание бейджа при появлении новой апелляции */
+@keyframes badgeBump {
+  0%,100% { transform: scale(1); }
+  35%     { transform: scale(1.45); }
+}
+.nav-item .badge.bump { animation: badgeBump .45s cubic-bezier(.34,1.6,.64,1); }
+
 /* ─── Командная палитра (Ctrl+K) ─── */
 .cmdk-bg {
   position: fixed; inset: 0; z-index: 800;
@@ -1569,7 +1591,8 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
           <div class="page-title">Апелляции</div>
           <div class="page-subtitle">Заявки участников на снятие наказаний</div>
         </div>
-        <div class="flex gap-1">
+        <div class="flex gap-1" style="align-items:center;">
+          <span class="live-dot" id="appealsLive" title="Список обновляется автоматически">live</span>
           <select class="select" id="appealsFilter" onchange="loadAppeals()" style="width: 180px;">
             <option value="pending">⏳ Ожидают</option>
             <option value="accepted">✅ Принятые</option>
@@ -2343,7 +2366,9 @@ async function selectGuild(g) {
   await loadChannelsRoles();
   await loadSettings();
   await showPage('overview');
-  refreshBanreqBadge();
+  _lastCounts = { appeals: null, banreq: null };   // без ложных «новых» при смене сервера
+  await livePoll();
+  startLive();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2371,6 +2396,7 @@ async function showPage(name) {
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
   if (name === 'appeals') { await loadAppeals(); }
+  if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation' || name === 'security') await loadAutomation();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') await loadInvites('');
@@ -2871,6 +2897,7 @@ async function reviewAppeal(action) {
     });
     if (r.ok) {
       showToast(action === 'accept' ? '✓ Апелляция принята' : '✗ Апелляция отклонена', 'success');
+      _lastCounts.appeals = null;
       const card = document.querySelector(`[data-appeal-id="${_currentAppealId}"]`);
       closeAppealModal();
       if (card) {
@@ -3136,6 +3163,126 @@ document.addEventListener('keydown', e => {
     if (bg.classList.contains('show')) closeCmdk(); else openCmdk();
   }
   if (e.key === 'Escape') closeCmdk();
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  АВТООБНОВЛЕНИЕ АПЕЛЛЯЦИЙ И ЗАЯВОК
+//  Опрос идёт всегда, но частота зависит от того, открыта ли вкладка:
+//  на самой странице — часто, в фоне — редко, при свёрнутой вкладке — пауза.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _liveTimer   = null;
+let _lastCounts  = { appeals: null, banreq: null };
+
+const LIVE_FAST = 15000;   // открыта страница апелляций/заявок
+const LIVE_SLOW = 60000;   // фоновая проверка бейджей
+
+function liveInterval() {
+  const p = document.querySelector('.page.active');
+  const id = p ? p.id : '';
+  return (id === 'content-appeals' || id === 'content-banreq') ? LIVE_FAST : LIVE_SLOW;
+}
+
+function setLiveState(active) {
+  const el = document.getElementById('appealsLive');
+  if (!el) return;
+  el.classList.toggle('paused', !active);
+  el.textContent = active ? 'live' : 'пауза';
+}
+
+function bumpBadge(id) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  b.classList.remove('bump');
+  void b.offsetWidth;      // перезапуск анимации
+  b.classList.add('bump');
+}
+
+async function livePoll() {
+  if (!currentGuild || document.hidden) return;
+
+  // ── Апелляции ──
+  if (hasPerm('manage_messages')) {
+    try {
+      const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals`);
+      if (r.ok) {
+        const all = await r.json();
+        const pending = all.filter(a => a.status === 'pending').length;
+
+        const badge = document.getElementById('appealsBadge');
+        if (badge) {
+          badge.textContent = pending;
+          badge.classList.toggle('hidden', pending === 0);
+        }
+        const stats = document.getElementById('appealsStats');
+        if (stats) {
+          stats.style.display = 'flex';
+          document.getElementById('stPending').textContent  = pending;
+          document.getElementById('stAccepted').textContent = all.filter(a=>a.status==='accepted').length;
+          document.getElementById('stRejected').textContent = all.filter(a=>a.status==='rejected').length;
+        }
+
+        if (_lastCounts.appeals !== null && pending > _lastCounts.appeals) {
+          const diff = pending - _lastCounts.appeals;
+          bumpBadge('appealsBadge');
+          showToast(`⚖️ Новых апелляций: ${diff}`, 'success');
+          // Если открыта страница апелляций — перерисуем список
+          const p = document.querySelector('.page.active');
+          if (p && p.id === 'content-appeals') loadAppeals();
+        }
+        _lastCounts.appeals = pending;
+      }
+    } catch(e) {}
+  }
+
+  // ── Заявки на бан ──
+  if (hasPerm('ban_members')) {
+    try {
+      const r = await apiFetch(`/api/guild/${currentGuild.id}/banrequests`);
+      if (r.ok) {
+        const all = await r.json();
+        const pending = all.filter(x => x.status === 'pending').length;
+        const badge = document.getElementById('banreqBadge');
+        if (badge) {
+          badge.textContent = pending;
+          badge.classList.toggle('hidden', pending === 0);
+        }
+        const st = document.getElementById('banreqStats');
+        if (st) {
+          st.style.display = 'flex';
+          document.getElementById('brPending').textContent  = pending;
+          document.getElementById('brApproved').textContent = all.filter(x=>x.status==='approved').length;
+          document.getElementById('brRejected').textContent = all.filter(x=>x.status==='rejected').length;
+        }
+        if (_lastCounts.banreq !== null && pending > _lastCounts.banreq) {
+          bumpBadge('banreqBadge');
+          showToast(`🔨 Новых заявок на бан: ${pending - _lastCounts.banreq}`, 'success');
+          const p = document.querySelector('.page.active');
+          if (p && p.id === 'content-banreq') loadBanRequests();
+        }
+        _lastCounts.banreq = pending;
+      }
+    } catch(e) {}
+  }
+}
+
+function startLive() {
+  stopLive();
+  setLiveState(true);
+  const tick = async () => {
+    await livePoll();
+    _liveTimer = setTimeout(tick, liveInterval());
+  };
+  _liveTimer = setTimeout(tick, liveInterval());
+}
+
+function stopLive() {
+  if (_liveTimer) { clearTimeout(_liveTimer); _liveTimer = null; }
+}
+
+// Свёрнутая вкладка — не опрашиваем сервер впустую
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopLive(); setLiveState(false); }
+  else if (currentGuild) { livePoll(); startLive(); }
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
