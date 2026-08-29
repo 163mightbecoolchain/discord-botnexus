@@ -467,7 +467,7 @@ async def memory_cleanup_loop(bot_instance):
                         await db.execute("""
                             DELETE FROM reminders
                             WHERE done = 1
-                              AND remind_at < datetime('now', '-7 days')
+                              AND fire_at < datetime('now', '-7 days')
                         """)
                         await db.commit()
                         # VACUUM — освобождаем удалённые страницы
@@ -1104,6 +1104,17 @@ async def db_init():
             "ALTER TABLE punishment_settings ADD COLUMN warn3_type TEXT DEFAULT 'ban'",
             # Quarantine on/off тоггл (отдельно от роли — можно временно выключить)
             "ALTER TABLE guild_settings ADD COLUMN quarantine_enabled INTEGER DEFAULT 1",
+            # Колонки, появившиеся в CREATE TABLE позже создания старых баз.
+            # CREATE TABLE IF NOT EXISTS существующую таблицу не меняет, поэтому
+            # без этих ALTER на старой базе будет "no such column".
+            "ALTER TABLE guild_settings ADD COLUMN lang TEXT DEFAULT 'ru'",
+            "ALTER TABLE guild_settings ADD COLUMN starboard_channel INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN starboard_threshold INTEGER DEFAULT 3",
+            "ALTER TABLE guild_settings ADD COLUMN suggestion_channel INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN ticket_category INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN birthday_channel INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN lockdown INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN price_watch INTEGER DEFAULT 0",
             # Стилометрия: колонки расширенного профиля.
             # КРИТИЧНО чтобы были здесь: update_style_profile делает SELECT по ним
             # при первом же сообщении — до первого вызова _save_style_profile
@@ -1544,18 +1555,29 @@ async def tempban_loop(bot_instance):
             for guild_id, user_id, reason in rows:
                 guild = bot_instance.get_guild(guild_id)
                 if guild:
+                    unbanned_now = False
                     try:
                         await guild.unban(discord.Object(id=user_id), reason=f"Tempban expired: {reason}")
+                        unbanned_now = True
+                        await add_modlog(guild_id, user_id, 0, "AUTO_UNBAN", "Tempban expired")
+                        print(f"[TEMPBAN] Auto-unbanned {user_id} from {guild.name}")
+                    except discord.NotFound:
+                        # Бан уже снят вручную — запись закрываем, иначе цикл
+                        # будет пытаться разбанить каждую минуту бесконечно
+                        unbanned_now = True
+                        print(f"[TEMPBAN] {user_id}: бан уже снят вручную, запись закрыта")
+                    except discord.Forbidden:
+                        print(f"[TEMPBAN] Нет прав на разбан {user_id} в {guild.name}")
+                    except Exception as ex:
+                        print(f"[TEMPBAN] Error unbanning {user_id}: {ex}")
+
+                    if unbanned_now:
                         async with aiosqlite.connect(DB_PATH) as db:
                             await db.execute(
                                 "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=?",
                                 (guild_id, user_id)
                             )
                             await db.commit()
-                        await add_modlog(guild_id, user_id, 0, "AUTO_UNBAN", "Tempban expired")
-                        print(f"[TEMPBAN] Auto-unbanned {user_id} from {guild.name}")
-                    except Exception as ex:
-                        print(f"[TEMPBAN] Error unbanning {user_id}: {ex}")
         except Exception as ex:
             print(f"[TEMPBAN LOOP] Error: {ex}")
         await asyncio.sleep(60)  # проверяем каждую минуту
