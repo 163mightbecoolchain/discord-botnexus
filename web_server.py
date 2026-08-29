@@ -31,8 +31,18 @@ BOT_ID        = os.getenv("BOT_ID", "")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 HMAC_KEY      = os.getenv("HMAC_SECRET", "witness_secret").encode()
 PORT          = int(os.getenv("PORT", 8080))
-SITE_URL      = os.getenv("SITE_URL", f"http://localhost:{PORT}")
-WEBSITE_URL   = os.getenv("WEBSITE_URL", "")
+def _norm_url(v: str) -> str:
+    """Приводит адрес к виду https://host без слеша на конце"""
+    v = (v or "").strip().rstrip("/")
+    if v and not v.startswith(("http://", "https://")):
+        v = "https://" + v
+    return v
+
+# ВАЖНО: SITE_URL — это адрес ЭТОГО сервиса (бота), потому что именно здесь
+# живёт /callback. Discord вернёт пользователя сюда после авторизации.
+SITE_URL      = _norm_url(os.getenv("SITE_URL", f"http://localhost:{PORT}"))
+# WEBSITE_URL — адрес отдельного сервиса с сайтом (лендинг + дашборд)
+WEBSITE_URL   = _norm_url(os.getenv("WEBSITE_URL", ""))
 INVITE_URL    = (f"https://discord.com/api/oauth2/authorize?client_id={BOT_ID}"
                  f"&permissions=8&scope=bot%20applications.commands") if BOT_ID else "#"
 SUPPORT_URL   = os.getenv("SUPPORT_URL", "https://discord.gg/witness")
@@ -1050,5 +1060,8 @@ async def start_web_server(bot):
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
     print(f"✅ Web server started → {SITE_URL} (port {PORT})")
+    print(f"   OAuth2 redirect_uri: {SITE_URL}/callback")
+    print(f"   ↑ ЭТОТ адрес должен быть в Dev Portal → OAuth2 → Redirects")
+    print(f"   Сайт (WEBSITE_URL):  {WEBSITE_URL or '— не задан, дашборд отдаётся ботом —'}")
     print(f"   OAuth2: {'✅ configured' if CLIENT_SECRET else '⚠️  DISCORD_CLIENT_SECRET not set'}")
     print(f"   Bot ID: {'✅ ' + BOT_ID if BOT_ID else '⚠️  BOT_ID not set'}")
