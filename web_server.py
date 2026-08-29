@@ -722,6 +722,243 @@ async def api_twins(request):
     except Exception:
         return web.json_response([])
 
+# ── API: автоматизация и безопасность ─────────────────────────
+
+@require_auth
+async def api_automation_get(request):
+    """GET /api/guild/:id/automation"""
+    guild_id = int(request.match_info['guild_id'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({}, status=404)
+    me = bg.get_member(int(s['user_id']))
+    if not me or not (me.guild_permissions.manage_guild or
+                      me.guild_permissions.administrator):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    out = {}
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("""
+                SELECT enabled, max_age_days, log_channel
+                FROM invite_autoclean_settings WHERE guild_id=?
+            """, (guild_id,)) as c:
+                r = await c.fetchone()
+            out['invclean_enabled']  = bool(r[0]) if r else False
+            out['invclean_days']     = (r[1] if r else 14)
+            out['invclean_channel']  = str(r[2]) if r and r[2] else ''
+
+            async with db.execute("""
+                SELECT starboard_channel, starboard_threshold, birthday_channel
+                FROM guild_settings WHERE guild_id=?
+            """, (guild_id,)) as c:
+                g = await c.fetchone()
+            out['starboard_channel']  = str(g[0]) if g and g[0] else ''
+            out['starboard_threshold']= (g[1] if g and g[1] else 3)
+            out['birthday_channel']   = str(g[2]) if g and g[2] else ''
+
+            async with db.execute(
+                "SELECT twin_threshold FROM guild_settings WHERE guild_id=?", (guild_id,)) as c:
+                t = await c.fetchone()
+            out['twin_threshold'] = (t[0] if t and t[0] else 80)
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+    return web.json_response(out)
+
+
+@require_auth
+async def api_automation_post(request):
+    """POST /api/guild/:id/automation"""
+    guild_id = int(request.match_info['guild_id'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    me = bg.get_member(int(s['user_id']))
+    if not me or not (me.guild_permissions.manage_guild or
+                      me.guild_permissions.administrator):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+
+    try:
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            if any(k in data for k in ('invclean_enabled','invclean_days','invclean_channel')):
+                async with db.execute("""
+                    SELECT enabled, max_age_days, log_channel
+                    FROM invite_autoclean_settings WHERE guild_id=?
+                """, (guild_id,)) as c:
+                    cur = await c.fetchone() or (0, 14, 0)
+                en  = int(bool(data.get('invclean_enabled', cur[0])))
+                dys = max(1, min(365, int(data.get('invclean_days', cur[1]) or 14)))
+                ch  = int(data.get('invclean_channel') or cur[2] or 0)
+                await db.execute("""
+                    INSERT INTO invite_autoclean_settings (guild_id, enabled, max_age_days, log_channel)
+                    VALUES (?,?,?,?)
+                    ON CONFLICT(guild_id) DO UPDATE SET
+                        enabled=excluded.enabled, max_age_days=excluded.max_age_days,
+                        log_channel=excluded.log_channel
+                """, (guild_id, en, dys, ch))
+
+            gs_map = {
+                'starboard_channel':   'starboard_channel',
+                'starboard_threshold': 'starboard_threshold',
+                'birthday_channel':    'birthday_channel',
+                'twin_threshold':      'twin_threshold',
+            }
+            for key, col in gs_map.items():
+                if key in data:
+                    v = data[key]
+                    v = int(v or 0)
+                    if key == 'starboard_threshold': v = max(1, min(100, v or 3))
+                    if key == 'twin_threshold':      v = max(50, min(99, v or 80))
+                    await db.execute(
+                        f"INSERT INTO guild_settings (guild_id, {col}) VALUES (?,?) "
+                        f"ON CONFLICT(guild_id) DO UPDATE SET {col}=excluded.{col}",
+                        (guild_id, v))
+            await db.commit()
+
+        cache = getattr(bot, '_settings_cache', None)
+        if isinstance(cache, dict):
+            cache.pop(guild_id, None)
+        return web.json_response({'ok': True})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# ── API: поиск по участнику ───────────────────────────────────
+
+@require_auth
+async def api_member_lookup(request):
+    """GET /api/guild/:id/member/:uid — досье на участника"""
+    guild_id = int(request.match_info['guild_id'])
+    uid      = int(request.match_info['uid'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    me = bg.get_member(int(s['user_id']))
+    p  = me.guild_permissions if me else None
+    if not p or not (p.manage_messages or p.moderate_members or
+                     p.ban_members or p.administrator or p.manage_guild):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    member = bg.get_member(uid)
+    out = {
+        'user_id': str(uid),
+        'name':    member.display_name if member else '',
+        'tag':     str(member) if member else '',
+        'avatar':  member.display_avatar.url if member else '',
+        'joined':  member.joined_at.isoformat() if member and member.joined_at else '',
+        'created': member.created_at.isoformat() if member else '',
+        'on_server': bool(member),
+        'timed_out': bool(member and member.is_timed_out()),
+        'roles': [r.name for r in member.roles[1:]] if member else [],
+    }
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM warnings WHERE guild_id=? AND user_id=?",
+                (guild_id, uid)) as c:
+                out['warns'] = (await c.fetchone())[0]
+
+            async with db.execute("""
+                SELECT action, reason, duration, created_at FROM modlog
+                WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 15
+            """, (guild_id, uid)) as c:
+                out['history'] = [
+                    {'action': a, 'reason': r, 'duration': d, 'created_at': ts}
+                    for a, r, d, ts in await c.fetchall()
+                ]
+
+            async with db.execute("""
+                SELECT id, action_type, status, submitted_at FROM appeals
+                WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10
+            """, (guild_id, uid)) as c:
+                out['appeals'] = [
+                    {'id': i, 'action_type': at, 'status': st, 'submitted_at': ts}
+                    for i, at, st, ts in await c.fetchall()
+                ]
+
+            async with db.execute("""
+                SELECT invite_code, inviter_id FROM invite_log
+                WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 1
+            """, (guild_id, uid)) as c:
+                row = await c.fetchone()
+            if row:
+                inv = bg.get_member(row[1])
+                out['invited_by'] = {'code': row[0],
+                                     'name': inv.display_name if inv else str(row[1])}
+
+            async with db.execute("""
+                SELECT user_a, user_b, similarity, confirmed, false_positive
+                FROM twin_links
+                WHERE guild_id=? AND (user_a=? OR user_b=?)
+                ORDER BY similarity DESC LIMIT 10
+            """, (guild_id, uid, uid)) as c:
+                twins = []
+                for a, b, sim, conf, fp in await c.fetchall():
+                    other = b if a == uid else a
+                    om = bg.get_member(other)
+                    twins.append({'user_id': str(other),
+                                  'name': om.display_name if om else str(other),
+                                  'similarity': sim, 'confirmed': bool(conf),
+                                  'false_positive': bool(fp)})
+                out['twins'] = twins
+
+            async with db.execute("""
+                SELECT until, reason FROM active_mutes
+                WHERE guild_id=? AND user_id=? AND notified=0
+            """, (guild_id, uid)) as c:
+                mrow = await c.fetchone()
+            out['active_mute'] = ({'until': mrow[0], 'reason': mrow[1]} if mrow else None)
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+    return web.json_response(out)
+
+
+@require_auth
+async def api_member_search(request):
+    """GET /api/guild/:id/members/search?q=ник — поиск участника по имени"""
+    guild_id = int(request.match_info['guild_id'])
+    q = (request.query.get('q') or '').strip().lower()
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response([])
+    me = bg.get_member(int(s['user_id']))
+    p  = me.guild_permissions if me else None
+    if not p or not (p.manage_messages or p.moderate_members or
+                     p.ban_members or p.administrator or p.manage_guild):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    if len(q) < 2:
+        return web.json_response([])
+
+    out = []
+    if q.isdigit():
+        m = bg.get_member(int(q))
+        if m:
+            out.append({'id': str(m.id), 'name': m.display_name,
+                        'tag': str(m), 'avatar': m.display_avatar.url})
+    for m in bg.members:
+        if len(out) >= 20:
+            break
+        if q in m.display_name.lower() or q in m.name.lower():
+            if not any(o['id'] == str(m.id) for o in out):
+                out.append({'id': str(m.id), 'name': m.display_name,
+                            'tag': str(m), 'avatar': m.display_avatar.url})
+    return web.json_response(out)
+
+
 # ── API: ban requests ─────────────────────────────────────────
 
 @require_auth
@@ -1047,6 +1284,10 @@ def create_app(bot) -> web.Application:
     app.router.add_get('/api/guild/{guild_id}/twins',             api_twins)
     app.router.add_get('/api/guild/{guild_id}/appeals',           api_appeals)
     app.router.add_post('/api/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action)
+    app.router.add_get('/api/guild/{guild_id}/automation',                    api_automation_get)
+    app.router.add_post('/api/guild/{guild_id}/automation',                   api_automation_post)
+    app.router.add_get('/api/guild/{guild_id}/members/search',                api_member_search)
+    app.router.add_get('/api/guild/{guild_id}/member/{uid}',                  api_member_lookup)
     app.router.add_get('/api/guild/{guild_id}/banrequests',                   api_ban_requests)
     app.router.add_post('/api/guild/{guild_id}/banrequest/{rid}/{action}',    api_ban_request_action)
 
