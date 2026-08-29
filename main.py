@@ -827,6 +827,18 @@ async def db_init():
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
                 member_id INTEGER, member_name TEXT, joined_at TEXT,
                 note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS active_mutes (
+                guild_id   INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                until      TEXT    NOT NULL,
+                reason     TEXT    DEFAULT '',
+                notified   INTEGER DEFAULT 0,
+                created_at TEXT    NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_active_mutes
+                ON active_mutes(notified, until);
+
             CREATE TABLE IF NOT EXISTS ban_requests (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id    INTEGER NOT NULL,
@@ -1057,7 +1069,7 @@ async def db_init():
                 original_reason TEXT DEFAULT '',
                 appeal_text  TEXT NOT NULL,
                 why_change   TEXT DEFAULT '',
-                status       TEXT DEFAULT 'pending', -- pending / accepted / rejected
+                status       TEXT DEFAULT 'pending', -- pending / accepted / rejected / expired
                 reviewer_id  INTEGER DEFAULT 0,
                 reviewer_note TEXT DEFAULT '',
                 submitted_at TEXT NOT NULL,
@@ -1115,6 +1127,7 @@ async def db_init():
             "ALTER TABLE guild_settings ADD COLUMN birthday_channel INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN lockdown INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN price_watch INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN twin_threshold INTEGER DEFAULT 80",
             # Стилометрия: колонки расширенного профиля.
             # КРИТИЧНО чтобы были здесь: update_style_profile делает SELECT по ним
             # при первом же сообщении — до первого вызова _save_style_profile
@@ -1578,6 +1591,9 @@ async def tempban_loop(bot_instance):
                                 (guild_id, user_id)
                             )
                             await db.commit()
+                        # Разбанен — апелляция на этот бан больше не нужна
+                        await expire_appeals(guild_id, user_id, ("BAN", "TEMPBAN"),
+                                             "срок бана истёк")
         except Exception as ex:
             print(f"[TEMPBAN LOOP] Error: {ex}")
         await asyncio.sleep(60)  # проверяем каждую минуту
@@ -1677,6 +1693,7 @@ async def on_ready():
         bot.loop.create_task(memory_cleanup_loop(bot))
         bot.loop.create_task(reminder_check_loop(bot))
         bot.loop.create_task(invite_autoclean_loop())
+        bot.loop.create_task(mute_expiry_loop(bot))
         print("✅ Фоновые задачи запущены")
 
     # ── Загружаем языки серверов из БД ───────────────────────
@@ -1936,6 +1953,48 @@ async def on_member_update(before, after):
                 e.set_author(name=t(gid7, "unmuted"))
                 e.add_field(name=t(gid7, "member"), value=after.mention, inline=False)
             await ch.send(embed=e)
+        # ── active_mutes: отслеживаем срок, чтобы уведомить об окончании ──
+        try:
+            if after.timed_out_until:
+                until_iso = after.timed_out_until.replace(tzinfo=None).isoformat()
+                now_iso   = datetime.datetime.utcnow().isoformat()
+                # причину подтянем из свежего modlog
+                mute_reason = ""
+                try:
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        async with db.execute("""
+                            SELECT reason FROM modlog
+                            WHERE guild_id=? AND user_id=?
+                              AND action IN ('MUTE','AUTO_MUTE','WARN')
+                            ORDER BY id DESC LIMIT 1
+                        """, (after.guild.id, after.id)) as c:
+                            rr = await c.fetchone()
+                    if rr and rr[0]:
+                        mute_reason = rr[0]
+                except Exception:
+                    pass
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute("""
+                        INSERT INTO active_mutes (guild_id,user_id,until,reason,notified,created_at)
+                        VALUES (?,?,?,?,0,?)
+                        ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                            until=excluded.until, reason=excluded.reason,
+                            notified=0, created_at=excluded.created_at
+                    """, (after.guild.id, after.id, until_iso, mute_reason, now_iso))
+                    await db.commit()
+            elif before.timed_out_until is not None:
+                # Мут сняли досрочно — уведомляем и закрываем апелляции
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=?",
+                        (after.guild.id, after.id))
+                    await db.commit()
+                await notify_mute_over(after.guild.id, after.id, early=True)
+                await expire_appeals(after.guild.id, after.id, ("MUTE",),
+                                     "мут снят досрочно")
+        except Exception as ex:
+            print(f"[MUTE_TRACK] {ex}")
+
         # mute_log — записываем для /muteboard
         if (before.timed_out_until is None and after.timed_out_until is not None):
             try:
@@ -2792,29 +2851,139 @@ class AppealButtonView(discord.ui.View):
         self.add_item(AppealButton(guild_id, action_type))
 
 
+async def notify_mute_over(guild_id: int, user_id: int, early: bool = False):
+    """Сообщает участнику, что мут закончился или снят досрочно"""
+    try:
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            return False
+        user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        if not user:
+            return False
+        e = build_embed(C.SUCCESS)
+        e.set_author(name=f"Наказание снято · {guild.name}",
+                     icon_url=guild.icon.url if guild.icon else None)
+        e.description = (
+            "### 🔊 Мут снят досрочно\n\nМодератор снял наказание раньше срока."
+            if early else
+            "### 🔊 Срок мута истёк\n\nТы снова можешь писать на сервере."
+        )
+        e.set_footer(text="Постарайся больше не нарушать правила сервера")
+        await user.send(embed=e)
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+    except Exception as ex:
+        print(f"[MUTE_OVER] {ex}")
+        return False
+
+
+async def mute_expiry_loop(bot_instance):
+    """
+    Раз в минуту проверяет истёкшие муты:
+    уведомляет участника и закрывает висящие апелляции.
+    """
+    await bot_instance.wait_until_ready()
+    while not bot_instance.is_closed():
+        try:
+            now = datetime.datetime.utcnow().isoformat()
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("""
+                    SELECT guild_id, user_id FROM active_mutes
+                    WHERE notified=0 AND until<=?
+                """, (now,)) as c:
+                    rows = await c.fetchall()
+            for gid, uid in rows:
+                await notify_mute_over(gid, uid, early=False)
+                await expire_appeals(gid, uid, ("MUTE",), "срок мута истёк")
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=?",
+                        (gid, uid))
+                    await db.commit()
+            # Чистим записи старше 30 дней
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    "DELETE FROM active_mutes WHERE notified=1 AND until < datetime('now','-30 days')")
+                await db.commit()
+        except Exception as ex:
+            print(f"[MUTE_EXPIRY] Loop error: {ex}")
+        await asyncio.sleep(60)
+
+
+async def expire_appeals(guild_id: int, user_id: int, action_types: tuple,
+                          why: str = "срок наказания истёк"):
+    """
+    Закрывает висящие апелляции, когда наказание уже неактуально.
+    Модераторам не нужно разбирать апелляцию на снятый мут.
+    """
+    try:
+        placeholders = ",".join("?" * len(action_types))
+        now = datetime.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(f"""
+                SELECT id FROM appeals
+                WHERE guild_id=? AND user_id=? AND status='pending'
+                  AND action_type IN ({placeholders})
+            """, (guild_id, user_id, *action_types)) as c:
+                rows = await c.fetchall()
+            if not rows:
+                return 0
+            await db.execute(f"""
+                UPDATE appeals SET status='expired', reviewer_note=?, reviewed_at=?
+                WHERE guild_id=? AND user_id=? AND status='pending'
+                  AND action_type IN ({placeholders})
+            """, (f"Закрыто автоматически: {why}", now, guild_id, user_id, *action_types))
+            await db.commit()
+        print(f"[APPEAL] Автозакрыто {len(rows)} апелляций у {user_id} ({why})")
+        return len(rows)
+    except Exception as ex:
+        print(f"[APPEAL] expire_appeals error: {ex}")
+        return 0
+
+
 async def send_appeal_dm(member, guild, action_type: str, reason: str = ""):
     """Отправляет DM участнику с кнопкой подать апелляцию"""
     try:
-        e = build_embed(C.WARNING)
-        e.set_author(
-            name=f"Наказание на {guild.name}",
-            icon_url=guild.icon.url if guild.icon else None
-        )
         action_labels = {
             "BAN":     "🔨 Перманентный бан",
-            "TEMPBAN": "⏱ Временный бан",
+            "TEMPBAN": "⏱️ Временный бан",
             "KICK":    "👢 Кик",
             "MUTE":    "🔇 Мут (таймаут)",
             "WARN":    "⚠️ Предупреждение",
         }
-        e.add_field(name="Действие", value=action_labels.get(action_type, action_type), inline=True)
-        if reason:
-            e.add_field(name="Причина", value=reason[:500], inline=False)
+        label = action_labels.get(action_type, action_type)
+
+        e = build_embed(C.DANGER if action_type in ("BAN", "TEMPBAN", "KICK") else C.WARNING)
+        e.set_author(
+            name=f"Наказание · {guild.name}",
+            icon_url=guild.icon.url if guild.icon else None
+        )
+        # Причина — главное в сообщении. Раньше она терялась среди полей,
+        # и люди писали в апелляциях «не понимаю за что». Теперь она
+        # в описании крупным блоком, отделённая от остального.
+        clean = (reason or "").strip()
+        if clean:
+            e.description = (
+                f"### {label}\n\n"
+                f"**Причина наказания:**\n"
+                f">>> {clean[:900]}"
+            )
+        else:
+            e.description = (
+                f"### {label}\n\n"
+                f"**Причина наказания:**\n"
+                f">>> *Модератор не указал причину. "
+                f"Уточнить её можно в апелляции.*"
+            )
         e.add_field(
-            name="Не согласен?",
-            value="Нажми кнопку ниже чтобы подать апелляцию. Модераторы рассмотрят её.",
+            name="\u200b",
+            value=("**Не согласен с наказанием?**\n"
+                   "Нажми кнопку ниже и опиши свою позицию — "
+                   "модераторы рассмотрят обращение."),
             inline=False
         )
+        e.set_footer(text=f"{guild.name} · сохрани это сообщение, оно понадобится для апелляции")
         view = AppealButtonView(guild.id, action_type, reason)
         await member.send(embed=e, view=view)
         return True
@@ -3342,7 +3511,8 @@ async def appeal_cmd(interaction: discord.Interaction,
                 SELECT id, user_id, username, action_type, status, submitted_at
                 FROM appeals WHERE guild_id=?
                 ORDER BY
-                    CASE status WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END,
+                    CASE status WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1
+                                WHEN 'rejected' THEN 2 ELSE 3 END,
                     id DESC
                 LIMIT 25
             """, (gid,)) as c:
@@ -3354,7 +3524,7 @@ async def appeal_cmd(interaction: discord.Interaction,
             e.description = "Апелляций пока нет."
             return await interaction.response.send_message(embed=e, ephemeral=True)
 
-        icons = {"pending":"⏳","accepted":"✅","rejected":"❌"}
+        icons = {"pending":"⏳","accepted":"✅","rejected":"❌","expired":"⌛"}
         lines = []
         for aid, uid, uname, atype, status, ts in rows:
             ic = icons.get(status, "•")
@@ -3380,7 +3550,8 @@ async def appeal_cmd(interaction: discord.Interaction,
 
         uid, uname, atype, orig_reason, atext, why, status, rev_id, rev_note, sub_at, rev_at = r
         member = interaction.guild.get_member(uid)
-        color  = {"pending":C.WARNING,"accepted":C.SUCCESS,"rejected":C.DANGER}.get(status, C.PRIMARY)
+        color  = {"pending":C.WARNING,"accepted":C.SUCCESS,
+                  "rejected":C.DANGER,"expired":C.MUTED}.get(status, C.PRIMARY)
         e = build_embed(color)
         e.set_author(name=f"Апелляция #{appeal_id} · {status}")
         e.add_field(name="Участник", value=f"{member.mention if member else uname} (`{uname}`)", inline=True)
@@ -3449,6 +3620,12 @@ async def appeal_cmd(interaction: discord.Interaction,
                         unbanned_msg = " · мут снят"
                     except discord.Forbidden:
                         unbanned_msg = " · ⚠️ нет прав снять мут"
+                # Мут снят по апелляции — уведомление об окончании не нужно
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=?",
+                        (gid, uid))
+                    await db.commit()
             elif atype == "WARN":
                 # Снимаем последний варн
                 async with aiosqlite.connect(DB_PATH) as db:
