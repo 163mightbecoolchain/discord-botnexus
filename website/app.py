@@ -54,6 +54,18 @@ async def handle_index(request):
 async def handle_privacy(request):
     return await html_response("privacy.html")
 
+async def handle_callback(request):
+    """
+    Страховка от путаницы в настройках.
+    /callback живёт на сервисе бота, но если в Dev Portal (и в SITE_URL)
+    указан адрес САЙТА — Discord приведёт пользователя сюда.
+    Пробрасываем code боту, чтобы авторизация всё равно завершилась.
+    """
+    if not BOT_API_URL:
+        return web.Response(text="BOT_API_URL not set", status=500)
+    qs = request.rel_url.query_string
+    raise web.HTTPFound(f"{BOT_API_URL}/callback" + (f"?{qs}" if qs else ""))
+
 async def handle_dashboard(request):
     return await html_response("dashboard.html")
 
@@ -75,6 +87,7 @@ app = web.Application()
 app.router.add_get("/",          handle_index)
 app.router.add_get("/dashboard", handle_dashboard)
 app.router.add_get("/privacy",   handle_privacy)
+app.router.add_get("/callback",  handle_callback)
 app.router.add_get("/login",     handle_login)
 app.router.add_get("/logout",    handle_logout)
 app.router.add_get("/health",    handle_health)
