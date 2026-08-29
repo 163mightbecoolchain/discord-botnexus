@@ -2949,10 +2949,29 @@ async def send_appeal_dm(member, guild, action_type: str, reason: str = ""):
             "BAN":     "🔨 Перманентный бан",
             "TEMPBAN": "⏱️ Временный бан",
             "KICK":    "👢 Кик",
-            "MUTE":    "🔇 Мут (таймаут)",
+            "MUTE":    "🔇 Мут",
             "WARN":    "⚠️ Предупреждение",
         }
         label = action_labels.get(action_type, action_type)
+
+        # Вызывающий код передаёт строку вида "Тайм-аут на 2 часа · причина".
+        # Длительность выносим в заголовок, в блоке причины оставляем только саму причину.
+        raw = (reason or "").strip()
+        prefix, clean = "", raw
+        if " · " in raw:
+            head, tail = raw.split(" · ", 1)
+            prefix, clean = head.strip(), tail.strip()
+        elif raw.startswith(("Тайм-аут", "Мут на", "Бан на", "Авто-бан",
+                             "Временный бан", "Кик")):
+            prefix, clean = raw, ""
+
+        # Из фразы вида «Тайм-аут на 2 часа» берём только «2 часа»,
+        # чтобы в заголовке не было «Мут (Тайм-аут на 2 часа)»
+        duration_part = ""
+        if " на " in prefix:
+            duration_part = prefix.split(" на ", 1)[1].strip()
+
+        head_line = f"{label} ({duration_part})" if duration_part else label
 
         e = build_embed(C.DANGER if action_type in ("BAN", "TEMPBAN", "KICK") else C.WARNING)
         e.set_author(
@@ -2960,18 +2979,16 @@ async def send_appeal_dm(member, guild, action_type: str, reason: str = ""):
             icon_url=guild.icon.url if guild.icon else None
         )
         # Причина — главное в сообщении. Раньше она терялась среди полей,
-        # и люди писали в апелляциях «не понимаю за что». Теперь она
-        # в описании крупным блоком, отделённая от остального.
-        clean = (reason or "").strip()
+        # и люди писали в апелляциях «не понимаю за что».
         if clean:
             e.description = (
-                f"### {label}\n\n"
+                f"### {head_line}\n\n"
                 f"**Причина наказания:**\n"
                 f">>> {clean[:900]}"
             )
         else:
             e.description = (
-                f"### {label}\n\n"
+                f"### {head_line}\n\n"
                 f"**Причина наказания:**\n"
                 f">>> *Модератор не указал причину. "
                 f"Уточнить её можно в апелляции.*"
