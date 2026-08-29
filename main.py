@@ -1248,9 +1248,12 @@ async def get_user_invites(gid, inviter_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 intents = discord.Intents.default()
-intents.members         = True   # Privileged: on_member_join/update, карантин, ban evasion, DM при таймауте
-intents.message_content = True   # Privileged: стилометрия, антиспам, автомод, префикс-команды
-# intents.presences НЕ запрашиваем — бот не использует статусы/активности
+# Привилегированные интенты. Их можно временно отключить переменными окружения
+# (INTENT_MEMBERS=0 / INTENT_MESSAGE_CONTENT=0), чтобы бот поднялся даже когда
+# в Dev Portal они ещё не включены — часть функций при этом отвалится.
+intents.members         = os.getenv("INTENT_MEMBERS", "1") != "0"
+intents.message_content = os.getenv("INTENT_MESSAGE_CONTENT", "1") != "0"
+# presences не запрашиваем — статусы и активности боту не нужны
 # Префикс-команд больше нет: чтение чужих сообщений ради префикса требует
 # Message Content Intent, а весь функционал переехал на слэш-команды.
 # Префикс задан заведомо недостижимым — команды по тексту не сработают.
@@ -8566,4 +8569,38 @@ async def on_app_command_error(interaction: discord.Interaction,
 
 
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    print("─" * 62)
+    print(f"Запрошенные привилегированные интенты: "
+          f"members={intents.members}, message_content={intents.message_content}")
+    print("─" * 62)
+    try:
+        bot.run(TOKEN)
+    except discord.errors.PrivilegedIntentsRequired:
+        print("\n" + "=" * 62)
+        print("❌ DISCORD ОТКЛОНИЛ ПРИВИЛЕГИРОВАННЫЕ ИНТЕНТЫ")
+        print("=" * 62)
+        print("Бот запросил:", 
+              ", ".join(filter(None, [
+                  "SERVER MEMBERS"  if intents.members else "",
+                  "MESSAGE CONTENT" if intents.message_content else "",
+              ])) or "ничего")
+        print()
+        print("Что проверить по порядку:")
+        print()
+        print("1. Токен и приложение — это одно и то же приложение?")
+        print("   Dev Portal → приложение → Bot → Reset Token.")
+        print("   Тумблеры включены у ТОГО приложения, чей токен в DISCORD_TOKEN?")
+        print("   Частая причина: у аккаунта несколько приложений, тумблеры")
+        print("   включены в одном, а токен взят из другого.")
+        print()
+        print("2. Dev Portal → Bot → Privileged Gateway Intents:")
+        print("   Server Members Intent  — должен быть ВКЛЮЧЁН")
+        print("   Message Content Intent — должен быть ВКЛЮЧЁН")
+        print("   После переключения страница сохраняет сама, но убедись,")
+        print("   что не осталось кнопки 'Save Changes' внизу экрана.")
+        print()
+        print("3. Временный запуск без части функций (переменные Railway):")
+        print("   INTENT_MESSAGE_CONTENT=0  — отключит стилометрию и антиспам")
+        print("   INTENT_MEMBERS=0          — отключит карантин и DM при наказаниях")
+        print("=" * 62)
+        raise SystemExit(1)
