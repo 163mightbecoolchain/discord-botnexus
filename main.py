@@ -4846,8 +4846,17 @@ async def blackmarket(
     if await get_tier(interaction.guild_id) < TIER_PRO:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
     await interaction.response.defer()
-    await interaction.response.defer()
+    await run_blackmarket(interaction, category, tier, server, sheets)
 
+
+async def run_blackmarket(interaction: discord.Interaction,
+                           category: str = "weapon", tier: int = 8,
+                           server: str = "eu", sheets: str = "no"):
+    """
+    Общая логика /blackmarket. Вынесена отдельно, потому что её вызывает
+    ещё и Select Menu смены категории (BlackmarketCategoryView).
+    Ответ на interaction должен быть уже отправлен вызывающим кодом.
+    """
     if tier not in (6, 7, 8):
         return await interaction.followup.send("❌ Тир: 6, 7 или 8")
     if server not in ALBION_SERVERS:
@@ -5821,9 +5830,8 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
             "`SHEET_ID` = ID таблицы из URL\n\n"
             "**5.** Дай сервис-аккаунту доступ Editor к таблице"
         )
-        return await interaction.response.send_message(embed=e, ephemeral=True)
-
-    await interaction.response.defer()
+        # defer уже выполнен выше — отвечаем через followup
+        return await interaction.followup.send(embed=e, ephemeral=True)
 
     if tier not in (6, 7, 8):
         return await interaction.followup.send("❌ Тир: 6, 7 или 8")
@@ -6089,7 +6097,6 @@ async def craftcalc(interaction: discord.Interaction, tier: int = 8, server: str
 async def flipper(interaction: discord.Interaction, category: str = "weapon", tier: int = 8, server: str = "eu"):
     if await get_tier(interaction.guild_id) < TIER_PRO:
         return await interaction.response.send_message(embed=upsell_embed("Pro"), ephemeral=True)
-    await interaction.response.defer()
     await interaction.response.defer()
 
     if tier not in (6, 7, 8):
