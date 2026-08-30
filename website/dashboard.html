@@ -1550,8 +1550,11 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 
       <div class="card">
         <div class="card-body">
-          <input type="text" class="input" id="memberSearch"
-                 placeholder="Ник или ID участника..." oninput="debounceMemberSearch()">
+          <div class="search-bar" style="margin:0;">
+            <input type="text" class="input" id="memberSearch"
+                   placeholder="Ник или ID участника..." oninput="debounceMemberSearch()">
+            <button class="btn btn-ghost btn-sm" onclick="clearMemberSearch()">Сбросить</button>
+          </div>
           <div id="memberResults" style="margin-top:.6rem;"></div>
         </div>
       </div>
@@ -2990,6 +2993,12 @@ async function runMemberSearch() {
   const box = document.getElementById('memberResults');
   if (!box || !currentGuild) return;
   if (q.length < 2) { box.innerHTML = ''; return; }
+  // Начали новый поиск — старое досье убираем, чтобы не путало
+  const card = document.getElementById('memberCard');
+  if (card && card.dataset.uid) {
+    card.innerHTML = '';
+    delete card.dataset.uid;
+  }
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/members/search?q=${encodeURIComponent(q)}`);
     const rows = r.ok ? await r.json() : [];
@@ -3009,9 +3018,32 @@ async function runMemberSearch() {
   } catch(e) {}
 }
 
+function clearMemberSearch() {
+  const inp = document.getElementById('memberSearch');
+  if (inp) { inp.value = ''; inp.focus(); }
+  const res = document.getElementById('memberResults');
+  if (res) res.innerHTML = '';
+  const box = document.getElementById('memberCard');
+  if (box) box.innerHTML = `
+    <div class="empty">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-title">Найди участника</div>
+      <div class="empty-sub">Введи ник или ID выше, затем кликни по результату</div>
+    </div>`;
+}
+
 async function openMember(uid) {
   const box = document.getElementById('memberCard');
   if (!box) return;
+
+  // Список результатов больше не нужен — прячем, чтобы досье
+  // оказалось сразу под строкой поиска, а не уезжало вниз
+  const res = document.getElementById('memberResults');
+  if (res) res.innerHTML = '';
+  clearTimeout(_memberTimer);          // отменяем висящий поиск
+  const inp = document.getElementById('memberSearch');
+  if (inp) inp.blur();
+
   box.innerHTML = skeletonCards(2);
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}`);
@@ -3025,6 +3057,7 @@ async function openMember(uid) {
       return;
     }
     const m = await r.json();
+    box.dataset.uid = uid;
     const d = s => (s || '').slice(0,10);
     const chips = [];
     if (!m.on_server) chips.push('<span class="chip danger">не на сервере</span>');
