@@ -1556,7 +1556,13 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
         </div>
       </div>
 
-      <div id="memberCard"></div>
+      <div id="memberCard">
+        <div class="empty">
+          <div class="empty-icon">🔍</div>
+          <div class="empty-title">Найди участника</div>
+          <div class="empty-sub">Введи ник или ID выше, затем кликни по результату</div>
+        </div>
+      </div>
     </div></div>
 
     <!-- MODLOG -->
@@ -3009,7 +3015,15 @@ async function openMember(uid) {
   box.innerHTML = skeletonCards(2);
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}`);
-    if (!r.ok) { box.innerHTML = '<div class="empty"><div class="empty-title">Не удалось загрузить</div></div>'; return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      box.innerHTML = `<div class="empty">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-title">Не удалось загрузить досье</div>
+        <div class="empty-sub">${escapeHtml(err.error || ('код ' + r.status))}</div>
+      </div>`;
+      return;
+    }
     const m = await r.json();
     const d = s => (s || '').slice(0,10);
     const chips = [];
@@ -3094,7 +3108,13 @@ async function openMember(uid) {
         </div>
       </div>` : ''}
     `;
-  } catch(e) {}
+  } catch(e) {
+    box.innerHTML = `<div class="empty">
+      <div class="empty-icon">⚠️</div>
+      <div class="empty-title">Ошибка при загрузке досье</div>
+      <div class="empty-sub">${escapeHtml(String(e))}</div>
+    </div>`;
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
