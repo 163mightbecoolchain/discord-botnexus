@@ -1880,6 +1880,18 @@ async def on_member_join(member):
 
 @bot.event
 async def on_member_remove(member):
+    # Участник мог не уйти сам, а быть кикнут через интерфейс Discord.
+    # Кик отдельного события не имеет — распознаём по audit log.
+    try:
+        mod_id, reason = await _audit_actor(
+            member.guild, discord.AuditLogAction.kick, member.id, window=8)
+        if mod_id:
+            await add_modlog(member.guild.id, member.id, mod_id, "KICK",
+                             reason or "Кик через Discord", "")
+            await antinuke_check(member.guild, mod_id, "kick")
+    except Exception as ex:
+        print(f"[KICK_LOG] {ex}")
+
     ch = await sec_check(member.guild, "leaves")
     if not ch: return
     roles = [r.mention for r in member.roles if r.name != "@everyone"]
@@ -1898,6 +1910,27 @@ async def on_member_ban(guild, user):
     except Exception:
         pass
 
+    # Бан мог быть выдан вручную через интерфейс Discord — тогда в modlog
+    # записи нет, и на сайте действие не видно. Достаём автора из audit log.
+    try:
+        mod_id, reason = await _audit_actor(guild, discord.AuditLogAction.ban, user.id)
+        if mod_id is not None:
+            already = False
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("""
+                    SELECT 1 FROM modlog
+                    WHERE guild_id=? AND user_id=? AND action LIKE '%BAN%'
+                      AND created_at > datetime('now','-15 seconds') LIMIT 1
+                """, (guild.id, user.id)) as c:
+                    already = bool(await c.fetchone())
+            if not already:
+                await add_modlog(guild.id, user.id, mod_id, "BAN",
+                                 reason or "Выдан через Discord", "")
+            if mod_id:
+                await antinuke_check(guild, mod_id, "ban")
+    except Exception as ex:
+        print(f"[BAN_LOG] {ex}")
+
     ch = await sec_check(guild, "bans")
     if not ch: return
     gid3 = guild.id
@@ -1908,6 +1941,22 @@ async def on_member_ban(guild, user):
 
 @bot.event
 async def on_member_unban(guild, user):
+    # Ручной разбан тоже пишем в modlog и закрываем tempban-запись,
+    # иначе цикл будет пытаться разбанить уже разбаненного
+    try:
+        mod_id, reason = await _audit_actor(guild, discord.AuditLogAction.unban, user.id)
+        if mod_id is not None:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=?",
+                    (guild.id, user.id))
+                await db.commit()
+            await add_modlog(guild.id, user.id, mod_id, "UNBAN",
+                             reason or "Разбан через Discord", "")
+            await expire_appeals(guild.id, user.id, ("BAN", "TEMPBAN"), "участник разбанен")
+    except Exception as ex:
+        print(f"[UNBAN_LOG] {ex}")
+
     ch = await sec_check(guild, "bans")
     if not ch: return
     gid4 = guild.id
@@ -1982,6 +2031,34 @@ async def on_member_update(before, after):
                             notified=0, created_at=excluded.created_at
                     """, (after.guild.id, after.id, until_iso, mute_reason, now_iso))
                     await db.commit()
+
+                # Мут мог быть выдан вручную через Discord — тогда записи в
+                # modlog нет и на сайте действие не отображается
+                if before.timed_out_until is None:
+                    try:
+                        mod_id, ar = await _audit_actor(
+                            after.guild, discord.AuditLogAction.member_update, after.id)
+                        if mod_id:
+                            already = False
+                            async with aiosqlite.connect(DB_PATH) as db:
+                                async with db.execute("""
+                                    SELECT 1 FROM modlog
+                                    WHERE guild_id=? AND user_id=? AND action LIKE '%MUTE%'
+                                      AND created_at > datetime('now','-15 seconds') LIMIT 1
+                                """, (after.guild.id, after.id)) as c:
+                                    already = bool(await c.fetchone())
+                            if not already:
+                                left = after.timed_out_until - datetime.datetime.now(
+                                    datetime.timezone.utc)
+                                mins = max(1, int(left.total_seconds() // 60))
+                                dur = (f"{mins}m" if mins < 60 else
+                                       f"{mins // 60}h" if mins < 1440 else
+                                       f"{mins // 1440}d")
+                                await add_modlog(after.guild.id, after.id, mod_id, "MUTE",
+                                                 ar or mute_reason or "Мут через Discord", dur)
+                            await antinuke_check(after.guild, mod_id, "mute")
+                    except Exception as ex:
+                        print(f"[MUTE_LOG] audit: {ex}")
             elif before.timed_out_until is not None:
                 # Мут сняли досрочно — уведомляем и закрываем апелляции
                 async with aiosqlite.connect(DB_PATH) as db:
@@ -7815,6 +7892,29 @@ async def compare_with_banned(guild: discord.Guild, sp_dict: dict,
     except Exception as ex:
         print(f"[BAN_EVASION] Compare error: {ex}")
     return best, best_name, best_reasons
+
+
+async def _audit_actor(guild, action, target_id, window: int = 12):
+    """
+    Возвращает (mod_id, reason) из audit log для действия над участником.
+    Нужно, чтобы действия через интерфейс Discord тоже попадали в modlog.
+    Требует у бота право View Audit Log.
+    """
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        async for entry in guild.audit_logs(limit=6, action=action):
+            if entry.target and entry.target.id != target_id:
+                continue
+            if (now - entry.created_at).total_seconds() > window:
+                continue
+            if entry.user and entry.user.id == bot.user.id:
+                return None, None          # действие самого бота уже залогировано
+            return (entry.user.id if entry.user else 0), (entry.reason or "")
+    except discord.Forbidden:
+        print("[AUDIT] Нет права View Audit Log — действия через Discord не логируются")
+    except Exception as ex:
+        print(f"[AUDIT] {ex}")
+    return 0, ""
 
 
 async def save_banned_profile(guild_id: int, user_id: int, username: str,
