@@ -827,6 +827,13 @@ async def db_init():
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
                 member_id INTEGER, member_name TEXT, joined_at TEXT,
                 note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS tier_warnings (
+                guild_id   INTEGER NOT NULL,
+                days_left  INTEGER NOT NULL,
+                sent_at    TEXT    NOT NULL,
+                PRIMARY KEY (guild_id, days_left)
+            );
+
             CREATE TABLE IF NOT EXISTS active_mutes (
                 guild_id   INTEGER NOT NULL,
                 user_id    INTEGER NOT NULL,
@@ -1128,6 +1135,15 @@ async def db_init():
             "ALTER TABLE guild_settings ADD COLUMN lockdown INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN price_watch INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN twin_threshold INTEGER DEFAULT 80",
+            # Индексы на таблицах с частыми выборками. Без них SQLite
+            # сканирует таблицу целиком, и время растёт вместе с историей.
+            "CREATE INDEX IF NOT EXISTS idx_invite_member ON invite_log(guild_id, member_id)",
+            "CREATE INDEX IF NOT EXISTS idx_invite_code   ON invite_log(guild_id, invite_code)",
+            "CREATE INDEX IF NOT EXISTS idx_warnings      ON warnings(guild_id, user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tempbans      ON temp_bans(unbanned, unban_at)",
+            "CREATE INDEX IF NOT EXISTS idx_modlog_date   ON modlog(guild_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_watchlist     ON style_watchlist(guild_id, user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_banned_prof   ON banned_profiles(guild_id)",
             # Стилометрия: колонки расширенного профиля.
             # КРИТИЧНО чтобы были здесь: update_style_profile делает SELECT по ним
             # при первом же сообщении — до первого вызова _save_style_profile
@@ -1156,15 +1172,56 @@ async def get_tier(gid):
             row = await c.fetchone()
             if not row: return TIER_FREE
             tier, exp = row
+            # Пустой expires_at = бессрочная подписка
             if exp and datetime.datetime.utcnow() > datetime.datetime.fromisoformat(exp):
                 await db.execute("UPDATE subscriptions SET tier=0 WHERE guild_id=?", (gid,))
-                await db.commit(); return TIER_FREE
+                await db.commit()
+                # Раньше подписка сгорала молча и владелец не понимал,
+                # почему половина бота перестала работать
+                asyncio.create_task(notify_tier_expired(gid, tier))
+                return TIER_FREE
             return tier
 
+
+async def notify_tier_expired(gid: int, old_tier: int):
+    """Сообщает владельцу и в лог-канал, что подписка сервера закончилась"""
+    try:
+        guild = bot.get_guild(gid)
+        if not guild:
+            return
+        e = build_embed(C.WARNING)
+        e.set_author(name="⏳ Подписка закончилась")
+        e.description = (
+            f"Тариф **{TIER_NAMES.get(old_tier, '?')}** на сервере **{guild.name}** истёк.\n"
+            f"Сервер переведён на **Free**."
+        )
+        e.add_field(
+            name="Что перестало работать",
+            value=("• Логирование событий безопасности\n"
+                   "• Стилометрия и детект обхода бана\n"
+                   "• Карантин новых аккаунтов\n"
+                   "• Анти-рейд и анти-спам"),
+            inline=False
+        )
+        e.set_footer(text="Продлить: /setpremium")
+        ch = await get_log_ch(guild)
+        if ch:
+            try: await ch.send(embed=e)
+            except Exception: pass
+        if guild.owner:
+            try: await guild.owner.send(embed=e)
+            except Exception: pass
+        print(f"[TIER] Подписка сервера {gid} истекла (был тир {old_tier})")
+    except Exception as ex:
+        print(f"[TIER] notify error: {ex}")
+
 async def set_tier(gid, tier, days=30):
-    exp = (datetime.datetime.utcnow() + timedelta(days=days)).isoformat()
+    """days=0 — бессрочно (expires_at пустой)"""
+    exp = "" if not days else (datetime.datetime.utcnow() + timedelta(days=days)).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT INTO subscriptions (guild_id,tier,expires_at) VALUES(?,?,?) ON CONFLICT(guild_id) DO UPDATE SET tier=excluded.tier,expires_at=excluded.expires_at", (gid,tier,exp))
+        # Подписку продлили — прошлые предупреждения больше не актуальны
+        await db.execute("DELETE FROM tier_warnings WHERE guild_id=?", (gid,))
         await db.commit()
 
 async def get_xp(gid, uid):
@@ -1694,6 +1751,8 @@ async def on_ready():
         bot.loop.create_task(reminder_check_loop(bot))
         bot.loop.create_task(invite_autoclean_loop())
         bot.loop.create_task(mute_expiry_loop(bot))
+        bot.loop.create_task(backup_loop(bot))
+        bot.loop.create_task(tier_expiry_loop(bot))
         print("✅ Фоновые задачи запущены")
 
     # ── Загружаем языки серверов из БД ───────────────────────
@@ -2392,12 +2451,23 @@ async def lang_cmd(interaction: discord.Interaction, language: str = "ru"):
     await interaction.response.send_message(embed=e)
 
 @bot.tree.command(name="setpremium", description="[ADMIN] Установить тир")
-@app_commands.describe(tier="0=Free 1=Premium 2=Pro", days="Дней")
-async def setpremium(interaction: discord.Interaction, tier: int, days: int = 30):
+@app_commands.describe(tier="0=Free 1=Premium 2=Pro", days="Дней (0 = бессрочно)")
+async def setpremium(interaction: discord.Interaction, tier: int, days: int = 0):
     if interaction.user.id not in OWNER_IDS and not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Нет доступа.", ephemeral=True)
+    if tier not in (0, 1, 2):
+        return await interaction.response.send_message("❌ Тир: 0, 1 или 2", ephemeral=True)
     await set_tier(interaction.guild_id, tier, days)
-    await interaction.response.send_message(f"✅ **{TIER_NAMES.get(tier,'?')}** на {days} дней.", ephemeral=True)
+    e = build_embed(C.SUCCESS if tier else C.MUTED)
+    e.set_author(name="Тариф изменён")
+    e.add_field(name="Тариф", value=f"**{TIER_NAMES.get(tier,'?')}**", inline=True)
+    if days:
+        until = (datetime.datetime.utcnow() + timedelta(days=days)).strftime("%d.%m.%Y")
+        e.add_field(name="Действует до", value=until, inline=True)
+        e.set_footer(text="Предупреждения придут за 7, 3 и 1 день до конца")
+    else:
+        e.add_field(name="Срок", value="бессрочно", inline=True)
+    await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="sechelp", description="Advanced Security команды [-q prefix] — только для администраторов")
 async def sechelp(interaction: discord.Interaction):
@@ -2955,6 +3025,184 @@ async def notify_mute_over(guild_id: int, user_id: int, early: bool = False):
         return False
 
 
+_err_reported = {}          # ключ ошибки → время последней отправки
+
+async def report_error(tag: str, error, context: str = ""):
+    """
+    Дублирует критические ошибки в приватный канал (ERROR_CHANNEL_ID).
+    Логи Railway ротируются и теряются — важные сбои нужно видеть сразу.
+    Одинаковые ошибки не чаще раза в 10 минут, чтобы не залить канал.
+    """
+    print(f"[{tag}] {context} {error}")
+    ch_id = int(os.getenv("ERROR_CHANNEL_ID", "0") or 0)
+    if not ch_id:
+        return
+    key = f"{tag}:{str(error)[:80]}"
+    now = time.time()
+    if now - _err_reported.get(key, 0) < 600:
+        return
+    _err_reported[key] = now
+    if len(_err_reported) > 200:
+        _err_reported.clear()
+    try:
+        ch = bot.get_channel(ch_id)
+        if not ch:
+            return
+        e = build_embed(C.DANGER)
+        e.set_author(name=f"⚠️ Ошибка · {tag}")
+        if context:
+            e.add_field(name="Контекст", value=context[:1000], inline=False)
+        e.add_field(name="Ошибка",
+                    value=f"```{type(error).__name__}: {str(error)[:900]}```",
+                    inline=False)
+        await ch.send(embed=e)
+    except Exception:
+        pass
+
+
+async def tier_expiry_loop(bot_instance):
+    """
+    Раз в 6 часов проверяет подписки и предупреждает заранее:
+    за 7, 3 и 1 день до конца. Каждое предупреждение — один раз.
+    """
+    await bot_instance.wait_until_ready()
+    await asyncio.sleep(120)
+    while not bot_instance.is_closed():
+        try:
+            now = datetime.datetime.utcnow()
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    "SELECT guild_id, tier, expires_at FROM subscriptions "
+                    "WHERE tier > 0 AND expires_at != ''") as c:
+                    rows = await c.fetchall()
+
+            for gid, tier, exp in rows:
+                try:
+                    left = (datetime.datetime.fromisoformat(exp) - now).days
+                except Exception:
+                    continue
+                if left < 0:
+                    continue
+                # Ближайший подходящий порог
+                threshold = next((t for t in (1, 3, 7) if left <= t), None)
+                if threshold is None:
+                    continue
+
+                async with aiosqlite.connect(DB_PATH) as db:
+                    async with db.execute(
+                        "SELECT 1 FROM tier_warnings WHERE guild_id=? AND days_left=?",
+                        (gid, threshold)) as c:
+                        if await c.fetchone():
+                            continue
+                    await db.execute(
+                        "INSERT OR REPLACE INTO tier_warnings (guild_id, days_left, sent_at) "
+                        "VALUES (?,?,?)", (gid, threshold, now.isoformat()))
+                    await db.commit()
+
+                guild = bot_instance.get_guild(gid)
+                if not guild:
+                    continue
+                word = "день" if left == 1 else ("дня" if left in (2,3,4) else "дней")
+                e = build_embed(C.WARNING if left > 1 else C.DANGER)
+                e.set_author(name="⏳ Подписка скоро закончится")
+                e.description = (
+                    f"Тариф **{TIER_NAMES.get(tier, '?')}** на сервере **{guild.name}** "
+                    f"истекает через **{left} {word}**."
+                )
+                e.add_field(
+                    name="После окончания отключится",
+                    value=("• Логирование событий безопасности\n"
+                           "• Стилометрия и детект обхода бана\n"
+                           "• Карантин и анти-рейд"),
+                    inline=False
+                )
+                e.set_footer(text="Продлить: /setpremium")
+                ch = await get_log_ch(guild)
+                if ch:
+                    try: await ch.send(embed=e)
+                    except Exception: pass
+                if guild.owner:
+                    try: await guild.owner.send(embed=e)
+                    except Exception: pass
+                print(f"[TIER] Предупреждение серверу {gid}: осталось {left} дн.")
+        except Exception as ex:
+            print(f"[TIER] Loop error: {ex}")
+        await asyncio.sleep(21600)      # 6 часов
+
+
+async def backup_loop(bot_instance):
+    """
+    Раз в сутки делает копию базы и отправляет её в приватный канал.
+    Том Railway — единственное место, где живут данные; без копии
+    любая его потеря означает потерю всей истории модерации.
+    Канал задаётся переменной BACKUP_CHANNEL_ID.
+    """
+    await bot_instance.wait_until_ready()
+    ch_id = int(os.getenv("BACKUP_CHANNEL_ID", "0") or 0)
+    if not ch_id:
+        print("[BACKUP] BACKUP_CHANNEL_ID не задан — резервные копии отключены")
+        return
+    await asyncio.sleep(300)          # даём боту прогреться после старта
+    while not bot_instance.is_closed():
+        tmp = "/tmp/witness_backup.db"
+        try:
+            ch = bot_instance.get_channel(ch_id)
+            if not ch:
+                print(f"[BACKUP] Канал {ch_id} недоступен")
+                await asyncio.sleep(86400); continue
+
+            # VACUUM INTO делает согласованную копию без остановки бота
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute("VACUUM INTO ?", (tmp,))
+
+            size_mb = os.path.getsize(tmp) / 1024 / 1024
+            stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+            if size_mb > 24:          # лимит вложения Discord
+                print(f"[BACKUP] Копия {size_mb:.1f} МБ — больше лимита Discord, пропуск")
+                await ch.send(f"⚠️ Резервная копия за {stamp} не отправлена: "
+                              f"размер {size_mb:.1f} МБ превышает лимит вложений.")
+            else:
+                e = build_embed(C.PRIMARY)
+                e.set_author(name="💾 Резервная копия базы")
+                e.add_field(name="Дата",   value=stamp,               inline=True)
+                e.add_field(name="Размер", value=f"{size_mb:.2f} МБ", inline=True)
+                await ch.send(embed=e, file=discord.File(tmp, f"witness_{stamp}.db"))
+                print(f"[BACKUP] Копия отправлена ({size_mb:.2f} МБ)")
+        except Exception as ex:
+            await report_error("BACKUP", ex, "Не удалось создать резервную копию")
+        finally:
+            try:
+                if os.path.exists(tmp): os.remove(tmp)
+            except Exception:
+                pass
+        await asyncio.sleep(86400)
+
+
+async def flush_style_cache():
+    """
+    Сохраняет накопленные профили стилометрии.
+    Вызывается при остановке: батч идёт раз в 10 минут, и без этого
+    всё несохранённое терялось при каждом редеплое.
+    """
+    if not _style_dirty:
+        return 0
+    saved = 0
+    for key in list(_style_dirty):
+        sp = _style_cache.get(key)
+        if sp:
+            try:
+                await _save_style_profile(key[0], key[1], sp)
+                saved += 1
+            except Exception as ex:
+                print(f"[STYLE] Flush error {key}: {ex}")
+        _style_dirty.discard(key)
+    print(f"[STYLE] Сохранено при остановке: {saved} профилей")
+    return saved
+
+
 async def mute_expiry_loop(bot_instance):
     """
     Раз в минуту проверяет истёкшие муты:
@@ -2984,7 +3232,7 @@ async def mute_expiry_loop(bot_instance):
                     "DELETE FROM active_mutes WHERE notified=1 AND until < datetime('now','-30 days')")
                 await db.commit()
         except Exception as ex:
-            print(f"[MUTE_EXPIRY] Loop error: {ex}")
+            await report_error("MUTE_EXPIRY", ex, "Сбой цикла проверки мутов")
         await asyncio.sleep(60)
 
 
@@ -5274,7 +5522,7 @@ async def birthday_check_loop():
                     except Exception as ex:
                         print(f"[BIRTHDAY] Send error guild {gid}: {ex}")
         except Exception as ex:
-            print(f"[BIRTHDAY] Loop error: {ex}")
+            await report_error("BIRTHDAY", ex, "Сбой цикла дней рождения")
         await asyncio.sleep(300)  # проверяем каждые 5 минут
 
 
@@ -6400,7 +6648,10 @@ async def askalbion(interaction: discord.Interaction, question: str):
 @app_commands.describe(item_id="ID предмета (напр. T8_MAIN_SWORD)")
 async def bmtest(interaction: discord.Interaction, item_id: str = "T8_MAIN_SWORD"):
     """Быстрый тест — проверяет что API отвечает и возвращает цены."""
-    await interaction.response.defer()
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            "❌ Отладочная команда, доступна только администраторам.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
     url = f"https://west.albion-online-data.com/api/v2/stats/prices/{item_id}?locations=Black%20Market,Caerleon,Martlock,Brecilien"
     try:
         async with aiohttp.ClientSession() as s:
@@ -7956,7 +8207,7 @@ async def save_banned_profile(guild_id: int, user_id: int, username: str,
             """, (guild_id, user_id, username, style_blob, now, reason))
             await db.commit()
     except Exception as ex:
-        print(f"[BAN_EVASION] Не сохранён профиль забаненного {user_id}: {ex}")
+        await report_error("BAN_EVASION", ex, f"Профиль забаненного {user_id} не сохранён")
 
 
 async def _check_ban_evasion(member):
@@ -8891,7 +9142,49 @@ async def on_app_command_error(interaction: discord.Interaction,
             print(f"[CMD_ERROR] Не удалось отправить сообщение об ошибке: {ex} · исходная ошибка: {error}")
 
 
+@bot.event
+async def on_close():
+    """discord.py вызывает при штатном завершении"""
+    await flush_style_cache()
+
+
+async def _graceful_shutdown():
+    """Сохраняем несохранённое и закрываем соединение с Discord"""
+    print("\n[SHUTDOWN] Завершение работы, сохраняю данные...")
+    try:
+        await flush_style_cache()
+    except Exception as ex:
+        print(f"[SHUTDOWN] Ошибка сохранения: {ex}")
+    try:
+        await bot.close()
+    except Exception:
+        pass
+    print("[SHUTDOWN] Готово")
+
+
+def _install_signal_handlers():
+    """
+    Railway при редеплое шлёт SIGTERM. Без обработчика процесс умирает
+    мгновенно и профили стилометрии из памяти теряются.
+    """
+    import signal
+    loop = asyncio.get_event_loop()
+
+    def handler(signum, frame):
+        try:
+            loop.create_task(_graceful_shutdown())
+        except Exception:
+            pass
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, handler)
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
+    _install_signal_handlers()
     print("─" * 62)
     print(f"Запрошенные привилегированные интенты: "
           f"members={intents.members}, message_content={intents.message_content}")
