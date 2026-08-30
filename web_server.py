@@ -862,65 +862,90 @@ async def api_member_lookup(request):
         'timed_out': bool(member and member.is_timed_out()),
         'roles': [r.name for r in member.roles[1:]] if member else [],
     }
+    # Каждый блок изолирован: сбой одной выборки не должен ронять всё досье
+    out.update({'warns': 0, 'history': [], 'appeals': [],
+                'twins': [], 'active_mute': None})
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                "SELECT COUNT(*) FROM warnings WHERE guild_id=? AND user_id=?",
-                (guild_id, uid)) as c:
-                out['warns'] = (await c.fetchone())[0]
+            try:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM warnings WHERE guild_id=? AND user_id=?",
+                    (guild_id, uid)) as c:
+                    out['warns'] = (await c.fetchone())[0]
+            except Exception as ex:
+                print(f"[LOOKUP] warnings: {ex}")
 
-            async with db.execute("""
-                SELECT action, reason, duration, created_at FROM modlog
-                WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 15
-            """, (guild_id, uid)) as c:
-                out['history'] = [
-                    {'action': a, 'reason': r, 'duration': d, 'created_at': ts}
-                    for a, r, d, ts in await c.fetchall()
-                ]
+            try:
+                async with db.execute("""
+                    SELECT action, reason, duration, created_at FROM modlog
+                    WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 15
+                """, (guild_id, uid)) as c:
+                    out['history'] = [
+                        {'action': a, 'reason': r, 'duration': d, 'created_at': ts}
+                        for a, r, d, ts in await c.fetchall()
+                    ]
+            except Exception as ex:
+                print(f"[LOOKUP] modlog: {ex}")
 
-            async with db.execute("""
-                SELECT id, action_type, status, submitted_at FROM appeals
-                WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10
-            """, (guild_id, uid)) as c:
-                out['appeals'] = [
-                    {'id': i, 'action_type': at, 'status': st, 'submitted_at': ts}
-                    for i, at, st, ts in await c.fetchall()
-                ]
+            try:
+                async with db.execute("""
+                    SELECT id, action_type, status, submitted_at FROM appeals
+                    WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 10
+                """, (guild_id, uid)) as c:
+                    out['appeals'] = [
+                        {'id': i, 'action_type': at, 'status': st, 'submitted_at': ts}
+                        for i, at, st, ts in await c.fetchall()
+                    ]
+            except Exception as ex:
+                print(f"[LOOKUP] appeals: {ex}")
 
-            async with db.execute("""
-                SELECT invite_code, inviter_id FROM invite_log
-                WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 1
-            """, (guild_id, uid)) as c:
-                row = await c.fetchone()
-            if row:
-                inv = bg.get_member(row[1])
-                out['invited_by'] = {'code': row[0],
-                                     'name': inv.display_name if inv else str(row[1])}
+            try:
+                # В invite_log приглашённый хранится как member_id (не user_id)
+                async with db.execute("""
+                    SELECT invite_code, inviter_id, inviter_name FROM invite_log
+                    WHERE guild_id=? AND member_id=? ORDER BY id DESC LIMIT 1
+                """, (guild_id, uid)) as c:
+                    row = await c.fetchone()
+                if row:
+                    inv = bg.get_member(row[1]) if row[1] else None
+                    out['invited_by'] = {
+                        'code': row[0] or '—',
+                        'name': (inv.display_name if inv else (row[2] or str(row[1] or '—')))
+                    }
+            except Exception as ex:
+                print(f"[LOOKUP] invite_log: {ex}")
 
-            async with db.execute("""
-                SELECT user_a, user_b, similarity, confirmed, false_positive
-                FROM twin_links
-                WHERE guild_id=? AND (user_a=? OR user_b=?)
-                ORDER BY similarity DESC LIMIT 10
-            """, (guild_id, uid, uid)) as c:
-                twins = []
-                for a, b, sim, conf, fp in await c.fetchall():
-                    other = b if a == uid else a
-                    om = bg.get_member(other)
-                    twins.append({'user_id': str(other),
-                                  'name': om.display_name if om else str(other),
-                                  'similarity': sim, 'confirmed': bool(conf),
-                                  'false_positive': bool(fp)})
-                out['twins'] = twins
+            try:
+                async with db.execute("""
+                    SELECT user_a, user_b, similarity, confirmed, false_positive
+                    FROM twin_links
+                    WHERE guild_id=? AND (user_a=? OR user_b=?)
+                    ORDER BY similarity DESC LIMIT 10
+                """, (guild_id, uid, uid)) as c:
+                    twins = []
+                    for a, b, sim, conf, fp in await c.fetchall():
+                        other = b if a == uid else a
+                        om = bg.get_member(other)
+                        twins.append({'user_id': str(other),
+                                      'name': om.display_name if om else str(other),
+                                      'similarity': sim or 0,
+                                      'confirmed': bool(conf),
+                                      'false_positive': bool(fp)})
+                    out['twins'] = twins
+            except Exception as ex:
+                print(f"[LOOKUP] twin_links: {ex}")
 
-            async with db.execute("""
-                SELECT until, reason FROM active_mutes
-                WHERE guild_id=? AND user_id=? AND notified=0
-            """, (guild_id, uid)) as c:
-                mrow = await c.fetchone()
-            out['active_mute'] = ({'until': mrow[0], 'reason': mrow[1]} if mrow else None)
-    except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+            try:
+                async with db.execute("""
+                    SELECT until, reason FROM active_mutes
+                    WHERE guild_id=? AND user_id=? AND notified=0
+                """, (guild_id, uid)) as c:
+                    mrow = await c.fetchone()
+                out['active_mute'] = ({'until': mrow[0], 'reason': mrow[1]} if mrow else None)
+            except Exception as ex:
+                print(f"[LOOKUP] active_mutes: {ex}")
+    except Exception as ex:
+        print(f"[LOOKUP] DB error: {ex}")
 
     return web.json_response(out)
 
