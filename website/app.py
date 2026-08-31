@@ -40,10 +40,27 @@ CSP = (
 )
 
 
-async def html_response(filename: str) -> web.Response:
+# Discord Activity открывается в iframe, поэтому для неё нужны
+# отдельные заголовки. Обычные страницы сайта остаются закрытыми
+# от встраивания — их политику не трогаем.
+CSP_ACTIVITY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self' https://esm.sh https://*.discordsays.com https://discord.com; "
+    "img-src 'self' data: https://cdn.discordapp.com https://*.discordsays.com; "
+    "frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com;"
+)
+
+
+async def html_response(filename: str, activity: bool = False) -> web.Response:
     resp = web.Response(text=read_file(filename), content_type="text/html")
-    resp.headers["Content-Security-Policy"] = CSP
-    resp.headers["X-Frame-Options"]         = "DENY"
+    if activity:
+        resp.headers["Content-Security-Policy"] = CSP_ACTIVITY
+        # X-Frame-Options намеренно не ставим: он запретил бы iframe Discord
+    else:
+        resp.headers["Content-Security-Policy"] = CSP
+        resp.headers["X-Frame-Options"]         = "DENY"
     resp.headers["X-Content-Type-Options"]  = "nosniff"
     return resp
 
@@ -53,6 +70,10 @@ async def handle_index(request):
 
 async def handle_privacy(request):
     return await html_response("privacy.html")
+
+async def handle_activity(request):
+    """Discord Activity — встраиваемая версия панели модерации"""
+    return await html_response("activity.html", activity=True)
 
 async def handle_callback(request):
     """
@@ -87,6 +108,7 @@ app = web.Application()
 app.router.add_get("/",          handle_index)
 app.router.add_get("/dashboard", handle_dashboard)
 app.router.add_get("/privacy",   handle_privacy)
+app.router.add_get("/activity",  handle_activity)
 app.router.add_get("/callback",  handle_callback)
 app.router.add_get("/login",     handle_login)
 app.router.add_get("/logout",    handle_logout)
