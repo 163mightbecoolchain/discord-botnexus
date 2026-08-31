@@ -216,8 +216,9 @@ input.search:focus { border-color: var(--accent); }
 
 <div class="toast" id="toast"></div>
 
-<script type="module">
-import { DiscordSDK } from "https://esm.sh/@discord/embedded-app-sdk@2";
+<script src="/.proxy/static/discord-sdk.js"></script>
+<script>
+const DiscordSDK = window.DiscordSDK;
 
 // В Activity все внешние запросы идут через прокси Discord.
 // Префикс /.proxy/api сопоставляется с доменом бота в Dev Portal.
@@ -247,8 +248,10 @@ async function api(path, opts = {}) {
 // ── Запуск ──────────────────────────────────────────────
 async function boot() {
   try {
-    const clientId = new URLSearchParams(location.search).get("client_id")
-                  || window.DISCORD_CLIENT_ID || "__BOT_ID__";
+    if (!DiscordSDK) throw new Error("SDK не загрузился (проверь /static/discord-sdk.js)");
+    const qp = new URLSearchParams(location.search);
+    const clientId = qp.get("client_id") || "__BOT_ID__";
+    if (!clientId || clientId.startsWith("__")) throw new Error("BOT_ID не подставлен");
     sdk = new DiscordSDK(clientId);
     await sdk.ready();
 
@@ -295,8 +298,11 @@ async function boot() {
     setInterval(refreshCounts, 20000);
   } catch (e) {
     $("bootMsg").innerHTML =
-      `<span style="color:var(--danger)">${esc(e.message || e)}</span>`;
-    console.error(e);
+      `<span style="color:var(--danger)">${esc(e.message || e)}</span>` +
+      `<div style="margin-top:.6rem;font-size:.75rem;color:var(--muted)">
+         Открой консоль (Ctrl+Shift+I) для подробностей
+       </div>`;
+    console.error("[Activity]", e);
   }
 }
 
