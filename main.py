@@ -1762,6 +1762,7 @@ async def on_ready():
         bot.loop.create_task(mute_expiry_loop(bot))
         bot.loop.create_task(backup_loop(bot))
         bot.loop.create_task(tier_expiry_loop(bot))
+        bot.loop.create_task(log_flush_loop(bot))
         print("✅ Фоновые задачи запущены")
 
     # ── Загружаем языки серверов из БД ───────────────────────
@@ -1833,7 +1834,7 @@ async def on_member_join(member):
                     e.set_author(name=t(gid, "raid_title"))
                     e.add_field(name=t(gid, "member"), value=member.mention, inline=False)
                     e.add_field(name=t(gid, "reason"), value=t(gid, "raid_reason"), inline=False)
-                    await ch.send(embed=e)
+                    queue_log(ch, e)
                 return
             except Exception: pass
 
@@ -1906,7 +1907,7 @@ async def on_member_join(member):
         e.add_field(name="Аккаунт", value=f"{age} дней — {sus}", inline=True)
         e.add_field(name="Инвайт", value=f"`{used_code}`" if used_code else "неизвестно", inline=True)
         e.add_field(name="Пригласил", value=f"{inviter_name} (`{inviter_id}`)" if inviter_id else "неизвестно", inline=True)
-        await ch.send(embed=e)
+        queue_log(ch, e)
 
     ch2 = await sec_check(member.guild, "suspicious")
     if ch2 and age < 7:
@@ -1968,7 +1969,7 @@ async def on_member_remove(member):
     e.set_author(name=t(gid2, "left"))
     e.add_field(name=t(gid2, "member"), value=f"{member.mention} · `{member.name}`", inline=False)
     e.add_field(name=t(gid2, "roles"),  value=", ".join(roles) if roles else "—",    inline=False)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_member_ban(guild, user):
@@ -2233,7 +2234,7 @@ async def on_message_delete(message):
             except Exception:
                 pass
 
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_message_edit(before, after):
@@ -2253,7 +2254,7 @@ async def on_message_edit(before, after):
     e.add_field(name=t(gid9, "was"),    value=before.content[:512] or "—",  inline=False)
     e.add_field(name=t(gid9, "now"),    value=after.content[:512] or "—",   inline=False)
     e.add_field(name="Link",            value=f"[Jump]({after.jump_url})",   inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_invite_create(invite):
@@ -2268,7 +2269,7 @@ async def on_invite_create(invite):
     e.add_field(name=t(gid10, "code"),    value=f"`{invite.code}`",                                                                inline=True)
     e.add_field(name=t(gid10, "uses"),    value=str(invite.max_uses) if invite.max_uses else "∞",                                  inline=True)
     e.add_field(name=t(gid10, "expires"), value=invite.expires_at.strftime("%d.%m.%Y %H:%M") if invite.expires_at else t(gid10, "never"), inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_invite_delete(invite):
@@ -2280,7 +2281,7 @@ async def on_invite_delete(invite):
     e = build_embed(C.MUTED)
     e.set_author(name=t(gid11, "invite_deleted"))
     e.add_field(name=t(gid11, "code"), value=f"`{invite.code}`", inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_close():
@@ -2329,7 +2330,7 @@ async def on_voice_state_update(member, before, after):
     e.set_author(name=t(gid12, "voice_update"))
     e.add_field(name=t(gid12, "member"), value=member.mention, inline=True)
     e.add_field(name=t(gid12, "action"), value=desc,           inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_guild_channel_create(channel_created):
@@ -2338,7 +2339,7 @@ async def on_guild_channel_create(channel_created):
     e = build_embed(C.SUCCESS)
     e.set_author(name="Channel created")
     e.add_field(name="Канал", value=channel_created.mention, inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_guild_channel_delete(channel_deleted):
@@ -2361,7 +2362,7 @@ async def on_guild_role_create(role):
     e = build_embed(C.SUCCESS)
     e.set_author(name="Role created")
     e.add_field(name="Роль", value=role.mention, inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_guild_role_delete(role):
@@ -2399,7 +2400,7 @@ async def on_user_update(before, after):
         e.set_author(name="Avatar changed")
         e.add_field(name="Member", value=member.mention, inline=False)
         e.set_thumbnail(url=after.display_avatar.url)
-        await ch.send(embed=e)
+        queue_log(ch, e)
 
 
 @bot.event
@@ -2410,7 +2411,7 @@ async def on_thread_create(thread):
     e.set_author(name="Thread created")
     e.add_field(name="Тред", value=thread.mention, inline=True)
     if thread.parent: e.add_field(name="Канал", value=thread.parent.mention, inline=True)
-    await ch.send(embed=e)
+    queue_log(ch, e)
 
 @bot.event
 async def on_interaction(interaction):
@@ -2458,6 +2459,87 @@ async def lang_cmd(interaction: discord.Interaction, language: str = "ru"):
             color=C.SUCCESS
         )
     await interaction.response.send_message(embed=e)
+
+@bot.tree.command(name="dbstats", description="[ADMIN] Размер базы и таблиц")
+async def dbstats(interaction: discord.Interaction):
+    if interaction.user.id not in OWNER_IDS and not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Нет доступа.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    try:
+        size_mb = os.path.getsize(DB_PATH) / 1024 / 1024
+        rows = []
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name") as c:
+                tables = [r[0] for r in await c.fetchall()]
+            for t in tables:
+                try:
+                    async with db.execute(f"SELECT COUNT(*) FROM {t}") as c:
+                        rows.append((t, (await c.fetchone())[0]))
+                except Exception:
+                    pass
+        rows.sort(key=lambda x: -x[1])
+
+        e = build_embed(C.PRIMARY)
+        e.set_author(name="🗄️ База данных")
+        e.add_field(name="Размер файла", value=f"**{size_mb:.1f} МБ**", inline=True)
+        e.add_field(name="Таблиц",       value=str(len(rows)),          inline=True)
+        top = "\n".join(f"`{n:<22}` {c:>8,}".replace(",", " ")
+                        for n, c in rows[:15] if c)
+        e.add_field(name="Записей по таблицам", value=top or "—", inline=False)
+        e.set_footer(text="Резервная копия отправляется раз в сутки в сжатом виде")
+        await interaction.followup.send(embed=e, ephemeral=True)
+    except Exception as ex:
+        await interaction.followup.send(f"❌ Ошибка: {ex}", ephemeral=True)
+
+
+@bot.tree.command(name="backupnow", description="[ADMIN] Сделать резервную копию сейчас")
+async def backupnow(interaction: discord.Interaction):
+    if interaction.user.id not in OWNER_IDS and not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("❌ Нет доступа.", ephemeral=True)
+    ch_id = int(os.getenv("BACKUP_CHANNEL_ID", "0") or 0)
+    if not ch_id:
+        return await interaction.response.send_message(
+            "❌ BACKUP_CHANNEL_ID не задан.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    tmp, gz = "/tmp/manual_backup.db", "/tmp/manual_backup.db.gz"
+    try:
+        for f in (tmp, gz):
+            if os.path.exists(f): os.remove(f)
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("PRAGMA wal_checkpoint(TRUNCATE)") as c:
+                await c.fetchall()
+            await db.execute("VACUUM INTO ?", (tmp,))
+        def _gzip():
+            import gzip, shutil
+            with open(tmp,"rb") as fi, gzip.open(gz,"wb",compresslevel=9) as fo:
+                shutil.copyfileobj(fi, fo, length=1024*1024)
+        await asyncio.to_thread(_gzip)
+        raw_mb = os.path.getsize(tmp)/1024/1024
+        gz_mb  = os.path.getsize(gz)/1024/1024
+        limit  = float(os.getenv("BACKUP_LIMIT_MB", "9"))
+        if gz_mb > limit:
+            return await interaction.followup.send(
+                f"⚠️ Архив {gz_mb:.1f} МБ больше лимита {limit} МБ — "
+                f"суточный бэкап отправит его частями.", ephemeral=True)
+        ch = bot.get_channel(ch_id) or await bot.fetch_channel(ch_id)
+        stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d_%H%M")
+        e = build_embed(C.PRIMARY)
+        e.set_author(name="💾 Резервная копия (вручную)")
+        e.add_field(name="База",     value=f"{raw_mb:.1f} МБ", inline=True)
+        e.add_field(name="В архиве", value=f"{gz_mb:.1f} МБ",  inline=True)
+        await ch.send(embed=e, file=discord.File(gz, f"witness_{stamp}.db.gz"))
+        await interaction.followup.send(
+            f"✅ Копия отправлена ({gz_mb:.1f} МБ).", ephemeral=True)
+    except Exception as ex:
+        await interaction.followup.send(f"❌ Ошибка: {ex}", ephemeral=True)
+    finally:
+        for f in (tmp, gz):
+            try:
+                if os.path.exists(f): os.remove(f)
+            except Exception: pass
+
 
 @bot.tree.command(name="setpremium", description="[ADMIN] Установить тир")
 @app_commands.describe(tier="0=Free 1=Premium 2=Pro", days="Дней (0 = бессрочно)")
@@ -3069,6 +3151,64 @@ async def report_error(tag: str, error, context: str = ""):
         pass
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ОЧЕРЕДЬ ЛОГОВ
+#  Массовые события (автоочистка инвайтов, рейд, чистка сообщений)
+#  раньше слали по сообщению на каждое действие и упирались в
+#  rate limit Discord (429). Теперь события копятся 3 секунды и
+#  уходят пачками: в одном сообщении помещается до 10 эмбедов.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_log_queue: dict = {}          # channel_id → [(channel, embed), ...]
+LOG_FLUSH_INTERVAL = 3         # секунд между отправками
+LOG_QUEUE_MAX      = 200       # предохранитель от переполнения памяти
+
+
+def queue_log(channel, embed):
+    """
+    Ставит эмбед в очередь на отправку. Для частых событий.
+    Срочные вещи (анти-нюк, заявки на бан) шлём напрямую через ch.send.
+    """
+    if channel is None:
+        return
+    q = _log_queue.setdefault(channel.id, [])
+    if len(q) >= LOG_QUEUE_MAX:
+        return                  # очередь переполнена — молча отбрасываем
+    q.append((channel, embed))
+
+
+async def flush_log_queue():
+    """Отправляет накопленное. Вызывается циклом и при остановке бота."""
+    for ch_id in list(_log_queue.keys()):
+        items = _log_queue.get(ch_id) or []
+        if not items:
+            _log_queue.pop(ch_id, None)
+            continue
+        channel = items[0][0]
+        # Discord принимает до 10 эмбедов в одном сообщении
+        batch  = items[:10]
+        _log_queue[ch_id] = items[10:]
+        try:
+            await channel.send(embeds=[e for _, e in batch])
+        except discord.HTTPException as ex:
+            print(f"[LOG_QUEUE] Не отправлено в {ch_id}: {ex}")
+        except Exception as ex:
+            print(f"[LOG_QUEUE] {ex}")
+        if not _log_queue.get(ch_id):
+            _log_queue.pop(ch_id, None)
+
+
+async def log_flush_loop(bot_instance):
+    """Раз в несколько секунд разгребает очередь логов"""
+    await bot_instance.wait_until_ready()
+    while not bot_instance.is_closed():
+        try:
+            if _log_queue:
+                await flush_log_queue()
+        except Exception as ex:
+            print(f"[LOG_QUEUE] Loop error: {ex}")
+        await asyncio.sleep(LOG_FLUSH_INTERVAL)
+
+
 async def tier_expiry_loop(bot_instance):
     """
     Раз в 6 часов проверяет подписки и предупреждает заранее:
@@ -3141,7 +3281,7 @@ async def tier_expiry_loop(bot_instance):
 
 async def backup_loop(bot_instance):
     """
-    Раз в сутки делает копию базы и отправляет её в приватный канал.
+    Раз в сутки делает копию базы, сжимает её и отправляет в приватный канал.
     Том Railway — единственное место, где живут данные; без копии
     любая его потеря означает потерю всей истории модерации.
     Канал задаётся переменной BACKUP_CHANNEL_ID.
@@ -3153,7 +3293,9 @@ async def backup_loop(bot_instance):
         return
     await asyncio.sleep(300)          # даём боту прогреться после старта
     while not bot_instance.is_closed():
-        tmp = "/tmp/witness_backup.db"
+        tmp   = "/tmp/witness_backup.db"
+        gz    = tmp + ".gz"
+        parts = []
         try:
             # get_channel читает только кэш — если бот недавно добавлен
             # на сервер, канала там может не быть. Дозапрашиваем через API.
@@ -3168,9 +3310,11 @@ async def backup_loop(bot_instance):
                           "«Просмотр канала», «Отправка сообщений», «Прикрепление файлов»?")
                     await asyncio.sleep(3600); continue
 
+            for f in (tmp, gz):
+                if os.path.exists(f):
+                    os.remove(f)
+
             # VACUUM INTO делает согласованную копию без остановки бота
-            if os.path.exists(tmp):
-                os.remove(tmp)
             async with aiosqlite.connect(DB_PATH) as db:
                 # Сбрасываем WAL, чтобы копия содержала все свежие записи.
                 # Курсор PRAGMA обязательно закрываем — иначе VACUUM INTO
@@ -3179,51 +3323,60 @@ async def backup_loop(bot_instance):
                     await c.fetchall()
                 await db.execute("VACUUM INTO ?", (tmp,))
 
-            size_mb = os.path.getsize(tmp) / 1024 / 1024
-            stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+            raw_mb = os.path.getsize(tmp) / 1024 / 1024
 
-            if size_mb > 24:          # лимит вложения Discord
-                print(f"[BACKUP] Копия {size_mb:.1f} МБ — больше лимита Discord, пропуск")
-                await ch.send(f"⚠️ Резервная копия за {stamp} не отправлена: "
-                              f"размер {size_mb:.1f} МБ превышает лимит вложений.")
+            # Сжимаем: SQLite ужимается примерно в 5 раз.
+            # Делаем в отдельном потоке, чтобы не блокировать бота.
+            def _gzip():
+                import gzip, shutil
+                with open(tmp, "rb") as fi, gzip.open(gz, "wb", compresslevel=9) as fo:
+                    shutil.copyfileobj(fi, fo, length=1024 * 1024)
+            await asyncio.to_thread(_gzip)
+
+            gz_mb = os.path.getsize(gz) / 1024 / 1024
+            stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+            LIMIT_MB = float(os.getenv("BACKUP_LIMIT_MB", "9"))   # запас под лимит Discord
+
+            e = build_embed(C.PRIMARY)
+            e.set_author(name="💾 Резервная копия базы")
+            e.add_field(name="Дата",     value=stamp, inline=True)
+            e.add_field(name="База",     value=f"{raw_mb:.1f} МБ", inline=True)
+            e.add_field(name="В архиве", value=f"{gz_mb:.1f} МБ", inline=True)
+
+            if gz_mb <= LIMIT_MB:
+                await ch.send(embed=e, file=discord.File(gz, f"witness_{stamp}.db.gz"))
+                print(f"[BACKUP] Копия отправлена ({gz_mb:.2f} МБ, база {raw_mb:.1f} МБ)")
             else:
-                e = build_embed(C.PRIMARY)
-                e.set_author(name="💾 Резервная копия базы")
-                e.add_field(name="Дата",   value=stamp,               inline=True)
-                e.add_field(name="Размер", value=f"{size_mb:.2f} МБ", inline=True)
-                await ch.send(embed=e, file=discord.File(tmp, f"witness_{stamp}.db"))
-                print(f"[BACKUP] Копия отправлена ({size_mb:.2f} МБ)")
+                # Даже сжатая не влезает — режем на части по LIMIT_MB
+                chunk = int(LIMIT_MB * 1024 * 1024)
+                with open(gz, "rb") as f:
+                    idx = 0
+                    while True:
+                        data = f.read(chunk)
+                        if not data:
+                            break
+                        idx += 1
+                        pth = f"/tmp/witness_{stamp}.db.gz.{idx:03d}"
+                        with open(pth, "wb") as pf:
+                            pf.write(data)
+                        parts.append(pth)
+                e.add_field(
+                    name="Частей", value=str(len(parts)), inline=True)
+                e.set_footer(text="Собрать: cat witness_*.db.gz.* > db.gz && gunzip db.gz")
+                await ch.send(embed=e)
+                for pth in parts:
+                    await ch.send(file=discord.File(pth, os.path.basename(pth)))
+                    await asyncio.sleep(1)      # не упираемся в rate limit
+                print(f"[BACKUP] Копия отправлена {len(parts)} частями ({gz_mb:.1f} МБ)")
         except Exception as ex:
             await report_error("BACKUP", ex, "Не удалось создать резервную копию")
         finally:
-            try:
-                if os.path.exists(tmp): os.remove(tmp)
-            except Exception:
-                pass
+            for f in [tmp, gz] + parts:
+                try:
+                    if os.path.exists(f): os.remove(f)
+                except Exception:
+                    pass
         await asyncio.sleep(86400)
-
-
-async def flush_style_cache():
-    """
-    Сохраняет накопленные профили стилометрии.
-    Вызывается при остановке: батч идёт раз в 10 минут, и без этого
-    всё несохранённое терялось при каждом редеплое.
-    """
-    if not _style_dirty:
-        return 0
-    saved = 0
-    for key in list(_style_dirty):
-        sp = _style_cache.get(key)
-        if sp:
-            try:
-                await _save_style_profile(key[0], key[1], sp)
-                saved += 1
-            except Exception as ex:
-                print(f"[STYLE] Flush error {key}: {ex}")
-        _style_dirty.discard(key)
-    print(f"[STYLE] Сохранено при остановке: {saved} профилей")
-    return saved
-
 
 async def mute_expiry_loop(bot_instance):
     """
@@ -9164,17 +9317,19 @@ async def on_app_command_error(interaction: discord.Interaction,
             print(f"[CMD_ERROR] Не удалось отправить сообщение об ошибке: {ex} · исходная ошибка: {error}")
 
 
-@bot.event
-async def on_close():
-    """discord.py вызывает при штатном завершении"""
-    await flush_style_cache()
-
-
 async def _graceful_shutdown():
-    """Сохраняем несохранённое и закрываем соединение с Discord"""
-    print("\n[SHUTDOWN] Завершение работы, сохраняю данные...")
+    """
+    Обработчик SIGTERM: Railway шлёт его при редеплое.
+    Вызывает штатный graceful_shutdown (он сохраняет профили,
+    языки и делает WAL checkpoint) и закрывает соединение.
+    """
+    print("\n[SHUTDOWN] Получен сигнал завершения, сохраняю данные...")
     try:
-        await flush_style_cache()
+        await flush_log_queue()          # дописываем накопленные логи в каналы
+    except Exception as ex:
+        print(f"[SHUTDOWN] Очередь логов: {ex}")
+    try:
+        await graceful_shutdown(bot)
     except Exception as ex:
         print(f"[SHUTDOWN] Ошибка сохранения: {ex}")
     try:
