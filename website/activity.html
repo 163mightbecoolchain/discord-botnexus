@@ -193,21 +193,21 @@ input.search:focus { border-color: var(--accent); }
 </div>
 
 <div class="tabs" id="tabs" style="display:none;">
-  <div class="tab active" data-v="appeals" onclick="show('appeals')">
+  <div class="tab active" data-v="appeals">
     Апелляции<span class="cnt hidden" id="cAppeals">0</span>
   </div>
-  <div class="tab" data-v="banreq" onclick="show('banreq')">
+  <div class="tab" data-v="banreq">
     Баны<span class="cnt hidden" id="cBanreq">0</span>
   </div>
-  <div class="tab" data-v="member" onclick="show('member')">Поиск</div>
-  <div class="tab" data-v="log" onclick="show('log')">Журнал</div>
+  <div class="tab" data-v="member">Поиск</div>
+  <div class="tab" data-v="log">Журнал</div>
 </div>
 
 <div class="body" id="main" style="display:none;">
   <div class="view active" id="v-appeals"></div>
   <div class="view" id="v-banreq"></div>
   <div class="view" id="v-member">
-    <input class="search" id="mSearch" placeholder="Ник или ID участника..." oninput="mDebounce()">
+    <input class="search" id="mSearch" placeholder="Ник или ID участника...">
     <div id="mRes"></div>
     <div id="mCard"></div>
   </div>
@@ -348,7 +348,7 @@ async function boot() {
 }
 
 // ── Вкладки ─────────────────────────────────────────────
-window.show = function (v) {
+function show(v) {
   document.querySelectorAll(".tab").forEach(t =>
     t.classList.toggle("active", t.dataset.v === v));
   document.querySelectorAll(".view").forEach(el =>
@@ -356,7 +356,7 @@ window.show = function (v) {
   if (v === "appeals") loadAppeals();
   if (v === "banreq")  loadBanreq();
   if (v === "log")     loadLog();
-};
+}
 
 const skel = n => '<div class="skel"></div>'.repeat(n);
 
@@ -404,8 +404,8 @@ async function loadAppeals() {
         </div>
         <div class="reason">${esc(a.appeal_text || "—")}</div>
         <div class="acts">
-          <button class="btn btn-no" onclick="rev(${a.id},'reject')">Отклонить</button>
-          <button class="btn btn-ok" onclick="rev(${a.id},'accept')">Принять</button>
+          <button class="btn btn-no" data-act="appeal" data-id="${a.id}" data-do="reject">Отклонить</button>
+          <button class="btn btn-ok" data-act="appeal" data-id="${a.id}" data-do="accept">Принять</button>
         </div>
       </div>`).join("");
   } catch (e) {
@@ -414,7 +414,7 @@ async function loadAppeals() {
   }
 }
 
-window.rev = async function (id, action) {
+async function rev(id, action) {
   try {
     const r = await api(`/guild/${guildId}/appeal/${id}/${action}`, {
       method: "POST",
@@ -433,7 +433,7 @@ window.rev = async function (id, action) {
             ? "Недостаточно прав для этого типа наказания" : "Ошибка", true);
     }
   } catch (e) { toast("Нет связи", true); }
-};
+}
 
 // ── Заявки на бан ───────────────────────────────────────
 async function loadBanreq() {
@@ -465,8 +465,8 @@ async function loadBanreq() {
         </div>
         <div class="reason">${esc(b.reason || "—")}</div>
         <div class="acts">
-          <button class="btn btn-no"  onclick="brev(${b.id},'reject')">Отклонить</button>
-          <button class="btn btn-ban" onclick="brev(${b.id},'approve')">Забанить</button>
+          <button class="btn btn-no"  data-act="banreq" data-id="${b.id}" data-do="reject">Отклонить</button>
+          <button class="btn btn-ban" data-act="banreq" data-id="${b.id}" data-do="approve">Забанить</button>
         </div>
       </div>`).join("");
   } catch (e) {
@@ -475,7 +475,7 @@ async function loadBanreq() {
   }
 }
 
-window.brev = async function (id, action) {
+async function brev(id, action) {
   try {
     const r = await api(`/guild/${guildId}/banrequest/${id}/${action}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
@@ -491,14 +491,14 @@ window.brev = async function (id, action) {
       if (!$("v-banreq").querySelector(".card")) loadBanreq();
     } else toast("Ошибка", true);
   } catch (e) { toast("Нет связи", true); }
-};
+}
 
 // ── Поиск участника ─────────────────────────────────────
 let mt = null;
-window.mDebounce = function () {
+function mDebounce() {
   clearTimeout(mt);
   mt = setTimeout(mSearch, 350);
-};
+}
 
 async function mSearch() {
   const q = $("mSearch").value.trim();
@@ -510,7 +510,7 @@ async function mSearch() {
     const rows = r.ok ? await r.json() : [];
     box.innerHTML = rows.length
       ? rows.slice(0, 8).map(m => `
-          <div class="res" onclick="openM('${m.id}')">
+          <div class="res" data-act="member" data-uid="${m.id}">
             <img src="${m.avatar}" alt="">
             <div style="min-width:0;">
               <div class="title">${esc(m.name)}</div>
@@ -521,7 +521,7 @@ async function mSearch() {
   } catch (e) {}
 }
 
-window.openM = async function (uid) {
+async function openM(uid) {
   $("mRes").innerHTML = "";
   const box = $("mCard");
   box.innerHTML = skel(2);
@@ -561,7 +561,7 @@ window.openM = async function (uid) {
         </div>` : `<div class="empty" style="padding:1.2rem;">
             <div class="s">Наказаний не было</div></div>`}`;
   } catch (e) {}
-};
+}
 
 // ── Журнал ──────────────────────────────────────────────
 async function loadLog() {
@@ -588,6 +588,25 @@ async function loadLog() {
       </div>`).join("");
   } catch (e) {}
 }
+
+// ━━━ Делегирование событий ━━━
+// Атрибуты onclick внутри iframe Discord могут блокироваться его политикой
+// безопасности, поэтому все клики ловим одним слушателем на документе.
+document.addEventListener("click", e => {
+  const tab = e.target.closest(".tab");
+  if (tab && tab.dataset.v) { show(tab.dataset.v); return; }
+
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act;
+  if (act === "appeal") rev(Number(el.dataset.id), el.dataset.do);
+  else if (act === "banreq") brev(Number(el.dataset.id), el.dataset.do);
+  else if (act === "member") openM(el.dataset.uid);
+});
+
+document.addEventListener("input", e => {
+  if (e.target && e.target.id === "mSearch") mDebounce();
+});
 
 boot();
 </script>
