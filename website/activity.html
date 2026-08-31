@@ -158,6 +158,43 @@ input.search:focus { border-color: var(--accent); }
 }
 @keyframes sh { to { background-position: -200% 0; } }
 
+/* ── Панель комментария ── */
+.sheet-bg {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,.55);
+  display: none; align-items: flex-end;
+}
+.sheet-bg.show { display: flex; animation: fade .18s ease; }
+@keyframes fade { from { opacity: 0; } }
+
+.sheet {
+  width: 100%; background: var(--panel);
+  border-top: 1px solid var(--border-2);
+  border-radius: 14px 14px 0 0;
+  padding: .9rem .9rem calc(.9rem + env(safe-area-inset-bottom));
+  animation: up .22s cubic-bezier(.32,1.3,.6,1);
+}
+@keyframes up { from { transform: translateY(100%); } }
+
+.sheet-grip {
+  width: 34px; height: 4px; border-radius: 999px;
+  background: var(--border-2); margin: 0 auto .7rem;
+}
+.sheet-title { font-weight: 700; font-size: .92rem; margin-bottom: .15rem; }
+.sheet-sub { font-size: .76rem; color: var(--muted); margin-bottom: .7rem; }
+
+.sheet textarea {
+  width: 100%; min-height: 74px; resize: none;
+  padding: .6rem .7rem;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text);
+  font-size: .85rem; font-family: inherit; line-height: 1.5;
+  outline: none;
+}
+.sheet textarea:focus { border-color: var(--accent); }
+.sheet-hint { font-size: .72rem; color: var(--muted); margin-top: .35rem; }
+.sheet-acts { display: flex; gap: .45rem; margin-top: .8rem; }
+
 .toast {
   position: fixed; left: 50%; bottom: 1rem; transform: translate(-50%, 20px);
   background: var(--panel); border: 1px solid var(--border);
@@ -212,6 +249,20 @@ input.search:focus { border-color: var(--accent); }
     <div id="mCard"></div>
   </div>
   <div class="view" id="v-log"></div>
+</div>
+
+<div class="sheet-bg" id="sheetBg">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-title" id="sheetTitle">Комментарий</div>
+    <div class="sheet-sub"   id="sheetSub"></div>
+    <textarea id="sheetNote" placeholder="Например: нарушение подтверждено записями" maxlength="500"></textarea>
+    <div class="sheet-hint">Участник увидит этот текст в личных сообщениях. Можно оставить пустым.</div>
+    <div class="sheet-acts">
+      <button class="btn btn-no" data-act="sheet-cancel">Отмена</button>
+      <button class="btn btn-ok" data-act="sheet-ok" id="sheetOk">Подтвердить</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -440,12 +491,50 @@ async function loadAppeals() {
   }
 }
 
-async function rev(id, action) {
+// Комментарий к решению по апелляции.
+// Раньше отправлялась пустая строка, и участник не понимал причину.
+let sheetCtx = null;   // { id, action, name }
+
+function openSheet(id, action) {
+  const card = document.querySelector(`[data-id="${id}"]`);
+  const name = card ? (card.querySelector(".title")?.textContent || "") : "";
+  sheetCtx = { id, action, name };
+
+  $("sheetTitle").textContent = action === "accept"
+    ? "Принять апелляцию" : "Отклонить апелляцию";
+  $("sheetSub").textContent = `#${id}${name ? " · " + name : ""}`;
+  const ok = $("sheetOk");
+  ok.textContent = action === "accept" ? "Принять" : "Отклонить";
+  ok.className = "btn " + (action === "accept" ? "btn-ok" : "btn-ban");
+  const ta = $("sheetNote");
+  ta.value = "";
+  ta.placeholder = action === "accept"
+    ? "Например: наказание снято, вопрос решён"
+    : "Например: нарушение подтверждено записями";
+
+  $("sheetBg").classList.add("show");
+  setTimeout(() => ta.focus(), 120);
+}
+
+function closeSheet() {
+  $("sheetBg").classList.remove("show");
+  sheetCtx = null;
+}
+
+async function confirmSheet() {
+  if (!sheetCtx) return;
+  const { id, action } = sheetCtx;
+  const note = $("sheetNote").value.trim();
+  closeSheet();
+  await rev(id, action, note);
+}
+
+async function rev(id, action, note = "") {
   try {
     const r = await api(`/guild/${guildId}/appeal/${id}/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ note: "" }),
+      body: JSON.stringify({ note }),
     });
     if (r.ok) {
       toast(action === "accept" ? "Апелляция принята" : "Апелляция отклонена");
@@ -625,9 +714,21 @@ document.addEventListener("click", e => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
   const act = el.dataset.act;
-  if (act === "appeal") rev(Number(el.dataset.id), el.dataset.do);
+  if (act === "appeal") openSheet(Number(el.dataset.id), el.dataset.do);
+  else if (act === "sheet-cancel") closeSheet();
+  else if (act === "sheet-ok") confirmSheet();
   else if (act === "banreq") brev(Number(el.dataset.id), el.dataset.do);
   else if (act === "member") openM(el.dataset.uid);
+});
+
+// Закрытие панели: клик по затемнению или Escape
+document.addEventListener("click", e => {
+  if (e.target && e.target.id === "sheetBg") closeSheet();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeSheet();
+  // Ctrl+Enter — быстрое подтверждение
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && sheetCtx) confirmSheet();
 });
 
 document.addEventListener("input", e => {
