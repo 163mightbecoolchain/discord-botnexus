@@ -1761,6 +1761,35 @@ async def on_ready():
         print(f"✅ Синхронизировано {len(synced)} команд глобально")
         for cmd in sorted(synced, key=lambda c: c.name):
             print(f"   /{cmd.name}")
+    except discord.HTTPException as ex:
+        # 50240: у приложения включены Activities, и Discord создал команду
+        # «точку входа» (Entry Point). Обычный sync её не содержит и Discord
+        # отказывается затирать — из-за этого падала вся синхронизация.
+        # Решение: подтягиваем существующую точку входа в дерево и повторяем.
+        if getattr(ex, "code", None) == 50240:
+            print("[SYNC] Обнаружена команда-точка входа Activity, сохраняю её...")
+            try:
+                existing = await bot.http.get_global_commands(bot.application_id)
+                entry = [c for c in existing
+                         if int(c.get("type", 1)) == 4]      # 4 = PRIMARY_ENTRY_POINT
+                if entry:
+                    # to_dict() в discord.py 2.x требует ссылку на дерево
+                    payload = [c.to_dict(bot.tree) for c in bot.tree.get_commands()]
+                    payload.extend(entry)
+                    synced = await bot.http.bulk_upsert_global_commands(
+                        bot.application_id, payload)
+                    print(f"✅ Синхронизировано {len(synced)} команд "
+                          f"(включая точку входа Activity)")
+                else:
+                    print("[SYNC] Точка входа не найдена, повтор обычной синхронизации")
+                    synced = await bot.tree.sync()
+                    print(f"✅ Синхронизировано {len(synced)} команд")
+            except Exception as ex2:
+                print(f"❌ Синхронизация не удалась: {ex2}")
+                print("   Обходной путь: Dev Portal → Activities → Настройки → "
+                      "отключить Activities, дождаться синхронизации, включить снова.")
+        else:
+            print(f"❌ Ошибка синхронизации: {ex}")
     except Exception as ex:
         print(f"❌ Ошибка синхронизации: {ex}")
 
