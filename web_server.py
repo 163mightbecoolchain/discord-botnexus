@@ -729,6 +729,20 @@ async def api_twins(request):
 
 # ── API: Discord Activity ─────────────────────────────────────
 
+async def api_activity_ping(request):
+    """
+    GET /activity/ping — проверка, что запрос из Activity вообще
+    доходит до бота через прокси Discord. Без авторизации.
+    """
+    return web.json_response({
+        'ok': True,
+        'path': str(request.rel_url),
+        'configured': bool(BOT_ID and CLIENT_SECRET),
+        'bot_id_set': bool(BOT_ID),
+        'secret_set': bool(CLIENT_SECRET),
+    })
+
+
 async def api_activity_token(request):
     """
     POST /api/activity/token  {"code": "..."}
@@ -740,6 +754,8 @@ async def api_activity_token(request):
     Возвращаем тот же подписанный токен, что и обычный вход на сайт,
     поэтому весь остальной API работает без изменений.
     """
+    print(f"[ACTIVITY] Запрос обмена кода · путь {request.rel_url} · "
+          f"origin {request.headers.get('Origin', '—')}")
     try:
         data = await request.json()
     except Exception:
@@ -792,7 +808,9 @@ async def api_activity_token(request):
     user = await get_discord_user(token_data['access_token'])
     if not user:
         print("[ACTIVITY] Не удалось получить профиль пользователя")
-        return web.json_response({'error': 'user_fetch_failed'}, status=502)
+        return web.json_response(
+            {'error': 'user_fetch_failed',
+             'detail': 'Токен получен, но профиль Discord не отдал'}, status=502)
 
     session_data = {
         'user_id':       user['id'],
@@ -1396,6 +1414,7 @@ def create_app(bot) -> web.Application:
         ('GET',  '/me',                                     api_me),
         ('GET',  '/refresh',                                api_refresh),
         ('GET',  '/guilds',                                 api_guilds),
+        ('GET',  '/activity/ping',                          api_activity_ping),
         ('POST', '/activity/token',                         api_activity_token),
         ('GET',  '/guild/{guild_id}/settings',              api_guild_settings_get),
         ('POST', '/guild/{guild_id}/settings',              api_guild_settings_post),
@@ -1416,6 +1435,22 @@ def create_app(bot) -> web.Application:
     for method, path, handler in API_ROUTES:
         app.router.add_route(method, '/api' + path, handler)
         app.router.add_route(method, path,          handler)   # для прокси Activity
+
+    # Перехватчик неизвестных путей — регистрируется последним, поэтому
+    # существующие маршруты не затрагивает. Возвращает JSON с путём,
+    # который реально дошёл до бота: без этого прокси Discord отдаёт
+    # безликий 502 и понять причину невозможно.
+    async def _unknown_route(request):
+        print(f"[ROUTE404] {request.method} {request.rel_url} "
+              f"· origin {request.headers.get('Origin', '—')}")
+        return web.json_response({
+            'error': 'unknown_route',
+            'method': request.method,
+            'path': str(request.rel_url.path),
+            'hint': 'Проверь сопоставление URL в Dev Portal Activities',
+        }, status=404)
+
+    app.router.add_route('*', '/{tail:.*}', _unknown_route)
 
     return app
 
