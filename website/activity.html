@@ -216,10 +216,33 @@ input.search:focus { border-color: var(--accent); }
 
 <div class="toast" id="toast"></div>
 
-<script src="/.proxy/static/discord-sdk.js"></script>
+<!--
+  SDK лежит на том же домене, что и страница, поэтому путь относительный.
+  Через /.proxy/ ходят только запросы на ДРУГИЕ домены (наш API бота).
+  На случай, если Discord отдаёт страницу из другого пути, пробуем
+  несколько вариантов по очереди.
+-->
 <script>
-const DiscordSDK = window.DiscordSDK;
-
+(function () {
+  var paths = ["static/discord-sdk.js",
+               "/static/discord-sdk.js",
+               "/.proxy/static/discord-sdk.js"];
+  var i = 0;
+  function tryNext() {
+    if (i >= paths.length) {
+      window.__sdkPathsFailed = paths;
+      return;
+    }
+    var s = document.createElement("script");
+    s.src = paths[i++];
+    s.onload  = function () { window.__sdkPath = s.src; };
+    s.onerror = tryNext;
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+</script>
+<script>
 // В Activity все внешние запросы идут через прокси Discord.
 // Префикс /.proxy/api сопоставляется с доменом бота в Dev Portal.
 const API = "/.proxy/api";
@@ -248,7 +271,15 @@ async function api(path, opts = {}) {
 // ── Запуск ──────────────────────────────────────────────
 async function boot() {
   try {
-    if (!DiscordSDK) throw new Error("SDK не загрузился (проверь /static/discord-sdk.js)");
+    // Скрипт грузится асинхронно — ждём до 5 секунд
+    for (let i = 0; i < 50 && !window.DiscordSDK; i++) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!window.DiscordSDK) {
+      throw new Error("SDK не загрузился. Пробовали: " +
+        (window.__sdkPathsFailed || []).join(", "));
+    }
+    const DiscordSDK = window.DiscordSDK;
     const qp = new URLSearchParams(location.search);
     const clientId = qp.get("client_id") || "__BOT_ID__";
     if (!clientId || clientId.startsWith("__")) throw new Error("BOT_ID не подставлен");
