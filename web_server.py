@@ -97,7 +97,12 @@ def require_auth(func):
 # ── CORS ──────────────────────────────────────────────────────
 
 def _add_cors(resp, origin: str):
+    # discordsays.com — домен, с которого Discord отдаёт Activity в iframe.
+    # Без него запросы из встроенного приложения блокируются браузером.
     allowed = (not origin or origin.endswith('.railway.app') or
+               origin.endswith('.discordsays.com') or
+               origin in ('https://discord.com', 'https://canary.discord.com',
+                          'https://ptb.discord.com') or
                origin in [SITE_URL, WEBSITE_URL])
     if allowed and origin:
         try:
@@ -722,6 +727,68 @@ async def api_twins(request):
     except Exception:
         return web.json_response([])
 
+# ── API: Discord Activity ─────────────────────────────────────
+
+async def api_activity_token(request):
+    """
+    POST /api/activity/token  {"code": "..."}
+
+    Обмен кода из Embedded App SDK на нашу сессию.
+    Внутри Activity обычный OAuth-редирект недоступен: SDK сам получает
+    код через discordSdk.commands.authorize(), а обменять его на токен
+    может только сервер — client_secret на клиент отдавать нельзя.
+    Возвращаем тот же подписанный токен, что и обычный вход на сайт,
+    поэтому весь остальной API работает без изменений.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+
+    code = (data.get('code') or '').strip()
+    if not code:
+        return web.json_response({'error': 'no_code'}, status=400)
+
+    # redirect_uri для Activity-потока пустой — так требует Discord
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post('https://discord.com/api/oauth2/token', data={
+                'client_id':     BOT_ID,
+                'client_secret': CLIENT_SECRET,
+                'grant_type':    'authorization_code',
+                'code':          code,
+            }, headers={'Content-Type': 'application/x-www-form-urlencoded'}) as r:
+                token_data = await r.json()
+    except Exception as ex:
+        print(f"[ACTIVITY] Обмен кода не удался: {ex}")
+        return web.json_response({'error': 'exchange_failed'}, status=502)
+
+    if 'access_token' not in token_data:
+        print(f"[ACTIVITY] Discord отказал: {token_data}")
+        return web.json_response({'error': 'exchange_rejected',
+                                  'detail': token_data.get('error', '')}, status=401)
+
+    user = await get_discord_user(token_data['access_token'])
+    if not user:
+        return web.json_response({'error': 'user_fetch_failed'}, status=502)
+
+    session_data = {
+        'user_id':       user['id'],
+        'username':      user['username'],
+        'discriminator': user.get('discriminator', '0'),
+        'avatar':        user.get('avatar'),
+        'access_token':  token_data['access_token'],
+        'refresh_token': token_data.get('refresh_token', ''),
+        'ts':            time.time(),
+    }
+    return web.json_response({
+        'token':        sign_session(session_data),
+        'access_token': token_data['access_token'],
+        'user': {'id': user['id'], 'username': user['username'],
+                 'avatar': user.get('avatar')},
+    })
+
+
 # ── API: автоматизация и безопасность ─────────────────────────
 
 @require_auth
@@ -1309,6 +1376,7 @@ def create_app(bot) -> web.Application:
     app.router.add_get('/api/guild/{guild_id}/twins',             api_twins)
     app.router.add_get('/api/guild/{guild_id}/appeals',           api_appeals)
     app.router.add_post('/api/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action)
+    app.router.add_post('/api/activity/token',                                api_activity_token)
     app.router.add_get('/api/guild/{guild_id}/automation',                    api_automation_get)
     app.router.add_post('/api/guild/{guild_id}/automation',                   api_automation_post)
     app.router.add_get('/api/guild/{guild_id}/members/search',                api_member_search)
