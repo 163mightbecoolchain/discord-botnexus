@@ -749,27 +749,49 @@ async def api_activity_token(request):
     if not code:
         return web.json_response({'error': 'no_code'}, status=400)
 
-    # redirect_uri для Activity-потока пустой — так требует Discord
+    # Проверяем конфигурацию до запроса — иначе Discord вернёт туманную ошибку
+    if not BOT_ID or not CLIENT_SECRET:
+        print("[ACTIVITY] BOT_ID или DISCORD_CLIENT_SECRET не заданы")
+        return web.json_response(
+            {'error': 'not_configured',
+             'detail': 'На сервере бота не заданы BOT_ID / DISCORD_CLIENT_SECRET'},
+            status=500)
+
+    # Для Activity redirect_uri не передаётся: код выдан через SDK, а не редиректом
+    payload = {
+        'client_id':     BOT_ID,
+        'client_secret': CLIENT_SECRET,
+        'grant_type':    'authorization_code',
+        'code':          code,
+    }
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.post('https://discord.com/api/oauth2/token', data={
-                'client_id':     BOT_ID,
-                'client_secret': CLIENT_SECRET,
-                'grant_type':    'authorization_code',
-                'code':          code,
-            }, headers={'Content-Type': 'application/x-www-form-urlencoded'}) as r:
-                token_data = await r.json()
+            async with s.post('https://discord.com/api/oauth2/token',
+                              data=payload) as r:
+                status = r.status
+                raw = await r.text()
+        try:
+            token_data = json.loads(raw)
+        except Exception:
+            token_data = {}
     except Exception as ex:
-        print(f"[ACTIVITY] Обмен кода не удался: {ex}")
-        return web.json_response({'error': 'exchange_failed'}, status=502)
+        print(f"[ACTIVITY] Сеть недоступна при обмене кода: {ex}")
+        return web.json_response({'error': 'network', 'detail': str(ex)}, status=502)
 
     if 'access_token' not in token_data:
-        print(f"[ACTIVITY] Discord отказал: {token_data}")
-        return web.json_response({'error': 'exchange_rejected',
-                                  'detail': token_data.get('error', '')}, status=401)
+        # Пишем всё, что вернул Discord — без этого причину не найти
+        print(f"[ACTIVITY] Discord отклонил обмен: HTTP {status} · {raw[:400]}")
+        return web.json_response({
+            'error':  'exchange_rejected',
+            'status': status,
+            'detail': token_data.get('error_description')
+                      or token_data.get('error')
+                      or raw[:200],
+        }, status=401)
 
     user = await get_discord_user(token_data['access_token'])
     if not user:
+        print("[ACTIVITY] Не удалось получить профиль пользователя")
         return web.json_response({'error': 'user_fetch_failed'}, status=502)
 
     session_data = {
@@ -1361,28 +1383,39 @@ def create_app(bot) -> web.Application:
 
     # CORS preflight
     app.router.add_route('OPTIONS', '/api/{tail:.*}', lambda r: web.Response(status=200))
+    app.router.add_route('OPTIONS', '/guild/{tail:.*}', lambda r: web.Response(status=200))
+    app.router.add_route('OPTIONS', '/activity/{tail:.*}', lambda r: web.Response(status=200))
 
-    # API
-    app.router.add_get('/api/stats',                              api_stats)
-    app.router.add_get('/api/me',                                 api_me)
-    app.router.add_get('/api/refresh',                            api_refresh)
-    app.router.add_get('/api/guilds',                             api_guilds)
-    app.router.add_get('/api/guild/{guild_id}/settings',          api_guild_settings_get)
-    app.router.add_post('/api/guild/{guild_id}/settings',         api_guild_settings_post)
-    app.router.add_post('/api/guild/{guild_id}/security',         api_security_save)
-    app.router.add_get('/api/guild/{guild_id}/channels',          api_channels)
-    app.router.add_get('/api/guild/{guild_id}/modlog',            api_modlog)
-    app.router.add_get('/api/guild/{guild_id}/invites',           api_invites)
-    app.router.add_get('/api/guild/{guild_id}/twins',             api_twins)
-    app.router.add_get('/api/guild/{guild_id}/appeals',           api_appeals)
-    app.router.add_post('/api/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action)
-    app.router.add_post('/api/activity/token',                                api_activity_token)
-    app.router.add_get('/api/guild/{guild_id}/automation',                    api_automation_get)
-    app.router.add_post('/api/guild/{guild_id}/automation',                   api_automation_post)
-    app.router.add_get('/api/guild/{guild_id}/members/search',                api_member_search)
-    app.router.add_get('/api/guild/{guild_id}/member/{uid}',                  api_member_lookup)
-    app.router.add_get('/api/guild/{guild_id}/banrequests',                   api_ban_requests)
-    app.router.add_post('/api/guild/{guild_id}/banrequest/{rid}/{action}',    api_ban_request_action)
+    # ── API ──────────────────────────────────────────────────
+    # Каждый маршрут регистрируется дважды: с префиксом /api и без него.
+    # Прокси Discord Activity ЗАМЕНЯЕТ сопоставленный префикс на домен,
+    # поэтому запрос /.proxy/api/activity/token приходит сюда как
+    # /activity/token. Дубли снимают эту неоднозначность.
+    API_ROUTES = [
+        ('GET',  '/stats',                                  api_stats),
+        ('GET',  '/me',                                     api_me),
+        ('GET',  '/refresh',                                api_refresh),
+        ('GET',  '/guilds',                                 api_guilds),
+        ('POST', '/activity/token',                         api_activity_token),
+        ('GET',  '/guild/{guild_id}/settings',              api_guild_settings_get),
+        ('POST', '/guild/{guild_id}/settings',              api_guild_settings_post),
+        ('POST', '/guild/{guild_id}/security',              api_security_save),
+        ('GET',  '/guild/{guild_id}/channels',              api_channels),
+        ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
+        ('GET',  '/guild/{guild_id}/invites',               api_invites),
+        ('GET',  '/guild/{guild_id}/twins',                 api_twins),
+        ('GET',  '/guild/{guild_id}/appeals',               api_appeals),
+        ('POST', '/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action),
+        ('GET',  '/guild/{guild_id}/automation',            api_automation_get),
+        ('POST', '/guild/{guild_id}/automation',            api_automation_post),
+        ('GET',  '/guild/{guild_id}/members/search',        api_member_search),
+        ('GET',  '/guild/{guild_id}/member/{uid}',          api_member_lookup),
+        ('GET',  '/guild/{guild_id}/banrequests',           api_ban_requests),
+        ('POST', '/guild/{guild_id}/banrequest/{rid}/{action}', api_ban_request_action),
+    ]
+    for method, path, handler in API_ROUTES:
+        app.router.add_route(method, '/api' + path, handler)
+        app.router.add_route(method, path,          handler)   # для прокси Activity
 
     return app
 
