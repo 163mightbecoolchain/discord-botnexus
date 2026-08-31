@@ -286,6 +286,32 @@ async function boot() {
     sdk = new DiscordSDK(clientId);
     await sdk.ready();
 
+    // Сначала проверяем, доходит ли запрос до бота через прокси.
+    // Без этого 502 от прокси неотличим от ошибки самого обмена.
+    $("bootMsg").textContent = "Проверка связи с ботом...";
+    try {
+      const p = await api("/activity/ping");
+      if (!p.ok) {
+        const body = await p.text().catch(() => "");
+        throw new Error(
+          `API бота недоступен через прокси (HTTP ${p.status}).\n` +
+          `Проверь в Dev Portal → Сопоставления URL: префикс /api → домен бота. ` +
+          `И что на сервисе бота задеплоен свежий web_server.py.` +
+          (body ? `\nОтвет: ${body.slice(0, 120)}` : ""));
+      }
+      const info = await p.json();
+      if (!info.configured) {
+        throw new Error("На сервере бота не заданы BOT_ID или DISCORD_CLIENT_SECRET " +
+                        `(bot_id: ${info.bot_id_set}, secret: ${info.secret_set})`);
+      }
+    } catch (pe) {
+      if (pe instanceof TypeError) {
+        throw new Error("Запрос к API не ушёл — сопоставление /api не настроено " +
+                        "или домен бота недоступен");
+      }
+      throw pe;
+    }
+
     $("bootMsg").textContent = "Авторизация...";
     const { code } = await sdk.commands.authorize({
       client_id: clientId,
