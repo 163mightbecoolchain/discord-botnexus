@@ -427,6 +427,25 @@ async def memory_cleanup_loop(bot_instance):
                 bot._last_db_cleanup = time.time()
                 try:
                     async with aiosqlite.connect(DB_PATH) as db:
+                        # content_hashes: журнал найденных дублей сообщений.
+                        # Детект работает на кэше в памяти (окно 1 час),
+                        # эта таблица — только история, читателей у неё нет.
+                        # Без очистки росла бесконтрольно.
+                        await db.execute("""
+                            DELETE FROM content_hashes
+                            WHERE created_at < datetime('now', '-7 days')
+                        """)
+                        # security_alerts: разобранные > 30 дней,
+                        # остальные > 90 дней
+                        await db.execute("""
+                            DELETE FROM security_alerts
+                            WHERE resolved = 1
+                              AND created_at < datetime('now', '-30 days')
+                        """)
+                        await db.execute("""
+                            DELETE FROM security_alerts
+                            WHERE created_at < datetime('now', '-90 days')
+                        """)
                         # invite_log > 90 дней (кроме записей с заметками)
                         await db.execute("""
                             DELETE FROM invite_log
@@ -1153,6 +1172,10 @@ async def db_init():
             "CREATE INDEX IF NOT EXISTS idx_modlog_date   ON modlog(guild_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_watchlist     ON style_watchlist(guild_id, user_id)",
             "CREATE INDEX IF NOT EXISTS idx_banned_prof   ON banned_profiles(guild_id)",
+            # Самые крупные таблицы — без индексов очистка сканирует их целиком
+            "CREATE INDEX IF NOT EXISTS idx_hashes_date   ON content_hashes(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_guild  ON security_alerts(guild_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_alerts_date   ON security_alerts(resolved, created_at)",
             # Стилометрия: колонки расширенного профиля.
             # КРИТИЧНО чтобы были здесь: update_style_profile делает SELECT по ним
             # при первом же сообщении — до первого вызова _save_style_profile
