@@ -8,901 +8,513 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
+/* ─────────────────────────────────────────────────────────────
+   Витнесс · спокойная типографика
+   Работают шрифт и воздух. Границы — волосяные, цвет только
+   на главном действии. Имена переменных сохранены: их задаёт
+   переключатель тем в скрипте.
+   ───────────────────────────────────────────────────────────── */
 :root {
   --accent-rgb: 0,217,163;
-  --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
-  --panel: #1a2028; --panel-2: #232b35;
-  --border: #2a3441; --border-2: #3a4554;
-  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
-  --accent: #00d9a3; --accent-2: #00bfa5;
-  --danger: #ff5470; --warning: #ffaa00; --info: #5a9eff;
-  --mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --bg:      #0b0f14;   /* полотно            */
+  --bg-2:    #0d1117;   /* сайдбар, шапки     */
+  --bg-3:    #131a22;   /* поля ввода         */
+  --panel:   #0d1117;   /* поверхности        */
+  --panel-2: #161d26;   /* наведение          */
+  --border:  #171e27;   /* волосяная линия    */
+  --border-2:#232c37;   /* заметная линия     */
+  --text:    #e6ebf1;   /* основной текст     */
+  --text-2:  #9aa5b1;   /* вторичный          */
+  --muted:   #667180;   /* подписи            */
+  --accent:  #00d9a3;
+  --accent-2:#00bf8f;
+  --danger:  #ff6b81;
+  --warning: #e0a33e;
+  --info:    #6ba3f0;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --s1: 4px;  --s2: 8px;  --s3: 12px;
+  --s4: 16px; --s5: 24px; --s6: 40px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   background: var(--bg); color: var(--text);
-  font-size: 14px; line-height: 1.5;
+  font-size: 14px; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
   min-height: 100vh;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: 240px 1fr;
-  min-height: 100vh;
-}
+.layout { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
 
-/* Sidebar */
+/* ── Сайдбар ─────────────────────────────────────────────── */
 .sidebar {
-  background: var(--bg-2);
-  border-right: 1px solid var(--border);
+  background: var(--bg-2); border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
-  position: sticky; top: 0; height: 100vh;
-  overflow-y: auto;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
+.sidebar-head { padding: var(--s5) var(--s5) var(--s4); }
 
-.sidebar-head {
-  padding: 1.25rem 1.25rem 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.logo {
-  display: flex; align-items: center; gap: .65rem;
-  text-decoration: none; color: inherit;
-}
-
+.logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
 .logo-mark {
-  width: 28px; height: 28px; border-radius: 7px;
-  background: linear-gradient(135deg, var(--accent), #00a085);
-  display: grid; place-items: center;
-  font-weight: 900; color: #001a14; font-size: .85rem;
-  box-shadow: 0 0 20px rgba(var(--accent-rgb),0.3);
+  width: 24px; height: 24px; border-radius: 6px;
+  background: var(--accent); color: #00110c;
+  display: grid; place-items: center; font-weight: 700; font-size: 12px;
 }
-
-.logo-text {
-  font-family: var(--mono); font-weight: 700;
-  font-size: 1rem; letter-spacing: -.01em;
-}
-
+.logo-text { font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
 .logo-text span { color: var(--accent); }
 
 .guild-selector {
-  margin: 1rem 1.25rem;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: .65rem .75rem;
-  display: flex; align-items: center; gap: .65rem;
+  margin: 0 var(--s4) var(--s5); padding: 10px var(--s3);
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: 8px;
   cursor: pointer; transition: border-color .15s;
 }
-
-.guild-selector:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .1);
-}
-.guild-selector:active { transform: scale(.98); }
-.guild-selector { transition: border-color .15s, box-shadow .2s, transform .1s; }
-
+.guild-selector:hover { border-color: var(--border-2); }
 .guild-icon {
-  width: 32px; height: 32px; border-radius: 8px;
+  width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
   background: var(--bg-3); display: grid; place-items: center;
-  font-weight: 700; flex-shrink: 0;
-  overflow: hidden;
+  font-size: 12px; font-weight: 600; overflow: hidden;
 }
-
 .guild-icon img { width: 100%; height: 100%; object-fit: cover; }
-
 .guild-info { flex: 1; min-width: 0; }
 .guild-info .name {
-  font-size: .85rem; font-weight: 600;
+  font-size: 13.5px; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.guild-info .members {
-  font-size: .7rem; color: var(--muted);
-}
+.guild-info .members { font-size: 11.5px; color: var(--muted); }
 
-.nav-section {
-  padding: 0 .75rem; margin-top: 1rem;
-}
-
+.nav-section { padding: 0 var(--s3); margin-bottom: var(--s5); }
 .nav-label {
-  font-size: .65rem; font-weight: 700;
-  color: var(--muted); text-transform: uppercase;
-  letter-spacing: .12em; padding: 0 .5rem .5rem;
+  font-size: 11.5px; color: var(--muted); font-weight: 500;
+  padding: 0 var(--s3) var(--s2);
 }
-
 .nav-item {
-  display: flex; align-items: center; gap: .65rem;
-  padding: .55rem .65rem; border-radius: 6px;
-  color: var(--text-2); text-decoration: none;
-  font-size: .88rem; font-weight: 500;
-  cursor: pointer;
-  transition: background .15s, color .15s, padding-left .18s ease, border-color .15s;
-  border: 1px solid transparent;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px var(--s3); border-radius: 6px;
+  color: var(--text-2); font-size: 13.5px; cursor: pointer;
+  transition: color .12s, background .12s;
 }
-
-.nav-item .icon { transition: transform .18s cubic-bezier(.34,1.56,.64,1); }
-
-.nav-item:hover {
-  background: var(--panel); color: var(--text);
-  padding-left: .95rem;
-}
-
-.nav-item:hover .icon { transform: scale(1.2) rotate(-6deg); }
-
-.nav-item.active {
-  background: rgba(var(--accent-rgb),0.08);
-  color: var(--accent);
-  border-color: rgba(var(--accent-rgb),0.2);
-}
-
+.nav-item:hover { color: var(--text); background: var(--panel-2); }
+.nav-item.active { color: var(--text); font-weight: 500; }
+.nav-item.active .icon { color: var(--accent); }
 .nav-item .icon {
-  width: 16px; text-align: center;
-  font-size: .9rem;
+  width: 15px; height: 15px; flex-shrink: 0; color: var(--muted);
+  display: grid; place-items: center;
 }
-
+.nav-item .icon svg { width: 15px; height: 15px; }
 .nav-item .badge {
-  margin-left: auto;
-  background: var(--danger); color: white;
-  padding: .1rem .4rem; border-radius: 999px;
-  font-size: .65rem; font-weight: 700;
-  animation: badgePulse 2.4s ease infinite;
-}
-
-@keyframes badgePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255,84,112,.5); }
-  50%      { box-shadow: 0 0 0 5px rgba(255,84,112,0); }
+  margin-left: auto; font-size: 11px; font-weight: 600;
+  color: var(--danger); font-variant-numeric: tabular-nums;
 }
 
 .user-card {
-  margin-top: auto; padding: 1rem 1.25rem;
+  margin-top: auto; padding: var(--s4) var(--s5);
   border-top: 1px solid var(--border);
-  display: flex; align-items: center; gap: .65rem;
+  display: flex; align-items: center; gap: 10px;
 }
-
 .user-avatar {
-  width: 32px; height: 32px; border-radius: 50%;
-  background: var(--bg-3); overflow: hidden;
-  display: grid; place-items: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--bg-3); overflow: hidden; display: grid; place-items: center;
+  font-size: 11px;
 }
 .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
-
 .user-info { flex: 1; min-width: 0; }
 .user-info .name {
-  font-size: .82rem; font-weight: 600;
+  font-size: 13px; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.user-info .role {
-  font-size: .68rem; color: var(--muted);
-}
-
+.user-info .role { font-size: 11.5px; color: var(--muted); }
 .logout-btn {
-  background: none; border: none; cursor: pointer;
-  color: var(--muted); padding: .25rem;
-  border-radius: 4px; transition: color .15s;
+  background: none; border: 0; cursor: pointer; color: var(--muted);
+  padding: var(--s1); display: grid; place-items: center;
 }
-.logout-btn:hover { color: var(--danger); }
+.logout-btn:hover { color: var(--text); }
 
-/* Main content */
-.main {
-  padding: 1.5rem 2rem;
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-/* Страницы настроек — плотный центр вместо растягивания */
-.page-inner { max-width: 960px; }
-.page-inner-wide { max-width: 1200px; }
+/* ── Основная область ────────────────────────────────────── */
+.main { padding: var(--s6) var(--s6) 64px; overflow-x: hidden; }
+.page-inner      { max-width: 680px; }
+.page-inner-wide { max-width: 880px; }
 
 .page-head {
   display: flex; justify-content: space-between; align-items: flex-end;
-  margin-bottom: 2rem; padding-bottom: 1.25rem;
-  border-bottom: 1px solid var(--border);
+  gap: var(--s4); margin-bottom: var(--s6);
 }
+.page-title { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.page-subtitle { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
 
-.page-title {
-  font-size: 1.5rem; font-weight: 700;
-  letter-spacing: -.01em;
-}
+/* ── Разделы вместо карточек ─────────────────────────────── */
+.card { margin-bottom: var(--s6); }
+.card-head { padding-bottom: var(--s3); margin-bottom: var(--s4);
+             border-bottom: 1px solid var(--border);
+             display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s4); }
+.card-title { font-size: 14.5px; font-weight: 600; }
+.card-desc  { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.card-body  { }
 
-.page-subtitle {
-  color: var(--muted); font-size: .85rem;
-  margin-top: .25rem;
-}
-
-/* Cards */
-.card {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 10px; margin-bottom: 1.25rem;
-  overflow: hidden;
-  transition: border-color .2s, box-shadow .25s;
-}
-
-.card:hover { border-color: var(--border-2); }
-
-.card-head {
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  display: flex; justify-content: space-between; align-items: center;
-}
-
-.card-title {
-  font-size: .95rem; font-weight: 600;
-}
-
-.card-desc {
-  font-size: .78rem; color: var(--muted);
-  margin-top: .2rem;
-}
-
-.card-body { padding: 1.25rem; }
-
-/* Stats grid */
+/* Статистика */
 .stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem; margin-bottom: 1.5rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--s5); margin-bottom: var(--s6);
+  padding-bottom: var(--s5); border-bottom: 1px solid var(--border);
 }
-
-.stat-card {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 10px; padding: 1.25rem;
-  position: relative; overflow: hidden;
-  transition: transform .18s ease, border-color .18s, box-shadow .22s;
-}
-
-.stat-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--border-2);
-  box-shadow: 0 10px 24px rgba(0,0,0,.25);
-}
-
-.stat-card::before {
-  content: ''; position: absolute;
-  top: 0; left: 0; width: 3px; height: 100%;
-  background: var(--accent);
-}
-
-.stat-card.danger::before { background: var(--danger); }
-.stat-card.warning::before { background: var(--warning); }
-.stat-card.info::before { background: var(--info); }
-
-.stat-label {
-  font-size: .7rem; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .1em;
-  font-weight: 600; margin-bottom: .4rem;
-}
-
+.stat-card { }
+.stat-label { font-size: 12.5px; color: var(--muted); margin-bottom: var(--s1); }
 .stat-value {
-  font-family: var(--mono); font-size: 1.6rem;
-  font-weight: 700; line-height: 1;
+  font-size: 26px; font-weight: 600; line-height: 1.15;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums;
 }
+.stat-card.danger  .stat-value { color: var(--danger); }
+.stat-card.warning .stat-value { color: var(--warning); }
+.stat-card.info    .stat-value { color: var(--text); }
 
-/* Forms */
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem; margin-bottom: 1rem;
-}
-
-.form-group { margin-bottom: 1rem; }
-
-label {
-  display: block; font-size: .8rem;
-  font-weight: 600; color: var(--text-2);
-  margin-bottom: .4rem;
-}
+/* ── Формы ───────────────────────────────────────────────── */
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); margin-bottom: var(--s4); }
+.form-group { margin-bottom: var(--s4); }
+label { display: block; font-size: 13px; color: var(--text-2); margin-bottom: 6px; }
 
 .input, .select, .textarea {
-  width: 100%; padding: .6rem .75rem;
+  width: 100%; padding: 8px var(--s3);
   background: var(--bg-3); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--text);
-  font-size: .87rem; font-family: inherit;
+  border-radius: 7px; color: var(--text);
+  font-size: 13.5px; font-family: inherit;
   transition: border-color .15s;
 }
-
-.input, .select, .textarea { transition: border-color .18s, box-shadow .18s; }
-
-.input:focus, .select:focus, .textarea:focus {
-  outline: none; border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .14);
-}
-
-.input-help {
-  font-size: .72rem; color: var(--muted);
-  margin-top: .3rem;
-}
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--border-2); }
+.input-help { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
 
 .toggle-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: .75rem 0; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s4); padding: var(--s3) 0; border-top: 1px solid var(--border);
 }
-
-.toggle-row:first-child { border-top: 0; }
-
+.toggle-row:first-child { border-top: 0; padding-top: 0; }
 .toggle-info { flex: 1; }
-.toggle-label { font-size: .9rem; font-weight: 600; }
-.toggle-desc { font-size: .77rem; color: var(--muted); margin-top: .15rem; }
-
+.toggle-label { font-size: 13.5px; }
+.toggle-desc  { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
 .toggle {
-  width: 38px; height: 22px; background: #4a5665;
-  border-radius: 999px; position: relative; cursor: pointer;
-  transition: background .15s; flex-shrink: 0;
+  width: 34px; height: 20px; border-radius: 999px; flex-shrink: 0;
+  background: var(--border-2); position: relative; cursor: pointer;
+  transition: background .18s;
 }
-
 .toggle::after {
-  content: ''; position: absolute;
-  top: 2px; left: 2px;
-  width: 18px; height: 18px; background: white;
-  border-radius: 50%;
-  transition: transform .28s cubic-bezier(.34,1.8,.64,1);
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--muted);
+  transition: transform .18s, background .18s;
 }
+.toggle.on { background: rgba(var(--accent-rgb), .25); }
+.toggle.on::after { transform: translateX(14px); background: var(--accent); }
 
-.toggle:active::after { width: 22px; transition: width .1s, transform .28s cubic-bezier(.34,1.8,.64,1); }
-
-.toggle.on { background: var(--accent); }
-.toggle.on::after { transform: translateX(16px); }
-
-/* Buttons */
+/* ── Кнопки ──────────────────────────────────────────────── */
 .btn {
-  display: inline-flex; align-items: center; gap: .4rem;
-  padding: .55rem 1rem; border-radius: 6px;
-  font-size: .85rem; font-weight: 600;
-  border: 1px solid transparent; cursor: pointer;
-  font-family: inherit;
-  transition: transform .16s cubic-bezier(.34,1.56,.64,1),
-              box-shadow .2s, background .15s, border-color .15s, color .15s;
-  text-decoration: none;
-  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 13.5px; cursor: pointer;
+  border: 0; background: none; color: var(--text-2);
+  padding: 6px 0; transition: color .15s;
+  position: relative;
 }
-
-.btn:hover { transform: translateY(-2px); }
-.btn:active { transform: translateY(0) scale(.97); transition-duration: .06s; }
-
-/* Ripple при клике */
-.btn .ripple {
-  position: absolute; border-radius: 50%;
-  background: rgba(255,255,255,.35);
-  transform: scale(0); pointer-events: none;
-  animation: ripple .5s ease-out forwards;
-}
-@keyframes ripple { to { transform: scale(3); opacity: 0; } }
-
+.btn-ghost { border-bottom: 1px solid var(--border-2); }
+.btn-ghost:hover { color: var(--text); border-bottom-color: var(--text-2); }
 .btn-primary {
-  background: var(--accent); color: #001a14; border-color: var(--accent);
-}
-.btn-primary:hover {
-  background: var(--accent-2);
-  box-shadow: 0 6px 20px rgba(var(--accent-rgb), .35);
-}
-
-.btn-ghost {
-  background: transparent; color: var(--text); border-color: var(--border-2);
-}
-.btn-ghost:hover { background: var(--panel-2); border-color: var(--accent); }
-
-.btn-danger {
-  background: var(--danger); color: white; border-color: var(--danger);
-}
-
-.btn-success {
-  background: var(--accent); color: #001a14; border-color: var(--accent);
-}
-
-.btn-sm { padding: .35rem .65rem; font-size: .78rem; }
-
-/* Tables */
-.table-wrap {
-  border: 1px solid var(--border);
-  border-radius: 8px; overflow: hidden;
-  background: var(--panel);
-}
-
-.table {
-  width: 100%; border-collapse: collapse;
-  font-size: .85rem;
-}
-
-.table thead {
-  background: var(--bg-3);
-}
-
-.table th {
-  text-align: left; padding: .65rem 1rem;
-  font-weight: 600; font-size: .73rem;
-  color: var(--muted); text-transform: uppercase;
-  letter-spacing: .08em;
-  border-bottom: 1px solid var(--border);
-}
-
-.table td {
-  padding: .65rem 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.table tr:last-child td { border-bottom: 0; }
-.table tbody tr { transition: background .12s, transform .12s; }
-.table tr:hover { background: rgba(var(--accent-rgb),0.04); }
-
-.code {
-  font-family: var(--mono); color: var(--accent);
-  background: rgba(var(--accent-rgb),0.08);
-  padding: .15rem .4rem; border-radius: 4px;
-  font-size: .8rem;
-}
-
-.status-pill {
-  display: inline-flex; align-items: center; gap: .3rem;
-  padding: .2rem .55rem; border-radius: 999px;
-  font-size: .72rem; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .05em;
-}
-
-.status-pill.pending { background: rgba(255,170,0,0.12); color: var(--warning); }
-.appeal-card { border-left: 3px solid var(--border-2); transition: border-color .15s, transform .1s; }
-.appeal-card:hover { transform: translateX(2px); }
-.appeal-card.pending  { border-left-color: var(--warning); }
-.appeal-card.accepted { border-left-color: var(--accent); }
-.appeal-card.rejected { border-left-color: var(--danger); }
-.appeals-stats {
-  display: flex; gap: 1rem; margin-bottom: 1.25rem;
-  font-size: .82rem;
-}
-.appeals-stats span {
-  background: var(--panel); border: 1px solid var(--border);
-  padding: .4rem .85rem; border-radius: 8px; color: var(--text-2);
-}
-.appeals-stats b { color: var(--text); }
-.status-pill.accepted, .status-pill.approved { background: rgba(var(--accent-rgb),0.12); color: var(--accent); }
-.status-pill.rejected { background: rgba(255,84,112,0.12); color: var(--danger); }
-
-/* Search */
-.search-bar {
-  display: flex; gap: .75rem; margin-bottom: 1rem;
-}
-
-.search-bar .input { flex: 1; }
-
-/* Empty state */
-.empty {
-  padding: 3rem 1rem; text-align: center; color: var(--muted);
-}
-
-.empty-icon { font-size: 2.5rem; margin-bottom: .75rem; opacity: .4; }
-.empty-title { font-weight: 600; color: var(--text-2); margin-bottom: .25rem; }
-.empty-sub { font-size: .8rem; }
-
-/* Toast */
-.toast {
-  position: fixed; top: 1.5rem; right: 1.5rem;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: .85rem 1.25rem;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.4);
-  z-index: 1000; opacity: 0; transform: translateY(-10px);
-  transition: all .25s; max-width: 360px;
-  font-size: .87rem;
-}
-
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast.success { border-left: 3px solid var(--accent); }
-.toast.error { border-left: 3px solid var(--danger); }
-
-/* Login page */
-.login-page {
-  min-height: 100vh;
-  display: grid; place-items: center;
-  padding: 2rem;
-}
-
-.login-card {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 14px; padding: 3rem;
-  max-width: 420px; width: 100%; text-align: center;
-}
-
-.login-logo {
-  width: 64px; height: 64px; border-radius: 16px;
-  background: linear-gradient(135deg, var(--accent), #00a085);
-  display: grid; place-items: center; margin: 0 auto 1.5rem;
-  font-weight: 900; color: #001a14; font-size: 1.75rem;
-  box-shadow: 0 0 40px rgba(var(--accent-rgb),0.3);
-}
-
-.login-card h1 { font-size: 1.5rem; margin-bottom: .5rem; }
-.login-card p { color: var(--text-2); margin-bottom: 2rem; font-size: .9rem; }
-
-/* Hidden page */
-.page { display: none; }
-.page.active { display: block; animation: pageIn .25s ease; }
-
-@keyframes pageIn {
-  from { opacity: 0; transform: translateY(8px); }
-}
-
-/* Modal */
-.modal-bg {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.6);
-  display: none; place-items: center;
-  z-index: 500; padding: 1rem;
-}
-.modal-bg.show { display: grid; animation: fadeIn .18s ease; }
-
-@keyframes fadeIn { from { opacity: 0; } }
-
-.modal {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 12px; padding: 1.5rem;
-  max-width: 540px; width: 100%;
-  max-height: 85vh; overflow-y: auto;
-  animation: modalIn .22s cubic-bezier(.34,1.4,.64,1);
-}
-
-@keyframes modalIn {
-  from { opacity: 0; transform: scale(.92) translateY(12px); }
-}
-
-.modal-title {
-  font-size: 1.05rem; font-weight: 700;
-  margin-bottom: 1rem;
-}
-
-.modal-actions {
-  display: flex; gap: .5rem; justify-content: flex-end;
-  margin-top: 1.5rem;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0;
-    width: 240px; z-index: 200; transform: translateX(-100%);
-    transition: transform .2s;
-  }
-  .sidebar.open { transform: translateX(0); }
-  .main { padding: 1rem; }
-  .form-row { grid-template-columns: 1fr; }
-}
-
-/* Custom background image */
-#bgImage {
-  position: fixed; inset: 0; z-index: 0;
-  background-size: cover; background-position: center;
-  display: none; pointer-events: none;
-}
-#bgDim {
-  position: fixed; inset: 0; z-index: 0;
-  background: var(--bg); opacity: 0;
-  display: none; pointer-events: none;
-}
-body.has-bg #bgImage, body.has-bg #bgDim { display: block; }
-body.has-bg::before, body.has-bg::after { display: none; }  /* сетка и glow не нужны поверх фото */
-body.has-bg .layout, body.fx-on .layout { position: relative; z-index: 1; }
-body.has-bg .login-page, body.fx-on .login-page { position: relative; z-index: 1; }
-
-/* Стеклянные панели — фон просвечивает сквозь карточки */
-body.glass .card,
-body.glass .sidebar,
-body.glass .table-wrap,
-body.glass .stat-card,
-body.glass .guild-selector,
-body.glass .modal {
-  background: rgba(var(--panel-rgb), .72);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.bg-preview {
-  width: 100%; height: 120px; border-radius: 8px;
-  background-size: cover; background-position: center;
-  border: 1px solid var(--border-2);
-  display: none;
-}
-
-.range-row { display: flex; align-items: center; gap: 1rem; }
-.range-row input[type="range"] { flex: 1; accent-color: var(--accent); }
-.range-val { font-family: var(--mono); font-size: .8rem; color: var(--text-2); width: 42px; text-align: right; }
-
-/* Themes */
-.theme-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: .85rem;
-}
-
-.theme-card {
-  border: 2px solid var(--border);
-  border-radius: 10px; padding: .85rem;
-  cursor: pointer; transition: all .15s;
-  background: var(--bg-3);
-}
-
-.theme-card:hover { border-color: var(--border-2); transform: translateY(-2px); }
-.theme-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-
-.theme-preview {
-  height: 52px; border-radius: 6px; margin-bottom: .6rem;
-  display: flex; overflow: hidden;
-}
-.theme-preview i { flex: 1; }
-
-.theme-name {
-  font-size: .8rem; font-weight: 600; text-align: center;
-}
-
-.color-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: .65rem 0; border-top: 1px solid var(--border);
-}
-.color-row:first-child { border-top: 0; }
-
-.color-row label { margin: 0; }
-
-input[type="color"] {
-  width: 44px; height: 30px; border: 1px solid var(--border-2);
-  border-radius: 6px; background: var(--bg-3);
-  cursor: pointer; padding: 2px;
-}
-
-/* ─── Индикатор автообновления ─── */
-.live-dot {
-  display: inline-flex; align-items: center; gap: .4rem;
-  font-size: .72rem; color: var(--muted); font-family: var(--mono);
-  padding: .35rem .6rem; border-radius: 999px;
-  background: var(--panel); border: 1px solid var(--border);
-}
-.live-dot::before {
-  content: ''; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent); box-shadow: 0 0 6px var(--accent);
-  animation: livePulse 2s ease infinite;
-}
-.live-dot.paused::before { background: var(--muted); box-shadow: none; animation: none; }
-@keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
-
-/* Мигание бейджа при появлении новой апелляции */
-@keyframes badgeBump {
-  0%,100% { transform: scale(1); }
-  35%     { transform: scale(1.45); }
-}
-.nav-item .badge.bump { animation: badgeBump .45s cubic-bezier(.34,1.6,.64,1); }
-
-/* ─── Командная палитра (Ctrl+K) ─── */
-.cmdk-bg {
-  position: fixed; inset: 0; z-index: 800;
-  background: rgba(0,0,0,.55); display: none;
-  align-items: flex-start; justify-content: center;
-  padding-top: 12vh; animation: fadeIn .15s ease;
-}
-.cmdk-bg.show { display: flex; }
-.cmdk {
-  width: 100%; max-width: 520px;
-  background: var(--panel); border: 1px solid var(--border-2);
-  border-radius: 12px; overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0,0,0,.55);
-  animation: modalIn .18s cubic-bezier(.34,1.4,.64,1);
-}
-.cmdk input {
-  width: 100%; padding: .95rem 1.1rem;
-  background: transparent; border: 0; border-bottom: 1px solid var(--border);
-  color: var(--text); font-size: 1rem; font-family: inherit; outline: none;
-}
-.cmdk-list { max-height: 340px; overflow-y: auto; padding: .35rem; }
-.cmdk-item {
-  padding: .6rem .75rem; border-radius: 6px; cursor: pointer;
-  display: flex; align-items: center; gap: .7rem; font-size: .9rem;
-}
-.cmdk-item:hover, .cmdk-item.cursor { background: var(--panel-2); }
-.cmdk-item .k { margin-left: auto; font-size: .72rem; color: var(--muted); font-family: var(--mono); }
-.cmdk-sec { padding: .5rem .75rem .3rem; font-size: .68rem; color: var(--muted);
-            text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
-
-/* ─── Досье участника ─── */
-.member-head {
-  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-}
-.member-av {
-  width: 64px; height: 64px; border-radius: 50%;
-  background: var(--bg-3); overflow: hidden; flex-shrink: 0;
-}
-.member-av img { width: 100%; height: 100%; object-fit: cover; }
-.member-chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
-.chip {
-  font-size: .72rem; padding: .2rem .55rem; border-radius: 999px;
-  background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border);
-}
-.chip.warn { background: rgba(255,170,0,.12); color: var(--warning); border-color: transparent; }
-.chip.danger { background: rgba(255,84,112,.12); color: var(--danger); border-color: transparent; }
-.chip.ok { background: rgba(var(--accent-rgb),.12); color: var(--accent); border-color: transparent; }
-
-.search-result {
-  padding: .6rem .75rem; border-radius: 7px; cursor: pointer;
-  display: flex; align-items: center; gap: .7rem;
-  border: 1px solid transparent;
-}
-.search-result:hover { background: var(--panel-2); border-color: var(--border-2); }
-.search-result img { width: 30px; height: 30px; border-radius: 50%; }
-
-/* ─── Группы тумблеров логирования ─── */
-.log-group { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem; }
-.log-group:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
-.log-group-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: .5rem;
-}
-.log-group-title {
-  font-size: .72rem; font-weight: 700; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .1em;
-}
-.log-group-all {
-  font-size: .74rem; color: var(--accent); cursor: pointer;
-  background: none; border: 0; font-family: inherit; font-weight: 600;
-  padding: .2rem .45rem; border-radius: 4px; transition: background .15s;
-}
-.log-group-all:hover { background: rgba(var(--accent-rgb), .1); }
-.log-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 1.5rem; }
-@media (max-width: 700px) { .log-grid { grid-template-columns: 1fr; } }
-.log-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: .42rem 0; gap: .75rem;
-}
-.log-row-label { font-size: .86rem; }
-
-/* ─── Бургер для мобильной версии ─── */
-.burger {
-  display: none; position: fixed; top: .8rem; left: .8rem; z-index: 300;
-  width: 40px; height: 40px; border-radius: 9px;
-  background: var(--panel); border: 1px solid var(--border-2);
-  color: var(--text); cursor: pointer;
-  align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px rgba(0,0,0,.3);
-}
-.sidebar-scrim {
-  display: none; position: fixed; inset: 0; z-index: 150;
-  background: rgba(0,0,0,.5); animation: fadeIn .2s ease;
-}
-.sidebar-scrim.show { display: block; }
-@media (max-width: 768px) {
-  .burger { display: flex; }
-  .main { padding-top: 4rem; }
-  .sidebar { box-shadow: 8px 0 30px rgba(0,0,0,.4); }
-}
-
-/* ─── Кастомный выпадающий список ─── */
-.cs-wrap { position: relative; }
-.cs-wrap > select { display: none !important; }
-
-.cs-trigger {
-  width: 100%; padding: .6rem .75rem;
-  background: var(--bg-3); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--text);
-  font-size: .87rem; font-family: inherit;
-  display: flex; align-items: center; gap: .5rem;
-  cursor: pointer; text-align: left;
-  transition: border-color .18s, box-shadow .18s, background .15s;
-}
-.cs-trigger:hover { border-color: var(--border-2); }
-.cs-trigger.open {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .14);
-}
-.cs-trigger .cs-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cs-trigger .cs-label.placeholder { color: var(--muted); }
-.cs-trigger .cs-arrow {
-  flex-shrink: 0; opacity: .55;
-  transition: transform .2s cubic-bezier(.34,1.4,.64,1);
-}
-.cs-trigger.open .cs-arrow { transform: rotate(180deg); opacity: 1; }
-
-.cs-panel {
-  position: fixed; z-index: 900;
-  background: var(--panel); border: 1px solid var(--border-2);
-  border-radius: 9px; overflow: hidden;
-  box-shadow: 0 16px 44px rgba(0,0,0,.45);
-  animation: csIn .16s cubic-bezier(.34,1.4,.64,1);
-  display: flex; flex-direction: column;
-  max-height: 320px;
-}
-@keyframes csIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
-.cs-panel.up { animation-name: csInUp; }
-@keyframes csInUp { from { opacity: 0; transform: translateY(6px) scale(.98); } }
-
-.cs-search {
-  padding: .5rem; border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.cs-search input {
-  width: 100%; padding: .45rem .6rem;
-  background: var(--bg-3); border: 1px solid var(--border);
-  border-radius: 5px; color: var(--text);
-  font-size: .84rem; font-family: inherit; outline: none;
-}
-.cs-search input:focus { border-color: var(--accent); }
-
-.cs-list { overflow-y: auto; padding: .3rem; }
-.cs-list::-webkit-scrollbar { width: 8px; }
-.cs-list::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
-
-.cs-opt {
-  padding: .5rem .6rem; border-radius: 5px;
-  font-size: .86rem; cursor: pointer;
-  display: flex; align-items: center; gap: .5rem;
-  transition: background .1s;
-}
-.cs-opt:hover, .cs-opt.cursor { background: var(--panel-2); }
-.cs-opt.sel { color: var(--accent); background: rgba(var(--accent-rgb), .09); }
-.cs-opt .cs-hash { color: var(--muted); flex-shrink: 0; font-weight: 600; }
-.cs-opt.sel .cs-hash { color: var(--accent); }
-.cs-opt .cs-txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cs-opt .cs-check { flex-shrink: 0; opacity: 0; }
-.cs-opt.sel .cs-check { opacity: 1; }
-
-.cs-empty { padding: 1.2rem; text-align: center; color: var(--muted); font-size: .82rem; }
-
-/* Skeleton-загрузка */
-.skeleton {
-  background: linear-gradient(90deg,
-    var(--bg-3) 25%, var(--panel-2) 50%, var(--bg-3) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s ease infinite;
-  border-radius: 5px;
-  height: 14px;
-}
-@keyframes shimmer { to { background-position: -200% 0; } }
-
-/* Каскадное появление */
-.stagger-in {
-  opacity: 0;
-  animation: staggerIn .32s ease forwards;
-}
-@keyframes staggerIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* Уход карточки апелляции */
-.card-exit-accept, .card-exit-reject {
-  animation: cardExit .45s ease forwards;
-  pointer-events: none;
-}
-.card-exit-accept { border-left-color: var(--accent) !important; background: rgba(var(--accent-rgb), .08); }
-.card-exit-reject { border-left-color: var(--danger) !important; background: rgba(255,84,112,.08); }
-@keyframes cardExit {
-  40% { opacity: 1; transform: translateX(0); }
-  100% { opacity: 0; transform: translateX(40px); max-height: 0; margin-bottom: 0;
-         padding-top: 0; padding-bottom: 0; }
-}
-
-/* Спиннер в кнопке */
+  color: var(--accent); font-weight: 500;
+  border-bottom: 1px solid rgba(var(--accent-rgb), .45);
+}
+.btn-primary:hover { color: var(--accent-2); border-bottom-color: var(--accent); }
+.btn-danger  { color: var(--danger); border-bottom: 1px solid rgba(255,107,129,.4); }
+.btn-danger:hover  { border-bottom-color: var(--danger); }
+.btn-success { color: var(--accent); border-bottom: 1px solid rgba(var(--accent-rgb), .45); }
+.btn-sm { font-size: 13px; }
+.btn-done { color: var(--accent) !important; }
+.btn:disabled { opacity: .5; cursor: default; }
 .btn .spin {
-  width: 13px; height: 13px; border-radius: 50%;
-  border: 2px solid rgba(0,0,0,.25); border-top-color: currentColor;
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 1.5px solid var(--border-2); border-top-color: var(--accent);
   animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.btn .ripple { display: none; }
 
-.btn.btn-done { background: var(--accent) !important; color: #001a14 !important; }
+/* ── Таблицы ─────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.table th {
+  text-align: left; padding: 0 var(--s4) var(--s2) 0;
+  font-size: 12.5px; font-weight: 500; color: var(--muted);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.table td {
+  padding: 11px var(--s4) 11px 0;
+  border-bottom: 1px solid var(--border); vertical-align: top;
+}
+.table tr:last-child td { border-bottom: 0; }
+.table th:last-child, .table td:last-child { padding-right: 0; }
 
-/* Плавная смена темы */
+.code {
+  font-family: var(--mono); font-size: 12.5px; color: var(--text-2);
+}
+.text-mono  { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.text-muted { color: var(--muted); }
+
+/* ── Статусы: без заливок ────────────────────────────────── */
+.status-pill { font-size: 12.5px; font-weight: 500; }
+.status-pill.pending  { color: var(--warning); }
+.status-pill.accepted,
+.status-pill.approved { color: var(--accent); }
+.status-pill.rejected { color: var(--danger); }
+.status-pill.expired  { color: var(--muted); }
+
+.appeal-card {
+  padding: var(--s4) 0 var(--s5);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0; cursor: pointer;
+}
+.appeal-card:hover .card-body { opacity: .85; }
+.appeals-stats {
+  display: flex; gap: var(--s5); margin-bottom: var(--s5);
+  padding-bottom: var(--s4); border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--muted);
+}
+.appeals-stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.chip {
+  font-size: 12.5px; color: var(--text-2);
+  padding-right: var(--s3); margin-right: var(--s2);
+  border-right: 1px solid var(--border);
+}
+.chip:last-child { border-right: 0; }
+.chip.warn   { color: var(--warning); }
+.chip.danger { color: var(--danger); }
+.chip.ok     { color: var(--accent); }
+
+/* ── Поиск и результаты ──────────────────────────────────── */
+.search-bar { display: flex; gap: var(--s3); align-items: center; margin-bottom: var(--s4); }
+.search-bar .input { flex: 1; }
+.search-result {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) 0; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.search-result:last-child { border-bottom: 0; }
+.search-result:hover { opacity: .8; }
+.search-result img { width: 26px; height: 26px; border-radius: 50%; }
+
+.member-head { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
+.member-av {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: var(--bg-3); overflow: hidden; flex-shrink: 0;
+}
+.member-av img { width: 100%; height: 100%; object-fit: cover; }
+.member-chips { display: flex; flex-wrap: wrap; margin-top: 6px; }
+
+/* ── Пустые состояния ────────────────────────────────────── */
+.empty { padding: var(--s6) 0; color: var(--muted); }
+.empty-icon  { display: none; }
+.empty-title { font-size: 14px; color: var(--text-2); margin-bottom: 2px; }
+.empty-sub   { font-size: 13px; }
+
+.skeleton {
+  height: 12px; border-radius: 3px; background: var(--panel-2);
+  animation: pulse 1.6s ease infinite;
+}
+@keyframes pulse { 50% { opacity: .45; } }
+
+.stagger-in { animation: none; opacity: 1; }
+
+/* ── Всплывающие сообщения ───────────────────────────────── */
+.toast {
+  position: fixed; bottom: var(--s5); left: 50%;
+  transform: translate(-50%, 8px);
+  background: var(--panel-2); border: 1px solid var(--border-2);
+  border-radius: 8px; padding: 10px var(--s4);
+  font-size: 13.5px; z-index: 1000;
+  opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.error { color: var(--danger); }
+
+/* ── Модальные окна ──────────────────────────────────────── */
+.modal-bg {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,.6); display: none; place-items: center; padding: var(--s4);
+}
+.modal-bg.show { display: grid; }
+.modal {
+  background: var(--panel); border: 1px solid var(--border-2);
+  border-radius: 12px; padding: var(--s5);
+  width: 100%; max-width: 520px; max-height: 85vh; overflow-y: auto;
+}
+.modal-title { font-size: 15px; font-weight: 600; margin-bottom: var(--s4); }
+.modal-actions { display: flex; gap: var(--s5); justify-content: flex-end; margin-top: var(--s5); }
+
+/* ── Страница входа ──────────────────────────────────────── */
+.login-page { min-height: 100vh; display: grid; place-items: center; padding: var(--s5); }
+.login-card { max-width: 340px; width: 100%; }
+.login-logo {
+  width: 40px; height: 40px; border-radius: 10px; margin-bottom: var(--s5);
+  background: var(--accent); color: #00110c;
+  display: grid; place-items: center; font-weight: 700; font-size: 17px;
+}
+.login-card h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; letter-spacing: -.01em; }
+.login-card p  { color: var(--text-2); font-size: 13.5px; margin-bottom: var(--s5); }
+
+/* ── Страницы ────────────────────────────────────────────── */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── Логирование ─────────────────────────────────────────── */
+.log-group { padding-top: var(--s5); margin-top: var(--s5); border-top: 1px solid var(--border); }
+.log-group:first-child { padding-top: 0; margin-top: 0; border-top: 0; }
+.log-group-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--s3); }
+.log-group-title { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.log-group-all {
+  font-size: 12.5px; color: var(--muted); background: none; border: 0;
+  font-family: inherit; cursor: pointer;
+}
+.log-group-all:hover { color: var(--accent); }
+.log-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s6); }
+@media (max-width: 720px) { .log-grid { grid-template-columns: 1fr; } }
+.log-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: 7px 0; }
+.log-row-label { font-size: 13.5px; }
+
+/* ── Оформление ──────────────────────────────────────────── */
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s3); }
+.theme-card { cursor: pointer; padding-bottom: var(--s2); }
+.theme-preview { height: 44px; border-radius: 7px; display: flex; overflow: hidden;
+                 border: 1px solid var(--border); margin-bottom: 6px; }
+.theme-preview i { flex: 1; }
+.theme-card.active .theme-preview { border-color: var(--accent); }
+.theme-name { font-size: 12.5px; color: var(--text-2); text-align: center; }
+.theme-card.active .theme-name { color: var(--text); }
+
+.color-row { display: flex; align-items: center; justify-content: space-between;
+             gap: var(--s4); padding: var(--s3) 0; border-top: 1px solid var(--border); }
+.color-row:first-child { border-top: 0; padding-top: 0; }
+.color-row label { margin: 0; }
+input[type="color"] {
+  width: 38px; height: 26px; padding: 2px; cursor: pointer;
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px;
+}
+.range-row { display: flex; align-items: center; gap: var(--s4); }
+.range-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.range-val { font-family: var(--mono); font-size: 13px; color: var(--text-2); width: 40px; text-align: right; }
+.bg-preview { width: 100%; height: 110px; border-radius: 8px; display: none;
+              background-size: cover; background-position: center; border: 1px solid var(--border); }
+
+/* ── Фон и эффекты ───────────────────────────────────────── */
+#bgImage { position: fixed; inset: 0; z-index: 0; background-size: cover;
+           background-position: center; display: none; pointer-events: none; }
+#bgDim   { position: fixed; inset: 0; z-index: 0; background: var(--bg);
+           opacity: 0; display: none; pointer-events: none; }
+body.has-bg #bgImage, body.has-bg #bgDim { display: block; }
+body.has-bg .layout, body.fx-on .layout { position: relative; z-index: 1; }
+body.has-bg .login-page, body.fx-on .login-page { position: relative; z-index: 1; }
+body.glass .sidebar, body.glass .modal {
+  background: rgba(var(--panel-rgb), .72);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+
+/* ── Командная палитра ───────────────────────────────────── */
+.cmdk-bg { position: fixed; inset: 0; z-index: 800; background: rgba(0,0,0,.55);
+           display: none; align-items: flex-start; justify-content: center; padding-top: 14vh; }
+.cmdk-bg.show { display: flex; }
+.cmdk { width: 100%; max-width: 480px; background: var(--panel);
+        border: 1px solid var(--border-2); border-radius: 10px; overflow: hidden; }
+.cmdk input { width: 100%; padding: var(--s4); background: none; border: 0;
+              border-bottom: 1px solid var(--border); color: var(--text);
+              font-size: 14.5px; font-family: inherit; outline: none; }
+.cmdk-list { max-height: 320px; overflow-y: auto; padding: var(--s2); }
+.cmdk-item { display: flex; align-items: center; gap: 10px; padding: 8px var(--s3);
+             border-radius: 6px; cursor: pointer; font-size: 13.5px; }
+.cmdk-item:hover, .cmdk-item.cursor { background: var(--panel-2); }
+.cmdk-item .k { margin-left: auto; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.cmdk-sec { padding: var(--s3) var(--s3) 5px; font-size: 12px; color: var(--muted); }
+
+/* ── Выпадающие списки ───────────────────────────────────── */
+.cs-wrap { position: relative; }
+.cs-wrap > select { display: none !important; }
+.cs-trigger {
+  width: 100%; padding: 8px var(--s3); text-align: left;
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 7px;
+  color: var(--text); font-size: 13.5px; font-family: inherit;
+  display: flex; align-items: center; gap: var(--s2); cursor: pointer;
+  transition: border-color .15s;
+}
+.cs-trigger:hover { border-color: var(--border-2); }
+.cs-trigger.open { border-color: var(--border-2); }
+.cs-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-label.placeholder { color: var(--muted); }
+.cs-arrow { flex-shrink: 0; opacity: .5; transition: transform .18s; }
+.cs-trigger.open .cs-arrow { transform: rotate(180deg); }
+.cs-panel {
+  position: fixed; z-index: 900; display: flex; flex-direction: column;
+  max-height: 300px; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border-2); border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.4);
+}
+.cs-search { padding: var(--s2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.cs-search input {
+  width: 100%; padding: 6px var(--s2); background: var(--bg-3);
+  border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+  font-size: 13px; font-family: inherit; outline: none;
+}
+.cs-list { overflow-y: auto; padding: var(--s1); }
+.cs-opt { display: flex; align-items: center; gap: 6px; padding: 7px var(--s2);
+          border-radius: 6px; font-size: 13.5px; cursor: pointer; }
+.cs-opt:hover, .cs-opt.cursor { background: var(--panel-2); }
+.cs-opt.sel { color: var(--accent); }
+.cs-hash { color: var(--muted); flex-shrink: 0; }
+.cs-opt.sel .cs-hash { color: var(--accent); }
+.cs-txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-check { flex-shrink: 0; opacity: 0; }
+.cs-opt.sel .cs-check { opacity: 1; }
+.cs-empty { padding: var(--s4); text-align: center; color: var(--muted); font-size: 13px; }
+
+/* ── Индикатор обновления ────────────────────────────────── */
+.live-dot { display: inline-flex; align-items: center; gap: 6px;
+            font-size: 12.5px; color: var(--muted); }
+.live-dot::before { content: ''; width: 5px; height: 5px; border-radius: 50%;
+                    background: var(--accent); }
+.live-dot.paused::before { background: var(--muted); }
+.nav-item .badge.bump { animation: none; }
+
+/* ── Мобильная версия ────────────────────────────────────── */
+.burger {
+  display: none; position: fixed; top: var(--s3); left: var(--s3); z-index: 300;
+  width: 36px; height: 36px; border-radius: 8px;
+  background: var(--bg-2); border: 1px solid var(--border-2);
+  color: var(--text); cursor: pointer; align-items: center; justify-content: center;
+}
+.sidebar-scrim { display: none; position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,.5); }
+.sidebar-scrim.show { display: block; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 232px; z-index: 200;
+             transform: translateX(-100%); transition: transform .2s; }
+  .sidebar.open { transform: translateX(0); }
+  .burger { display: flex; }
+  .main { padding: 64px var(--s4) var(--s6); }
+  .form-row { grid-template-columns: 1fr; }
+}
+
+/* ── Утилиты ─────────────────────────────────────────────── */
+.hidden { display: none !important; }
+.flex { display: flex; }
+.gap-1 { gap: var(--s3); }
+
+/* Плавная смена темы (класс вешает скрипт) */
 html.theme-anim, html.theme-anim body,
 html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
   transition: background-color .4s ease, border-color .4s ease,
-              color .4s ease, box-shadow .4s ease !important;
+              color .4s ease !important;
 }
+
+/* Выпадающий список, развёрнутый вверх */
+.cs-panel.up { box-shadow: 0 -12px 32px rgba(0,0,0,.4); }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: .01ms !important;
-    transition-duration: .01ms !important;
-  }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
-
-/* Helpers */
-.hidden { display: none !important; }
-.flex { display: flex; }
-.gap-1 { gap: .5rem; }
-.text-mono { font-family: var(--mono); }
-.text-muted { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -917,7 +529,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
     <div class="login-logo">W</div>
     <h1>Witness Dashboard</h1>
     <p>Войди через Discord чтобы управлять серверами где есть бот</p>
-    <a href="/login" class="btn btn-primary" style="width: 100%; justify-content: center; padding: .8rem;">
+    <a href="/login" class="btn btn-primary" style="text-decoration:none;">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
       Войти через Discord
     </a>
@@ -960,53 +572,53 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
     <div class="nav-section">
       <div class="nav-label">Обзор</div>
       <div class="nav-item active" data-page="overview" onclick="showPage('overview')">
-        <span class="icon">📊</span> Обзор
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Обзор
       </div>
     </div>
 
     <div class="nav-section">
       <div class="nav-label">Настройки</div>
       <div class="nav-item" data-perm="manage_guild" data-page="general" onclick="showPage('general')">
-        <span class="icon">⚙️</span> Общие
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.36.43.63.79.76H21a2 2 0 0 1 0 4h-.09c-.36.13-.65.4-.79.76z"/></svg></span> Общие
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="logging" onclick="showPage('logging')">
-        <span class="icon">📝</span> Логирование
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span> Логирование
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="moderation" onclick="showPage('moderation')">
-        <span class="icon">⚖️</span> Модерация
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><path d="M5 7h14"/><path d="M5 7l-2.5 6a3 3 0 0 0 5 0z"/><path d="M19 7l2.5 6a3 3 0 0 1-5 0z"/><path d="M9 21h6"/></svg></span> Модерация
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="automation" onclick="showPage('automation')">
-        <span class="icon">🤖</span> Автоматизация
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1"/><line x1="9" y1="13" x2="9" y2="14"/><line x1="15" y1="13" x2="15" y2="14"/></svg></span> Автоматизация
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="security" onclick="showPage('security')">
-        <span class="icon">🛡️</span> Безопасность
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span> Безопасность
       </div>
       <div class="nav-item" data-page="appearance" onclick="showPage('appearance')">
-        <span class="icon">🎨</span> Внешний вид
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="9.5" r="1"/><circle cx="15" cy="9.5" r="1"/><circle cx="9" cy="15" r="1"/></svg></span> Внешний вид
       </div>
     </div>
 
     <div class="nav-section">
       <div class="nav-label">Данные</div>
       <div class="nav-item" data-perm="manage_messages" data-page="member" onclick="showPage('member')">
-        <span class="icon">🔍</span> Поиск участника
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span> Поиск участника
       </div>
       <div class="nav-item" data-perm="manage_messages" data-page="modlog" onclick="showPage('modlog')">
-        <span class="icon">📋</span> Mod Log
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg></span> Mod Log
       </div>
       <div class="nav-item" data-perm="manage_messages" data-page="appeals" onclick="showPage('appeals')">
-        <span class="icon">⚖️</span> Апелляции
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><path d="M5 7h14"/><path d="M5 7l-2.5 6a3 3 0 0 0 5 0z"/><path d="M19 7l2.5 6a3 3 0 0 1-5 0z"/><path d="M9 21h6"/></svg></span> Апелляции
         <span class="badge hidden" id="appealsBadge">0</span>
       </div>
       <div class="nav-item" data-perm="ban_members" data-page="banreq" onclick="showPage('banreq')">
-        <span class="icon">🔨</span> Заявки на бан
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 6l-4.5 4.5"/><path d="M17 3l4 4-3 3-4-4z"/><path d="M9.5 10.5L3 17v4h4l6.5-6.5"/></svg></span> Заявки на бан
         <span class="badge hidden" id="banreqBadge">0</span>
       </div>
       <div class="nav-item" data-perm="manage_messages" data-page="invites" onclick="showPage('invites')">
-        <span class="icon">🔗</span> Инвайты
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span> Инвайты
       </div>
       <div class="nav-item" data-perm="manage_messages" data-page="twins" onclick="showPage('twins')">
-        <span class="icon">🧬</span> Стилометрия
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3c0 5 8 5 8 10s-8 5-8 8"/><path d="M16 3c0 5-8 5-8 10s8 5 8 8"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="17" x2="15" y2="17"/></svg></span> Стилометрия
       </div>
     </div>
 
@@ -1073,7 +685,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
               </tr>
             </thead>
             <tbody id="ovRecentTable">
-              <tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
+              <tr><td colspan="5"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -1227,9 +839,9 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
             <div class="form-group">
               <label>3-й варн → действие</label>
               <select class="select" id="mod-warn3type">
-                <option value="ban">🔨 Авто-бан</option>
-                <option value="mute">🔇 Мут (как 2-й варн)</option>
-                <option value="request">⚖️ Заявка на бан (вручную)</option>
+                <option value="ban">Авто-бан</option>
+                <option value="mute">Мут (как 2-й варн)</option>
+                <option value="request">Заявка на бан (вручную)</option>
               </select>
             </div>
             <div class="form-group">
@@ -1310,10 +922,10 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
           <div class="bg-preview" id="bgPreview"></div>
           <div class="flex gap-1" style="margin-top: .75rem; flex-wrap: wrap;">
             <label class="btn btn-primary btn-sm" style="cursor:pointer;">
-              📷 Загрузить фото
+              Загрузить фото
               <input type="file" accept="image/*" style="display:none;" onchange="uploadBg(this)">
             </label>
-            <button class="btn btn-ghost btn-sm" id="bgRemoveBtn" style="display:none;" onclick="removeBg()">✕ Убрать фон</button>
+            <button class="btn btn-ghost btn-sm" id="bgRemoveBtn" style="display:none;" onclick="removeBg()">Убрать фон</button>
           </div>
 
           <div id="bgControls" style="display:none; margin-top: 1.25rem;">
@@ -1561,7 +1173,6 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 
       <div id="memberCard">
         <div class="empty">
-          <div class="empty-icon">🔍</div>
           <div class="empty-title">Найди участника</div>
           <div class="empty-sub">Введи ник или ID выше, затем кликни по результату</div>
         </div>
@@ -1575,7 +1186,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
           <div class="page-title">Mod Log</div>
           <div class="page-subtitle">Последние 100 действий модерации</div>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="loadModlog()">⟳ Обновить</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadModlog()">Обновить</button>
       </div>
 
       <div class="table-wrap">
@@ -1587,7 +1198,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
             </tr>
           </thead>
           <tbody id="modlogTable">
-            <tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Загрузка...</div></div></td></tr>
+            <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1603,22 +1214,22 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
         <div class="flex gap-1" style="align-items:center;">
           <span class="live-dot" id="appealsLive" title="Список обновляется автоматически">live</span>
           <select class="select" id="appealsFilter" onchange="loadAppeals()" style="width: 180px;">
-            <option value="pending">⏳ Ожидают</option>
-            <option value="accepted">✅ Принятые</option>
-            <option value="rejected">❌ Отклонённые</option>
+            <option value="pending">Ожидают</option>
+            <option value="accepted">Принятые</option>
+            <option value="rejected">Отклонённые</option>
             <option value="">Все</option>
           </select>
-          <button class="btn btn-ghost btn-sm" onclick="loadAppeals()">⟳</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadAppeals()">Обновить</button>
         </div>
       </div>
 
       <div class="appeals-stats" id="appealsStats" style="display:none;">
-        <span>⏳ Ожидают: <b id="stPending">0</b></span>
-        <span>✅ Приняты: <b id="stAccepted">0</b></span>
-        <span>❌ Отклонены: <b id="stRejected">0</b></span>
+        <span>Ожидают: <b id="stPending">0</b></span>
+        <span>Приняты: <b id="stAccepted">0</b></span>
+        <span>Отклонены: <b id="stRejected">0</b></span>
       </div>
       <div id="appealsList">
-        <div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Загрузка...</div></div>
+        <div class="empty"><div class="empty-title">Загрузка...</div></div>
       </div>
     </div>
     </div>
@@ -1632,23 +1243,23 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
         </div>
         <div class="flex gap-1">
           <select class="select" id="banreqFilter" onchange="loadBanRequests()" style="width: 180px;">
-            <option value="pending">⏳ Ожидают</option>
-            <option value="approved">✅ Одобренные</option>
-            <option value="rejected">❌ Отклонённые</option>
+            <option value="pending">Ожидают</option>
+            <option value="approved">Одобренные</option>
+            <option value="rejected">Отклонённые</option>
             <option value="">Все</option>
           </select>
-          <button class="btn btn-ghost btn-sm" onclick="loadBanRequests()">⟳</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadBanRequests()">Обновить</button>
         </div>
       </div>
 
       <div class="appeals-stats" id="banreqStats" style="display:none;">
-        <span>⏳ Ожидают: <b id="brPending">0</b></span>
-        <span>✅ Одобрено: <b id="brApproved">0</b></span>
-        <span>❌ Отклонено: <b id="brRejected">0</b></span>
+        <span>Ожидают: <b id="brPending">0</b></span>
+        <span>Одобрено: <b id="brApproved">0</b></span>
+        <span>Отклонено: <b id="brRejected">0</b></span>
       </div>
 
       <div id="banreqList">
-        <div class="empty"><div class="empty-icon">🔨</div><div class="empty-title">Загрузка...</div></div>
+        <div class="empty"><div class="empty-title">Загрузка...</div></div>
       </div>
     </div></div>
 
@@ -1677,7 +1288,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
             </tr>
           </thead>
           <tbody id="invitesTable">
-            <tr><td colspan="5"><div class="empty"><div class="empty-icon">🔗</div><div class="empty-title">Загрузка...</div></div></td></tr>
+            <tr><td colspan="5"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1690,7 +1301,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
           <div class="page-title">Стилометрия</div>
           <div class="page-subtitle">Возможные альт-аккаунты по стилю письма</div>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="loadTwins()">⟳ Обновить</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTwins()">Обновить</button>
       </div>
 
       <div class="table-wrap">
@@ -1702,7 +1313,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
             </tr>
           </thead>
           <tbody id="twinsTable">
-            <tr><td colspan="6"><div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Загрузка...</div></div></td></tr>
+            <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1716,7 +1327,7 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
   <div class="modal">
     <div class="modal-title">Выбери сервер</div>
     <div id="guildPickerList">
-      <div class="empty"><div class="empty-icon">⏳</div><div class="empty-title">Загрузка серверов...</div></div>
+      <div class="empty"><div class="empty-title">Загрузка серверов...</div></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost btn-sm" onclick="closeGuildPicker()">Закрыть</button>
@@ -1912,7 +1523,7 @@ function uploadBg(input) {
       }
       applyBg();
       renderBgControls();
-      showToast('✓ Фон установлен', 'success');
+      showToast('Фон установлен', 'success');
     };
     im.src = e.target.result;
   };
@@ -2275,7 +1886,6 @@ function openGuildPicker() {
   const list = document.getElementById('guildPickerList');
   if (!userGuilds.length) {
     list.innerHTML = `<div class="empty">
-      <div class="empty-icon">🤖</div>
       <div class="empty-title">Нет доступных серверов</div>
       <div class="empty-sub">Добавь бота на сервер где у тебя есть права администратора</div>
     </div>`;
@@ -2571,14 +2181,14 @@ function renderConfigSummary(s) {
     const c = _channels.find(x => String(x.id) === String(id));
     return c ? '#' + c.name : '—';
   };
-  const w3 = {ban: '🔨 Авто-бан ' + (s.ban3_days ?? 30) + ' дн.',
-              mute: '🔇 Мут', request: '⚖️ Заявка на бан'}[s.warn3_type ?? 'ban'];
+  const w3 = {ban: 'Авто-бан ' + (s.ban3_days ?? 30) + ' дн.',
+              mute: 'Мут', request: 'Заявка на бан'}[s.warn3_type ?? 'ban'];
   const rows = [
     ['Лог-канал',        chName(s.log_channel)],
-    ['1-й / 2-й варн',   '🔇 ' + (s.mute1_days ?? 7) + ' дн. / ' + (s.mute2_days ?? 7) + ' дн.'],
+    ['1-й / 2-й варн',   '' + (s.mute1_days ?? 7) + ' дн. / ' + (s.mute2_days ?? 7) + ' дн.'],
     ['3-й варн',         w3],
-    ['Карантин',         s.quarantine_enabled ? '✅ вкл · ' + (s.quarantine_min_age ?? 7) + ' дн. мин. возраст' : '⬚ выкл'],
-    ['Тикеты',           s.tickets_enabled ? '✅ вкл' : '⬚ выкл'],
+    ['Карантин',         s.quarantine_enabled ? 'включён · ' + (s.quarantine_min_age ?? 7) + ' дн. мин. возраст' : 'выключены'],
+    ['Тикеты',           s.tickets_enabled ? 'включены' : 'выключены'],
     ['Язык',             {ru:'Русский', en:'English', de:'Deutsch'}[s.lang] || s.lang || 'Русский'],
   ];
   el.innerHTML = '<table class="table">' + rows.map(([k,v]) =>
@@ -2613,7 +2223,7 @@ async function saveSettings(payload, silent=false) {
       body: JSON.stringify(payload)
     });
     if (r.ok) {
-      if (!silent) showToast('✓ Сохранено', 'success');
+      if (!silent) showToast('Сохранено', 'success');
       return true;
     }
     const err = await r.json().catch(() => ({}));
@@ -2648,7 +2258,7 @@ async function saveLogging() {
     okSec = r.ok;
   } catch(e) { okSec = false; }
 
-  if (okSettings && okSec) { showToast('✓ Сохранено', 'success'); return true; }
+  if (okSettings && okSec) { showToast('Сохранено', 'success'); return true; }
   showToast('Не удалось сохранить часть настроек', 'error');
   return false;
 }
@@ -2707,7 +2317,7 @@ async function loadOverview() {
 
     const tbody = document.getElementById('ovRecentTable');
     if (!modlog.length) {
-      tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Пока пусто</div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-title">Пока пусто</div></div></td></tr>';
     } else {
       tbody.innerHTML = modlog.slice(0, 5).map((row, i) => `
         <tr class="stagger-in" style="animation-delay:${i*45}ms">
@@ -2733,7 +2343,7 @@ async function loadModlog() {
     const rows = r.ok ? await r.json() : [];
     const tbody = document.getElementById('modlogTable');
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Mod log пуст</div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Mod log пуст</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = rows.map((row, i) => `
@@ -2794,7 +2404,7 @@ async function loadAppeals() {
     refreshAppealsBadge();
     const list = document.getElementById('appealsList');
     if (!rows.length) {
-      list.innerHTML = '<div class="empty"><div class="empty-icon">⚖️</div><div class="empty-title">Нет апелляций</div><div class="empty-sub">с этим статусом</div></div>';
+      list.innerHTML = '<div class="empty"><div class="empty-title">Нет апелляций</div><div class="empty-sub">с этим статусом</div></div>';
       return;
     }
     list.innerHTML = rows.map((a, i) => `
@@ -2862,7 +2472,7 @@ function openAppealDetails(id) {
 
     ${isPending && !canDecide ? `
       <div class="input-help" style="padding:.6rem .75rem; background:var(--bg-3); border-radius:6px;">
-        🔒 Для решения по типу <b>${a.action_type}</b> нужно право
+        Для решения по типу <b>${a.action_type}</b> нужно право
         ${a.action_type==='BAN'||a.action_type==='TEMPBAN' ? '«Банить участников»' :
           a.action_type==='MUTE' ? '«Модерировать участников»' : '«Управлять сообщениями»'} на сервере
       </div>
@@ -2877,8 +2487,8 @@ function openAppealDetails(id) {
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
-        <button class="btn btn-danger btn-sm" onclick="reviewAppeal('reject')">❌ Отклонить</button>
-        <button class="btn btn-success btn-sm" onclick="reviewAppeal('accept')">✅ Принять</button>
+        <button class="btn btn-danger btn-sm" onclick="reviewAppeal('reject')">Отклонить</button>
+        <button class="btn btn-success btn-sm" onclick="reviewAppeal('accept')">Принять</button>
       </div>
     ` : ''}
     ${!isPending ? `
@@ -2905,7 +2515,7 @@ async function reviewAppeal(action) {
       body: JSON.stringify({note})
     });
     if (r.ok) {
-      showToast(action === 'accept' ? '✓ Апелляция принята' : '✗ Апелляция отклонена', 'success');
+      showToast(action === 'accept' ? 'Апелляция принята' : 'Апелляция отклонена', 'success');
       _lastCounts.appeals = null;
       const card = document.querySelector(`[data-appeal-id="${_currentAppealId}"]`);
       closeAppealModal();
@@ -2955,7 +2565,7 @@ async function postAutomation(payload) {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     });
-    if (r.ok) { showToast('✓ Сохранено', 'success'); return true; }
+    if (r.ok) { showToast('Сохранено', 'success'); return true; }
     const err = await r.json().catch(() => ({}));
     showToast('Ошибка: ' + (err.error || r.status), 'error');
   } catch(e) { showToast('Ошибка соединения', 'error'); }
@@ -3026,7 +2636,6 @@ function clearMemberSearch() {
   const box = document.getElementById('memberCard');
   if (box) box.innerHTML = `
     <div class="empty">
-      <div class="empty-icon">🔍</div>
       <div class="empty-title">Найди участника</div>
       <div class="empty-sub">Введи ник или ID выше, затем кликни по результату</div>
     </div>`;
@@ -3050,7 +2659,6 @@ async function openMember(uid) {
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       box.innerHTML = `<div class="empty">
-        <div class="empty-icon">⚠️</div>
         <div class="empty-title">Не удалось загрузить досье</div>
         <div class="empty-sub">${escapeHtml(err.error || ('код ' + r.status))}</div>
       </div>`;
@@ -3143,7 +2751,6 @@ async function openMember(uid) {
     `;
   } catch(e) {
     box.innerHTML = `<div class="empty">
-      <div class="empty-icon">⚠️</div>
       <div class="empty-title">Ошибка при загрузке досье</div>
       <div class="empty-sub">${escapeHtml(String(e))}</div>
     </div>`;
@@ -3154,13 +2761,13 @@ async function openMember(uid) {
 //  КОМАНДНАЯ ПАЛИТРА (Ctrl+K)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const CMDK_PAGES = [
-  ['overview','📊','Обзор'], ['general','⚙️','Общие'],
-  ['logging','📝','Логирование'], ['moderation','⚖️','Модерация'],
-  ['automation','🤖','Автоматизация'], ['security','🛡️','Безопасность'],
-  ['member','🔍','Поиск участника'], ['modlog','📋','Mod Log'],
-  ['appeals','⚖️','Апелляции'], ['banreq','🔨','Заявки на бан'],
-  ['invites','🔗','Инвайты'], ['twins','🧬','Стилометрия'],
-  ['appearance','🎨','Внешний вид'],
+  ['overview','','Обзор'], ['general','','Общие'],
+  ['logging','','Логирование'], ['moderation','','Модерация'],
+  ['automation','','Автоматизация'], ['security','','Безопасность'],
+  ['member','','Поиск участника'], ['modlog','','Mod Log'],
+  ['appeals','','Апелляции'], ['banreq','','Заявки на бан'],
+  ['invites','','Инвайты'], ['twins','','Стилометрия'],
+  ['appearance','','Внешний вид'],
 ];
 
 function openCmdk() {
@@ -3186,7 +2793,7 @@ async function renderCmdk(q) {
   if (pages.length) {
     html += '<div class="cmdk-sec">Разделы</div>' + pages.map(([id, ic, name]) => `
       <div class="cmdk-item" onclick="closeCmdk(); showPage('${id}')">
-        <span>${ic}</span><span>${name}</span>
+        <span>${name}</span>
       </div>`).join('');
   }
   list.innerHTML = html || '<div class="cmdk-sec">Ничего не найдено</div>';
@@ -3277,7 +2884,7 @@ async function livePoll() {
         if (_lastCounts.appeals !== null && pending > _lastCounts.appeals) {
           const diff = pending - _lastCounts.appeals;
           bumpBadge('appealsBadge');
-          showToast(`⚖️ Новых апелляций: ${diff}`, 'success');
+          showToast(`Новых апелляций: ${diff}`, 'success');
           // Если открыта страница апелляций — перерисуем список
           const p = document.querySelector('.page.active');
           if (p && p.id === 'content-appeals') loadAppeals();
@@ -3308,7 +2915,7 @@ async function livePoll() {
         }
         if (_lastCounts.banreq !== null && pending > _lastCounts.banreq) {
           bumpBadge('banreqBadge');
-          showToast(`🔨 Новых заявок на бан: ${pending - _lastCounts.banreq}`, 'success');
+          showToast(`Новых заявок на бан: ${pending - _lastCounts.banreq}`, 'success');
           const p = document.querySelector('.page.active');
           if (p && p.id === 'content-banreq') loadBanRequests();
         }
@@ -3377,7 +2984,7 @@ async function loadBanRequests() {
     refreshBanreqBadge();
     const list = document.getElementById('banreqList');
     if (!rows.length) {
-      list.innerHTML = '<div class="empty"><div class="empty-icon">🔨</div><div class="empty-title">Нет заявок</div><div class="empty-sub">с этим статусом</div></div>';
+      list.innerHTML = '<div class="empty"><div class="empty-title">Нет заявок</div><div class="empty-sub">с этим статусом</div></div>';
       return;
     }
     const pill = { pending: 'pending', approved: 'approved', rejected: 'rejected' };
@@ -3403,8 +3010,8 @@ async function loadBanRequests() {
           </div>
           ${b.status === 'pending' && hasPerm('ban_members') ? `
             <div class="flex gap-1" style="margin-top:.9rem; justify-content:flex-end;">
-              <button class="btn btn-ghost btn-sm" onclick="reviewBanReq(${b.id}, 'reject')">❌ Отклонить</button>
-              <button class="btn btn-danger btn-sm" onclick="reviewBanReq(${b.id}, 'approve')">🔨 Одобрить бан</button>
+              <button class="btn btn-ghost btn-sm" onclick="reviewBanReq(${b.id}, 'reject')">Отклонить</button>
+              <button class="btn btn-danger btn-sm" onclick="reviewBanReq(${b.id}, 'approve')">Одобрить бан</button>
             </div>
           ` : ''}
         </div>
@@ -3421,8 +3028,8 @@ async function reviewBanReq(id, action) {
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
       showToast(action === 'approve'
-        ? (d.banned ? `🔨 Бан на ${d.ban_days} дней выдан` : '⚠️ Одобрено, но бан не выдан (нет прав у бота)')
-        : '✗ Заявка отклонена', d.banned === false && action === 'approve' ? 'error' : 'success');
+        ? (d.banned ? `Бан на ${d.ban_days} дней выдан` : 'Одобрено, но бан не выдан — у бота нет прав')
+        : 'Заявка отклонена', d.banned === false && action === 'approve' ? 'error' : 'success');
       const card = document.querySelector(`[data-br-id="${id}"]`);
       if (card) {
         card.classList.add(action === 'approve' ? 'card-exit-reject' : 'card-exit-accept');
@@ -3457,7 +3064,6 @@ async function loadInvites(q='') {
     const tbody = document.getElementById('invitesTable');
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="5"><div class="empty">
-        <div class="empty-icon">🔗</div>
         <div class="empty-title">${q ? 'Ничего не найдено' : 'Нет данных'}</div>
         ${q ? `<div class="empty-sub">по запросу «${escapeHtml(q)}»</div>` : ''}
       </div></td></tr>`;
@@ -3486,7 +3092,7 @@ async function loadTwins() {
     const rows = r.ok ? await r.json() : [];
     const tbody = document.getElementById('twinsTable');
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Твинков не обнаружено</div></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Твинков не обнаружено</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = rows.map((row, i) => {
@@ -3680,7 +3286,7 @@ function animateNum(el, target) {
 }
 
 async function btnBusy(btn, fn) {
-  // Кнопка: спиннер → ✓ Готово → возврат
+  // Кнопка: спиннер → Готово → возврат
   if (!btn || btn.dataset.busy) return fn();
   const orig = btn.innerHTML;
   btn.dataset.busy = '1';
@@ -3689,7 +3295,7 @@ async function btnBusy(btn, fn) {
   const ok = await fn();
   if (ok !== false) {
     btn.classList.add('btn-done');
-    btn.innerHTML = '✓ Готово';
+    btn.innerHTML = 'Готово';
     setTimeout(() => {
       btn.classList.remove('btn-done');
       btn.innerHTML = orig;
