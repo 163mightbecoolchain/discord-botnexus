@@ -45,9 +45,9 @@ CSP = (
 # от встраивания — их политику не трогаем.
 CSP_ACTIVITY = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'self' 'unsafe-inline'; "
-    "connect-src 'self' https://esm.sh https://*.discordsays.com https://discord.com; "
+    "connect-src 'self' https://*.discordsays.com https://discord.com; "
     "img-src 'self' data: https://cdn.discordapp.com https://*.discordsays.com; "
     "frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com;"
 )
@@ -66,6 +66,13 @@ async def html_response(filename: str, activity: bool = False) -> web.Response:
 
 
 async def handle_index(request):
+    # Discord открывает Activity по КОРНЮ сопоставленного домена и передаёт
+    # свои параметры (frame_id, instance_id, platform). Если они есть —
+    # это запуск из клиента, отдаём activity.html вместо лендинга.
+    # Лендинг в iframe всё равно не открылся бы: на нём стоит запрет встраивания.
+    q = request.rel_url.query
+    if "frame_id" in q or "instance_id" in q:
+        return await html_response("activity.html", activity=True)
     return await html_response("index.html")
 
 async def handle_privacy(request):
@@ -74,6 +81,24 @@ async def handle_privacy(request):
 async def handle_activity(request):
     """Discord Activity — встраиваемая версия панели модерации"""
     return await html_response("activity.html", activity=True)
+
+
+async def handle_static(request):
+    """
+    Статика для Activity (SDK). Discord блокирует загрузку скриптов
+    со сторонних доменов, поэтому библиотека лежит у нас же.
+    """
+    name = request.match_info.get("name", "")
+    if "/" in name or ".." in name or not name.endswith(".js"):
+        return web.Response(status=404)
+    path = os.path.join(BASE_DIR, "static", name)
+    if not os.path.exists(path):
+        return web.Response(status=404)
+    with open(path, "r", encoding="utf-8") as f:
+        body = f.read()
+    resp = web.Response(text=body, content_type="application/javascript")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 async def handle_callback(request):
     """
@@ -109,6 +134,7 @@ app.router.add_get("/",          handle_index)
 app.router.add_get("/dashboard", handle_dashboard)
 app.router.add_get("/privacy",   handle_privacy)
 app.router.add_get("/activity",  handle_activity)
+app.router.add_get("/static/{name}", handle_static)
 app.router.add_get("/callback",  handle_callback)
 app.router.add_get("/login",     handle_login)
 app.router.add_get("/logout",    handle_logout)
