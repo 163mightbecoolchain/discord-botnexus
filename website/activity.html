@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Witness</title>
+<style>
+:root {
+  --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
+  --panel: #1a2028; --panel-2: #232b35;
+  --border: #2a3441; --border-2: #3a4554;
+  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
+  --accent: #00d9a3; --accent-rgb: 0,217,163;
+  --danger: #ff5470; --warning: #ffaa00; --info: #5a9eff;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  font-size: 14px; line-height: 1.5;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Шапка ── */
+.top {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .7rem .85rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2); flex-shrink: 0;
+}
+.mark {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent), #00a085);
+  display: grid; place-items: center;
+  font-weight: 900; color: #001a14; font-size: .8rem; flex-shrink: 0;
+}
+.top-name { font-family: var(--mono); font-weight: 700; font-size: .92rem; }
+.top-name span { color: var(--accent); }
+.guild-tag {
+  margin-left: auto; font-size: .72rem; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%;
+}
+
+/* ── Вкладки ── */
+.tabs {
+  display: flex; border-bottom: 1px solid var(--border);
+  background: var(--bg-2); flex-shrink: 0; overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 1; min-width: 78px; text-align: center;
+  padding: .6rem .4rem; font-size: .78rem; font-weight: 600;
+  color: var(--text-2); cursor: pointer;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab .cnt {
+  display: inline-block; background: var(--danger); color: #fff;
+  border-radius: 999px; padding: 0 .3rem; font-size: .64rem;
+  margin-left: .2rem; vertical-align: middle;
+}
+.tab .cnt.hidden { display: none; }
+
+/* ── Контент ── */
+.body { flex: 1; overflow-y: auto; padding: .7rem; }
+.view { display: none; }
+.view.active { display: block; animation: in .2s ease; }
+@keyframes in { from { opacity: 0; transform: translateY(6px); } }
+
+.card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--border-2);
+  border-radius: 9px; padding: .7rem .8rem; margin-bottom: .55rem;
+}
+.card.pending  { border-left-color: var(--warning); }
+.card.accepted, .card.approved { border-left-color: var(--accent); }
+.card.rejected { border-left-color: var(--danger); }
+.card.expired  { border-left-color: var(--muted); }
+
+.row { display: flex; align-items: center; gap: .5rem; }
+.title { font-weight: 600; font-size: .87rem; }
+.sub { font-size: .76rem; color: var(--muted); margin-top: .15rem;
+       overflow: hidden; text-overflow: ellipsis; }
+.when { margin-left: auto; font-size: .7rem; color: var(--muted);
+        font-family: var(--mono); flex-shrink: 0; }
+
+.pill {
+  font-size: .64rem; font-weight: 700; text-transform: uppercase;
+  padding: .12rem .4rem; border-radius: 999px; letter-spacing: .04em;
+}
+.pill.pending  { background: rgba(255,170,0,.14);  color: var(--warning); }
+.pill.accepted, .pill.approved { background: rgba(var(--accent-rgb),.14); color: var(--accent); }
+.pill.rejected { background: rgba(255,84,112,.14); color: var(--danger); }
+.pill.expired  { background: rgba(107,119,133,.18); color: var(--muted); }
+
+.reason {
+  margin-top: .5rem; padding: .5rem .6rem;
+  background: var(--bg-3); border-radius: 6px;
+  font-size: .8rem; line-height: 1.5;
+  max-height: 6.5em; overflow-y: auto;
+}
+
+.acts { display: flex; gap: .4rem; margin-top: .6rem; }
+.btn {
+  flex: 1; padding: .5rem; border-radius: 7px; border: 1px solid transparent;
+  font-size: .8rem; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: transform .12s, filter .15s;
+}
+.btn:active { transform: scale(.97); }
+.btn-ok  { background: var(--accent); color: #001a14; }
+.btn-no  { background: transparent; color: var(--text); border-color: var(--border-2); }
+.btn-ban { background: var(--danger); color: #fff; }
+
+input.search {
+  width: 100%; padding: .6rem .7rem; margin-bottom: .6rem;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 7px; color: var(--text); font-size: .87rem;
+  font-family: inherit; outline: none;
+}
+input.search:focus { border-color: var(--accent); }
+
+.res {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .5rem .6rem; border-radius: 7px; cursor: pointer;
+}
+.res:active { background: var(--panel-2); }
+.res img { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; }
+
+.chips { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .4rem; }
+.chip {
+  font-size: .68rem; padding: .15rem .45rem; border-radius: 999px;
+  background: var(--bg-3); color: var(--text-2);
+}
+.chip.warn   { background: rgba(255,170,0,.14);  color: var(--warning); }
+.chip.danger { background: rgba(255,84,112,.14); color: var(--danger); }
+.chip.ok     { background: rgba(var(--accent-rgb),.14); color: var(--accent); }
+
+.code {
+  font-family: var(--mono); font-size: .72rem; color: var(--accent);
+  background: rgba(var(--accent-rgb),.08);
+  padding: .08rem .3rem; border-radius: 4px;
+}
+
+.empty { padding: 2.2rem 1rem; text-align: center; color: var(--muted); }
+.empty .ic { font-size: 1.9rem; opacity: .4; margin-bottom: .5rem; }
+.empty .t  { font-weight: 600; color: var(--text-2); font-size: .85rem; }
+.empty .s  { font-size: .76rem; margin-top: .2rem; }
+
+.skel {
+  height: 58px; border-radius: 9px; margin-bottom: .55rem;
+  background: linear-gradient(90deg, var(--bg-3) 25%, var(--panel-2) 50%, var(--bg-3) 75%);
+  background-size: 200% 100%; animation: sh 1.4s ease infinite;
+}
+@keyframes sh { to { background-position: -200% 0; } }
+
+.toast {
+  position: fixed; left: 50%; bottom: 1rem; transform: translate(-50%, 20px);
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: .6rem 1rem; border-radius: 8px; font-size: .82rem;
+  opacity: 0; transition: all .25s; pointer-events: none; z-index: 50;
+  box-shadow: 0 8px 26px rgba(0,0,0,.5); max-width: 88%;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.err { border-left-color: var(--danger); }
+
+.boot { flex: 1; display: grid; place-items: center; text-align: center; padding: 2rem; }
+.boot .mark { width: 52px; height: 52px; font-size: 1.4rem; margin: 0 auto 1rem;
+              border-radius: 14px; box-shadow: 0 0 34px rgba(var(--accent-rgb),.35); }
+.boot h1 { font-size: 1.05rem; margin-bottom: .4rem; }
+.boot p  { color: var(--text-2); font-size: .84rem; }
+</style>
+</head>
+<body>
+
+<div class="boot" id="boot">
+  <div>
+    <div class="mark">W</div>
+    <h1>Witness</h1>
+    <p id="bootMsg">Подключение к Discord...</p>
+  </div>
+</div>
+
+<div class="top" id="top" style="display:none;">
+  <div class="mark">W</div>
+  <div class="top-name">Witness<span>.</span></div>
+  <div class="guild-tag" id="guildTag">—</div>
+</div>
+
+<div class="tabs" id="tabs" style="display:none;">
+  <div class="tab active" data-v="appeals" onclick="show('appeals')">
+    Апелляции<span class="cnt hidden" id="cAppeals">0</span>
+  </div>
+  <div class="tab" data-v="banreq" onclick="show('banreq')">
+    Баны<span class="cnt hidden" id="cBanreq">0</span>
+  </div>
+  <div class="tab" data-v="member" onclick="show('member')">Поиск</div>
+  <div class="tab" data-v="log" onclick="show('log')">Журнал</div>
+</div>
+
+<div class="body" id="main" style="display:none;">
+  <div class="view active" id="v-appeals"></div>
+  <div class="view" id="v-banreq"></div>
+  <div class="view" id="v-member">
+    <input class="search" id="mSearch" placeholder="Ник или ID участника..." oninput="mDebounce()">
+    <div id="mRes"></div>
+    <div id="mCard"></div>
+  </div>
+  <div class="view" id="v-log"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { DiscordSDK } from "https://esm.sh/@discord/embedded-app-sdk@2";
+
+// В Activity все внешние запросы идут через прокси Discord.
+// Префикс /.proxy/api сопоставляется с доменом бота в Dev Portal.
+const API = "/.proxy/api";
+
+let sdk = null, token = null, guildId = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+                                .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const d10 = s => (s || "").slice(0, 10);
+
+function toast(msg, err = false) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "toast show" + (err ? " err" : "");
+  setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+async function api(path, opts = {}) {
+  const h = opts.headers || {};
+  if (token) h["Authorization"] = "Bearer " + token;
+  const r = await fetch(API + path, { ...opts, headers: h });
+  return r;
+}
+
+// ── Запуск ──────────────────────────────────────────────
+async function boot() {
+  try {
+    const clientId = new URLSearchParams(location.search).get("client_id")
+                  || window.DISCORD_CLIENT_ID || "__BOT_ID__";
+    sdk = new DiscordSDK(clientId);
+    await sdk.ready();
+
+    $("bootMsg").textContent = "Авторизация...";
+    const { code } = await sdk.commands.authorize({
+      client_id: clientId,
+      response_type: "code",
+      state: "",
+      prompt: "none",
+      scope: ["identify", "guilds"],
+    });
+
+    const r = await api("/activity/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    if (!r.ok) throw new Error("Обмен кода не удался (" + r.status + ")");
+    const data = await r.json();
+    token = data.token;
+
+    await sdk.commands.authenticate({ access_token: data.access_token });
+
+    guildId = sdk.guildId;
+    if (!guildId) throw new Error("Активность запущена вне сервера");
+
+    // Название сервера — из списка доступных
+    try {
+      const g = await api("/guilds");
+      if (g.ok) {
+        const list = await g.json();
+        const cur = list.find(x => x.id === String(guildId));
+        $("guildTag").textContent = cur ? cur.name : "";
+      }
+    } catch (e) {}
+
+    $("boot").style.display = "none";
+    $("top").style.display = "flex";
+    $("tabs").style.display = "flex";
+    $("main").style.display = "block";
+
+    loadAppeals();
+    refreshCounts();
+    setInterval(refreshCounts, 20000);
+  } catch (e) {
+    $("bootMsg").innerHTML =
+      `<span style="color:var(--danger)">${esc(e.message || e)}</span>`;
+    console.error(e);
+  }
+}
+
+// ── Вкладки ─────────────────────────────────────────────
+window.show = function (v) {
+  document.querySelectorAll(".tab").forEach(t =>
+    t.classList.toggle("active", t.dataset.v === v));
+  document.querySelectorAll(".view").forEach(el =>
+    el.classList.toggle("active", el.id === "v-" + v));
+  if (v === "appeals") loadAppeals();
+  if (v === "banreq")  loadBanreq();
+  if (v === "log")     loadLog();
+};
+
+const skel = n => '<div class="skel"></div>'.repeat(n);
+
+// ── Счётчики ────────────────────────────────────────────
+async function refreshCounts() {
+  try {
+    const r = await api(`/guild/${guildId}/appeals?status=pending`);
+    if (r.ok) {
+      const n = (await r.json()).length;
+      const c = $("cAppeals");
+      c.textContent = n; c.classList.toggle("hidden", !n);
+    }
+  } catch (e) {}
+  try {
+    const r = await api(`/guild/${guildId}/banrequests?status=pending`);
+    if (r.ok) {
+      const n = (await r.json()).length;
+      const c = $("cBanreq");
+      c.textContent = n; c.classList.toggle("hidden", !n);
+    }
+  } catch (e) {}
+}
+
+// ── Апелляции ───────────────────────────────────────────
+async function loadAppeals() {
+  const box = $("v-appeals");
+  box.innerHTML = skel(3);
+  try {
+    const r = await api(`/guild/${guildId}/appeals?status=pending`);
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty"><div class="ic">⚖️</div>
+        <div class="t">Нет апелляций</div><div class="s">Всё разобрано</div></div>`;
+      return;
+    }
+    box.innerHTML = rows.map(a => `
+      <div class="card ${a.status}" data-id="${a.id}">
+        <div class="row">
+          <span class="pill ${a.status}">${a.action_type}</span>
+          <div style="flex:1;min-width:0;">
+            <div class="title">${esc(a.username || a.user_id)}</div>
+            <div class="sub">#${a.id}</div>
+          </div>
+          <div class="when">${d10(a.submitted_at)}</div>
+        </div>
+        <div class="reason">${esc(a.appeal_text || "—")}</div>
+        <div class="acts">
+          <button class="btn btn-no" onclick="rev(${a.id},'reject')">Отклонить</button>
+          <button class="btn btn-ok" onclick="rev(${a.id},'accept')">Принять</button>
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="empty"><div class="ic">⚠️</div>
+      <div class="t">Ошибка загрузки</div></div>`;
+  }
+}
+
+window.rev = async function (id, action) {
+  try {
+    const r = await api(`/guild/${guildId}/appeal/${id}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: "" }),
+    });
+    if (r.ok) {
+      toast(action === "accept" ? "Апелляция принята" : "Апелляция отклонена");
+      const el = document.querySelector(`[data-id="${id}"]`);
+      if (el) el.remove();
+      refreshCounts();
+      if (!$("v-appeals").querySelector(".card")) loadAppeals();
+    } else {
+      const e = await r.json().catch(() => ({}));
+      toast(e.error === "missing_permission"
+            ? "Недостаточно прав для этого типа наказания" : "Ошибка", true);
+    }
+  } catch (e) { toast("Нет связи", true); }
+};
+
+// ── Заявки на бан ───────────────────────────────────────
+async function loadBanreq() {
+  const box = $("v-banreq");
+  box.innerHTML = skel(2);
+  try {
+    const r = await api(`/guild/${guildId}/banrequests?status=pending`);
+    if (r.status === 403) {
+      box.innerHTML = `<div class="empty"><div class="ic">🔒</div>
+        <div class="t">Нет доступа</div>
+        <div class="s">Нужно право «Банить участников»</div></div>`;
+      return;
+    }
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty"><div class="ic">🔨</div>
+        <div class="t">Нет заявок</div></div>`;
+      return;
+    }
+    box.innerHTML = rows.map(b => `
+      <div class="card pending" data-br="${b.id}">
+        <div class="row">
+          <span class="pill pending">${b.warn_count}/3</span>
+          <div style="flex:1;min-width:0;">
+            <div class="title">${esc(b.username || b.user_id)}</div>
+            <div class="sub">#${b.id} · ${esc(b.mod_name || "—")}</div>
+          </div>
+          <div class="when">${d10(b.created_at)}</div>
+        </div>
+        <div class="reason">${esc(b.reason || "—")}</div>
+        <div class="acts">
+          <button class="btn btn-no"  onclick="brev(${b.id},'reject')">Отклонить</button>
+          <button class="btn btn-ban" onclick="brev(${b.id},'approve')">Забанить</button>
+        </div>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="empty"><div class="ic">⚠️</div>
+      <div class="t">Ошибка загрузки</div></div>`;
+  }
+}
+
+window.brev = async function (id, action) {
+  try {
+    const r = await api(`/guild/${guildId}/banrequest/${id}/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      toast(action === "approve"
+        ? (d.banned ? `Бан на ${d.ban_days} дней выдан` : "Одобрено, но бот не смог забанить")
+        : "Заявка отклонена", action === "approve" && !d.banned);
+      const el = document.querySelector(`[data-br="${id}"]`);
+      if (el) el.remove();
+      refreshCounts();
+      if (!$("v-banreq").querySelector(".card")) loadBanreq();
+    } else toast("Ошибка", true);
+  } catch (e) { toast("Нет связи", true); }
+};
+
+// ── Поиск участника ─────────────────────────────────────
+let mt = null;
+window.mDebounce = function () {
+  clearTimeout(mt);
+  mt = setTimeout(mSearch, 350);
+};
+
+async function mSearch() {
+  const q = $("mSearch").value.trim();
+  const box = $("mRes");
+  if (q.length < 2) { box.innerHTML = ""; return; }
+  $("mCard").innerHTML = "";
+  try {
+    const r = await api(`/guild/${guildId}/members/search?q=${encodeURIComponent(q)}`);
+    const rows = r.ok ? await r.json() : [];
+    box.innerHTML = rows.length
+      ? rows.slice(0, 8).map(m => `
+          <div class="res" onclick="openM('${m.id}')">
+            <img src="${m.avatar}" alt="">
+            <div style="min-width:0;">
+              <div class="title">${esc(m.name)}</div>
+              <div class="sub">${esc(m.tag)}</div>
+            </div>
+          </div>`).join("")
+      : `<div class="empty" style="padding:1.2rem;"><div class="s">Никого не найдено</div></div>`;
+  } catch (e) {}
+}
+
+window.openM = async function (uid) {
+  $("mRes").innerHTML = "";
+  const box = $("mCard");
+  box.innerHTML = skel(2);
+  try {
+    const r = await api(`/guild/${guildId}/member/${uid}`);
+    if (!r.ok) { box.innerHTML = `<div class="empty"><div class="t">Не удалось загрузить</div></div>`; return; }
+    const m = await r.json();
+    const chips = [];
+    if (!m.on_server) chips.push('<span class="chip danger">не на сервере</span>');
+    if (m.timed_out)  chips.push('<span class="chip warn">в муте</span>');
+    if (m.warns)      chips.push(`<span class="chip ${m.warns >= 3 ? "danger" : "warn"}">варнов ${m.warns}/3</span>`);
+    if (!m.warns && m.on_server) chips.push('<span class="chip ok">чисто</span>');
+    if (m.twins && m.twins.length) chips.push(`<span class="chip danger">твинков ${m.twins.length}</span>`);
+
+    box.innerHTML = `
+      <div class="card">
+        <div class="row">
+          <img src="${m.avatar}" style="width:40px;height:40px;border-radius:50%;">
+          <div style="min-width:0;">
+            <div class="title">${esc(m.name || m.user_id)}</div>
+            <div class="sub">${esc(m.tag || "")}</div>
+          </div>
+        </div>
+        <div class="chips">${chips.join("")}</div>
+        ${m.invited_by ? `<div class="sub" style="margin-top:.5rem;">
+          Пригласил: ${esc(m.invited_by.name)}</div>` : ""}
+      </div>
+      ${(m.history && m.history.length) ? `
+        <div class="card">
+          <div class="sub" style="margin-bottom:.4rem;">История наказаний</div>
+          ${m.history.slice(0, 8).map(h => `
+            <div class="row" style="padding:.25rem 0;">
+              <span class="code">${h.action || "?"}</span>
+              <div class="sub" style="flex:1;">${esc(h.reason || "—")}</div>
+              <div class="when">${d10(h.created_at)}</div>
+            </div>`).join("")}
+        </div>` : `<div class="empty" style="padding:1.2rem;">
+            <div class="s">Наказаний не было</div></div>`}`;
+  } catch (e) {}
+};
+
+// ── Журнал ──────────────────────────────────────────────
+async function loadLog() {
+  const box = $("v-log");
+  box.innerHTML = skel(4);
+  try {
+    const r = await api(`/guild/${guildId}/modlog`);
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty"><div class="ic">📋</div>
+        <div class="t">Журнал пуст</div></div>`;
+      return;
+    }
+    box.innerHTML = rows.slice(0, 25).map(x => `
+      <div class="card">
+        <div class="row">
+          <span class="code">${x.action || "?"}</span>
+          <div style="flex:1;min-width:0;">
+            <div class="title">${esc(x.user_name || x.user_id)}</div>
+            <div class="sub">${esc(x.reason || "—")}</div>
+          </div>
+          <div class="when">${d10(x.created_at)}</div>
+        </div>
+      </div>`).join("");
+  } catch (e) {}
+}
+
+boot();
+</script>
+
+</body>
+</html>
