@@ -474,9 +474,18 @@ async def memory_cleanup_loop(bot_instance):
                         # Делаем раз в неделю (тяжёлая операция)
                         if not hasattr(bot, '_last_vacuum') or                            time.time() - bot._last_vacuum > 604800:
                             bot._last_vacuum = time.time()
-                            await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                            await db.execute("VACUUM")
-                            print("[CLEANUP] VACUUM complete")
+                            try:
+                                # aiosqlite оставляет курсор открытым после execute,
+                                # а VACUUM требует, чтобы незакрытых запросов не было.
+                                # Поэтому PRAGMA читаем через async with и закрываем.
+                                async with aiosqlite.connect(DB_PATH) as vdb:
+                                    async with vdb.execute(
+                                            "PRAGMA wal_checkpoint(TRUNCATE)") as vc:
+                                        await vc.fetchall()
+                                    await vdb.execute("VACUUM")
+                                print("[CLEANUP] VACUUM complete")
+                            except Exception as vex:
+                                print(f"[CLEANUP] VACUUM пропущен: {vex}")
                     print("[CLEANUP] DB cleanup complete")
                 except Exception as ex:
                     print(f"[CLEANUP] Error: {ex}")
@@ -3146,15 +3155,28 @@ async def backup_loop(bot_instance):
     while not bot_instance.is_closed():
         tmp = "/tmp/witness_backup.db"
         try:
+            # get_channel читает только кэш — если бот недавно добавлен
+            # на сервер, канала там может не быть. Дозапрашиваем через API.
             ch = bot_instance.get_channel(ch_id)
             if not ch:
-                print(f"[BACKUP] Канал {ch_id} недоступен")
-                await asyncio.sleep(86400); continue
+                try:
+                    ch = await bot_instance.fetch_channel(ch_id)
+                except Exception as cex:
+                    print(f"[BACKUP] Канал {ch_id} недоступен: {cex}")
+                    print("[BACKUP] Проверь: бот добавлен на сервер с этим каналом? "
+                          "ID именно канала, а не сервера? Есть права "
+                          "«Просмотр канала», «Отправка сообщений», «Прикрепление файлов»?")
+                    await asyncio.sleep(3600); continue
 
             # VACUUM INTO делает согласованную копию без остановки бота
             if os.path.exists(tmp):
                 os.remove(tmp)
             async with aiosqlite.connect(DB_PATH) as db:
+                # Сбрасываем WAL, чтобы копия содержала все свежие записи.
+                # Курсор PRAGMA обязательно закрываем — иначе VACUUM INTO
+                # упадёт с "SQL statements in progress".
+                async with db.execute("PRAGMA wal_checkpoint(TRUNCATE)") as c:
+                    await c.fetchall()
                 await db.execute("VACUUM INTO ?", (tmp,))
 
             size_mb = os.path.getsize(tmp) / 1024 / 1024
