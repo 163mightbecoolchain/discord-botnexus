@@ -409,6 +409,27 @@ input[type="color"] {
 body.has-bg #bgImage, body.has-bg #bgDim { display: block; }
 body.has-bg .layout, body.fx-on .layout { position: relative; z-index: 1; }
 body.has-bg .login-page, body.fx-on .login-page { position: relative; z-index: 1; }
+
+/* Со своим фоном контенту нужна подложка: без неё картинка
+   просвечивает прямо под текстом и читать невозможно. */
+body.has-bg .main {
+  background: rgba(var(--bg-rgb), .88);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+body.has-bg .sidebar { background: rgba(var(--bg-2-rgb), .94); }
+
+/* Стеклянный режим — подложка легче, размытие сильнее */
+body.has-bg.glass .main {
+  background: rgba(var(--bg-rgb), .68);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+body.has-bg.glass .sidebar {
+  background: rgba(var(--bg-2-rgb), .72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
 body.glass .sidebar, body.glass .modal {
   background: rgba(var(--panel-rgb), .72);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
@@ -1365,6 +1386,10 @@ const THEMES = {
   light:   { name: 'Light',    accent: '#009975', bg: '#f2f4f7', panel: '#ffffff', text: '#1a2028' },
 };
 
+function isLightHex(hex) {
+  return hexToRgb(hex).reduce((a, b) => a + b, 0) > 380;
+}
+
 function hexToRgb(hex) {
   const h = hex.replace('#','');
   return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
@@ -1478,9 +1503,12 @@ function applyBg() {
   const bgEl  = document.getElementById('bgImage');
   const dimEl = document.getElementById('bgDim');
 
-  // panel-rgb для стеклянных панелей
+  // rgb-варианты цветов: нужны для полупрозрачных подложек поверх фона
   const t = currentTheme();
-  document.documentElement.style.setProperty('--panel-rgb', hexToRgb(t.panel).join(','));
+  const root = document.documentElement.style;
+  root.setProperty('--panel-rgb', hexToRgb(t.panel).join(','));
+  root.setProperty('--bg-rgb',    hexToRgb(t.bg).join(','));
+  root.setProperty('--bg-2-rgb',  hexToRgb(shade(t.bg, isLightHex(t.bg) ? -5 : 5)).join(','));
 
   if (img && bgEl) {
     bgEl.style.backgroundImage = `url(${img})`;
