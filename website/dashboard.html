@@ -410,25 +410,28 @@ body.has-bg #bgImage, body.has-bg #bgDim { display: block; }
 body.has-bg .layout, body.fx-on .layout { position: relative; z-index: 1; }
 body.has-bg .login-page, body.fx-on .login-page { position: relative; z-index: 1; }
 
-/* Со своим фоном контенту нужна подложка: без неё картинка
-   просвечивает прямо под текстом и читать невозможно. */
+/* Со своим фоном контенту нужна подложка, иначе картинка просвечивает
+   под текстом. Её плотность задаёт ползунок «Затемнение»: на нуле
+   фон виден почти целиком, к 90 текст читается на любой картинке. */
 body.has-bg .main {
-  background: rgba(var(--bg-rgb), .88);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  background: rgba(var(--bg-rgb), var(--surface, .6));
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
-body.has-bg .sidebar { background: rgba(var(--bg-2-rgb), .94); }
+body.has-bg .sidebar {
+  background: rgba(var(--bg-2-rgb), calc(var(--surface, .6) + .2));
+}
 
-/* Стеклянный режим — подложка легче, размытие сильнее */
+/* Стеклянный режим: подложка легче, размытие делает основную работу */
 body.has-bg.glass .main {
-  background: rgba(var(--bg-rgb), .68);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(var(--bg-rgb), calc(var(--surface, .6) * .65));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 body.has-bg.glass .sidebar {
-  background: rgba(var(--bg-2-rgb), .72);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(var(--bg-2-rgb), calc(var(--surface, .6) * .8));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 body.glass .sidebar, body.glass .modal {
   background: rgba(var(--panel-rgb), .72);
@@ -951,13 +954,13 @@ html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
 
           <div id="bgControls" style="display:none; margin-top: 1.25rem;">
             <div class="form-group">
-              <label>Затемнение фона</label>
+              <label>Плотность подложки</label>
               <div class="range-row">
                 <input type="range" min="0" max="90" value="55" id="bgDimRange"
                        oninput="setBgDim(this.value)">
                 <span class="range-val" id="bgDimVal">55%</span>
               </div>
-              <div class="input-help">Чем выше — тем читабельнее текст поверх фото</div>
+              <div class="input-help">Ниже — фон виднее, выше — текст читается увереннее</div>
             </div>
             <div class="toggle-row">
               <div class="toggle-info">
@@ -1512,7 +1515,10 @@ function applyBg() {
 
   if (img && bgEl) {
     bgEl.style.backgroundImage = `url(${img})`;
-    dimEl.style.opacity = dim / 100;
+    // Затемнение общего слоя оставляем слабым, основную читаемость
+    // даёт подложка под контентом — так фон остаётся виден
+    dimEl.style.opacity = (dim / 100) * 0.35;
+    root.setProperty('--surface', String(0.28 + (dim / 100) * 0.6));
     document.body.classList.add('has-bg');
     document.body.classList.toggle('glass', glass);
   } else {
@@ -1569,7 +1575,9 @@ function removeBg() {
 function setBgDim(v) {
   localStorage.setItem('ws_bg_dim', v);
   document.getElementById('bgDimVal').textContent = v + '%';
-  document.getElementById('bgDim').style.opacity = v / 100;
+  document.getElementById('bgDim').style.opacity = (v / 100) * 0.35;
+  document.documentElement.style.setProperty('--surface',
+    String(0.28 + (v / 100) * 0.6));
 }
 
 function toggleGlass() {
