@@ -550,9 +550,6 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-item" data-perm="manage_messages" data-page="invites" onclick="showPage('invites')">
         <span class="icon">🔗</span> Инвайты
       </div>
-      <div class="nav-item" data-perm="manage_messages" data-page="twins" onclick="showPage('twins')">
-        <span class="icon">🧬</span> Стилометрия
-      </div>
     </div>
 
     <div class="user-card">
@@ -594,10 +591,6 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="stat-card warning">
           <div class="stat-label">Активных апелляций</div>
           <div class="stat-value" id="ovAppeals">—</div>
-        </div>
-        <div class="stat-card danger">
-          <div class="stat-label">Возможных твинков</div>
-          <div class="stat-value" id="ovTwins">—</div>
         </div>
       </div>
 
@@ -1028,31 +1021,7 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Безопасность</div>
-          <div class="page-subtitle">Анти-нюк и стилометрия</div>
-        </div>
-        <button class="btn btn-primary" onclick="btnBusy(this, saveSecurityPage)">Сохранить</button>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Порог определения твинков</div>
-            <div class="card-desc">Насколько похожим должен быть стиль письма для срабатывания</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="form-group" style="margin:0;">
-            <label>Сходство от, %</label>
-            <div class="range-row">
-              <input type="range" min="50" max="99" value="80" id="sec-twinthr"
-                     oninput="document.getElementById('twinThrVal').textContent=this.value+'%'">
-              <span class="range-val" id="twinThrVal">80%</span>
-            </div>
-            <div class="input-help">
-              Ниже — больше находок и ложных срабатываний, выше — только явные совпадения.
-              Рекомендуется 75–85%.
-            </div>
-          </div>
+          <div class="page-subtitle">Анти-нюк</div>
         </div>
       </div>
 
@@ -1222,31 +1191,6 @@ html.theme-anim *::before, html.theme-anim *::after {
           </thead>
           <tbody id="invitesTable">
             <tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- TWINS -->
-    <div id="content-twins" class="page">
-      <div class="page-head">
-        <div>
-          <div class="page-title">Стилометрия</div>
-          <div class="page-subtitle">Возможные альт-аккаунты по стилю письма</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="loadTwins()">⟳ Обновить</button>
-      </div>
-
-      <div class="table-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>#</th><th>Участник A</th><th>Участник B</th>
-              <th>Сходство</th><th>Статус</th><th>Обнаружено</th>
-            </tr>
-          </thead>
-          <tbody id="twinsTable">
-            <tr><td colspan="6"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -1955,7 +1899,6 @@ async function showPage(name) {
   if (name === 'automation' || name === 'security') await loadAutomation();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') await loadInvites('');
-  if (name === 'twins') await loadTwins();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2229,19 +2172,16 @@ async function loadOverview() {
   animateNum(document.getElementById('ovMembers'), currentGuild.member_count || 0);
 
   try {
-    const [modlogR, appealsR, twinsR] = await Promise.all([
+    const [modlogR, appealsR] = await Promise.all([
       apiFetch(`/api/guild/${currentGuild.id}/modlog`),
       apiFetch(`/api/guild/${currentGuild.id}/appeals?status=pending`),
-      apiFetch(`/api/guild/${currentGuild.id}/twins`),
     ]);
 
     const modlog = modlogR.ok ? await modlogR.json() : [];
     const appeals = appealsR.ok ? await appealsR.json() : [];
-    const twins = twinsR.ok ? await twinsR.json() : [];
 
     animateNum(document.getElementById('ovModlog'), modlog.length);
     animateNum(document.getElementById('ovAppeals'), appeals.length);
-    animateNum(document.getElementById('ovTwins'), twins.filter(t => !t.confirmed && !t.false_positive).length);
 
     const badge = document.getElementById('appealsBadge');
     if (appeals.length > 0) {
@@ -2486,10 +2426,6 @@ async function loadAutomation() {
     setSelect('auto-starch', a.starboard_channel);
     setVal('auto-starthr', a.starboard_threshold ?? 3);
     setSelect('auto-bdaych', a.birthday_channel);
-    const thr = a.twin_threshold ?? 80;
-    setVal('sec-twinthr', thr);
-    const tv = document.getElementById('twinThrVal');
-    if (tv) tv.textContent = thr + '%';
     csSync();
   } catch(e) {}
 }
@@ -2516,12 +2452,6 @@ function saveAutomation() {
     starboard_channel:   getVal('auto-starch') || 0,
     starboard_threshold: parseInt(getVal('auto-starthr')) || 3,
     birthday_channel:    getVal('auto-bdaych') || 0,
-  });
-}
-
-function saveSecurityPage() {
-  return postAutomation({
-    twin_threshold: parseInt(getVal('sec-twinthr')) || 80,
   });
 }
 
@@ -2653,22 +2583,6 @@ async function openMember(uid) {
         </div>
       </div>
 
-      ${(m.twins && m.twins.length) ? `
-      <div class="card">
-        <div class="card-head"><div><div class="card-title">Возможные твинки</div></div></div>
-        <div class="table-wrap" style="border:0; border-radius:0;">
-          <table class="table">
-            <thead><tr><th>Участник</th><th>Сходство</th><th>Статус</th></tr></thead>
-            <tbody>${m.twins.map(t=>`
-              <tr><td>${escapeHtml(t.name)}</td>
-              <td><strong style="color:${t.similarity>=80?'var(--danger)':'var(--warning)'}">${(t.similarity||0).toFixed(0)}%</strong></td>
-              <td>${t.confirmed?'<span class="status-pill approved">Подтверждён</span>'
-                    :t.false_positive?'<span class="status-pill rejected">Ложное</span>'
-                    :'<span class="status-pill pending">Не проверен</span>'}</td></tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>` : ''}
 
       ${(m.appeals && m.appeals.length) ? `
       <div class="card">
@@ -2702,7 +2616,7 @@ const CMDK_PAGES = [
   ['automation','🤖','Автоматизация'], ['security','🛡️','Безопасность'],
   ['member','🔍','Поиск участника'], ['modlog','📋','Mod Log'],
   ['appeals','⚖️','Апелляции'], ['banreq','🔨','Заявки на бан'],
-  ['invites','🔗','Инвайты'], ['twins','🧬','Стилометрия'],
+  ['invites','🔗','Инвайты'],
   ['appearance','🎨','Внешний вид'],
 ];
 
@@ -3014,40 +2928,6 @@ async function loadInvites(q='') {
         <td>${escapeHtml(row.note || '—')}</td>
       </tr>
     `).join('');
-  } catch(e) {}
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  TWINS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function loadTwins() {
-  if (!currentGuild) return;
-  document.getElementById('twinsTable').innerHTML = skeletonRows(6, 4);
-  try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/twins`);
-    const rows = r.ok ? await r.json() : [];
-    const tbody = document.getElementById('twinsTable');
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Твинков не обнаружено</div></div></td></tr>';
-      return;
-    }
-    tbody.innerHTML = rows.map((row, i) => {
-      const sim = row.similarity || 0;
-      const status = row.confirmed ? 'approved' : (row.false_positive ? 'rejected' : 'pending');
-      const statusText = row.confirmed ? 'Подтверждён' : (row.false_positive ? 'Ложное' : 'Не проверен');
-      return `
-        <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
-          <td>#${row.id}</td>
-          <td>${escapeHtml(row.user_a_name || row.user_a)}</td>
-          <td>${escapeHtml(row.user_b_name || row.user_b)}</td>
-          <td><strong style="color: ${sim >= 80 ? 'var(--danger)' : sim >= 70 ? 'var(--warning)' : 'var(--muted)'};">
-            ${sim.toFixed(0)}%
-          </strong></td>
-          <td><span class="status-pill ${status}">${statusText}</span></td>
-          <td class="text-mono text-muted">${(row.detected_at || '').slice(0, 10)}</td>
-        </tr>
-      `;
-    }).join('');
   } catch(e) {}
 }
 

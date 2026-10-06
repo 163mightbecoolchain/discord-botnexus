@@ -1,31 +1,27 @@
 """
 Witness — Advanced Security Module
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Префиксные команды: -q <command>
+Слэш-команда: /q subcmd:<команда>
 Доступ: только администраторы (administrator permission)
 
 Команды:
-  -q scan @user       — полный анализ участника
-  -q threat @user     — проверка через threat intelligence
-  -q graph @user      — граф связей участника
-  -q fp @user         — fingerprint профиль
-  -q nlp [текст]      — NLP анализ текста
-  -q forensics [id]   — криминалистика сообщения
-  -q sig [action_id]  — проверить подпись действия
-  -q alert            — последние алерты безопасности
-  -q network          — сетевая статистика сервера
-  -q whitelist @user  — добавить в whitelist
-  -q blacklist @user  — добавить в blacklist
-  -q status           — статус всех модулей
-  -q help             — список команд
+  /q scan @user       — полный анализ участника
+  /q threat @user     — проверка через threat intelligence
+  /q nlp [текст]      — NLP анализ текста
+  /q forensics [id]   — криминалистика сообщения
+  /q sig [action_id]  — проверить подпись действия
+  /q alert            — последние алерты безопасности
+  /q network          — сетевая статистика сервера
+  /q whitelist @user  — добавить в whitelist
+  /q blacklist @user  — добавить в blacklist
+  /q status           — статус всех модулей
+  /q help             — список команд
 
 Реализованные системы:
   ✅ Социальная инженерия (impersonation, phishing, unicode spoofing, scam)
   ✅ Криминалистика контента (EXIF, hash, дублирование)
   ✅ Цифровые подписи модераторских действий (HMAC-SHA256)
   ✅ NLP фильтрация (через Groq/Gemini)
-  ✅ Граф связей участников
-  ✅ Fingerprinting аккаунтов (поведенческий профиль)
   ✅ Базовый threat intelligence (публичные списки)
   ✅ Распределённая защита (shared threat DB между серверами)
   ✅ Статистические аномалии (замена ML)
@@ -71,31 +67,6 @@ class SC:
 async def sec_db_init():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript("""
-            -- Fingerprint профили участников
-            CREATE TABLE IF NOT EXISTS fingerprints (
-                user_id     INTEGER NOT NULL,
-                guild_id    INTEGER NOT NULL,
-                first_seen  TEXT,
-                last_seen   TEXT,
-                msg_count   INTEGER DEFAULT 0,
-                avg_msg_len REAL DEFAULT 0,
-                active_hours TEXT DEFAULT '{}',
-                join_pattern TEXT DEFAULT '{}',
-                risk_score  REAL DEFAULT 0,
-                PRIMARY KEY (user_id, guild_id)
-            );
-
-            -- Граф связей (кто с кем взаимодействует)
-            CREATE TABLE IF NOT EXISTS social_graph (
-                guild_id    INTEGER NOT NULL,
-                user_a      INTEGER NOT NULL,
-                user_b      INTEGER NOT NULL,
-                interactions INTEGER DEFAULT 0,
-                first_seen  TEXT,
-                last_seen   TEXT,
-                PRIMARY KEY (guild_id, user_a, user_b)
-            );
-
             -- Хеши контента (для дублирования)
             CREATE TABLE IF NOT EXISTS content_hashes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,14 +156,10 @@ async def sec_db_init():
 #  IN-MEMORY КЭШИ (оптимизация — не бьём БД на каждое событие)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Кэш fingerprint профилей: {(guild_id, user_id): {...}}
-_fp_cache: dict = {}
 # Кэш хешей контента: {guild_id: deque([(hash, user_id, ts), ...])}
 _content_cache: dict = defaultdict(lambda: deque(maxlen=1000))
 # Кэш поведения: {(guild_id, user_id): deque([timestamps])}
 _behavior_cache: dict = defaultdict(lambda: deque(maxlen=100))
-# Кэш interaction graph: {(guild_id, user_a, user_b): count}
-_graph_cache: dict = defaultdict(int)
 # Алерты в памяти: {guild_id: deque([alert, ...])}
 _alerts_cache: dict = defaultdict(lambda: deque(maxlen=50))
 # Whitelist/Blacklist кэш: {guild_id: {user_id: 'white'|'black'}}
@@ -519,194 +486,21 @@ async def nlp_analyze(text: str, groq_key: str = "", gemini_key: str = "") -> di
     return result
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  FINGERPRINTING
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-async def update_fingerprint(guild_id: int, user_id: int, message: discord.Message):
-    """Обновляет поведенческий профиль участника"""
-    key = (guild_id, user_id)
-    now = datetime.datetime.utcnow()
-    hour = now.hour
-
-    if key not in _fp_cache:
-        _fp_cache[key] = {
-            "msg_count": 0,
-            "total_len": 0,
-            "active_hours": defaultdict(int),
-            "first_seen": now.isoformat(),
-            "last_seen": now.isoformat(),
-            "mention_count": 0,
-            "link_count": 0,
-            "emoji_count": 0,
-            "caps_ratio_sum": 0,
-            "unique_words": set(),
-        }
-
-    fp = _fp_cache[key]
-    content = message.content or ""
-
-    fp["msg_count"] += 1
-    fp["total_len"] += len(content)
-    fp["active_hours"][hour] += 1
-    fp["last_seen"] = now.isoformat()
-    fp["mention_count"] += len(message.mentions)
-    fp["link_count"] += len(re.findall(r'https?://', content))
-    fp["emoji_count"] += len(re.findall(r'<:[^:]+:\d+>', content))
-
-    words = content.lower().split()
-    fp["unique_words"].update(words[:50])
-
-    if content and content.upper() == content and len(content) > 5:
-        fp["caps_ratio_sum"] += 1
-
-    # Периодически сохраняем в БД (каждые 50 сообщений)
-    if fp["msg_count"] % 50 == 0:
-        await _save_fingerprint(guild_id, user_id, fp)
 
 
-async def _save_fingerprint(guild_id: int, user_id: int, fp: dict):
-    """Сохраняет fingerprint в БД"""
-    avg_len = fp["total_len"] / fp["msg_count"] if fp["msg_count"] else 0
-    risk = _calculate_risk_score(fp)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO fingerprints (user_id,guild_id,first_seen,last_seen,msg_count,avg_msg_len,active_hours,risk_score)
-            VALUES (?,?,?,?,?,?,?,?)
-            ON CONFLICT(user_id,guild_id) DO UPDATE SET
-                last_seen=excluded.last_seen, msg_count=excluded.msg_count,
-                avg_msg_len=excluded.avg_msg_len, active_hours=excluded.active_hours,
-                risk_score=excluded.risk_score
-        """, (user_id, guild_id, fp["first_seen"], fp["last_seen"],
-              fp["msg_count"], round(avg_len, 1),
-              json.dumps(dict(fp["active_hours"])), round(risk, 2)))
-        await db.commit()
 
 
-def _calculate_risk_score(fp: dict) -> float:
-    """Рассчитывает risk score 0-100 на основе поведения"""
-    score = 0.0
-
-    if fp["msg_count"] > 0:
-        # Высокий процент упоминаний — подозрительно
-        mention_ratio = fp["mention_count"] / fp["msg_count"]
-        if mention_ratio > 0.5: score += 20
-        elif mention_ratio > 0.2: score += 10
-
-        # Много ссылок
-        link_ratio = fp["link_count"] / fp["msg_count"]
-        if link_ratio > 0.5: score += 25
-        elif link_ratio > 0.2: score += 10
-
-        # Много caps
-        caps_ratio = fp["caps_ratio_sum"] / fp["msg_count"]
-        if caps_ratio > 0.3: score += 15
-
-        # Очень короткие сообщения (спам-паттерн)
-        avg_len = fp["total_len"] / fp["msg_count"]
-        if avg_len < 5: score += 10
-
-        # Активность только в ночное время (UTC 0-6)
-        night_hours = sum(fp["active_hours"].get(str(h), 0) for h in range(0, 6))
-        total_hours = sum(fp["active_hours"].values()) or 1
-        if night_hours / total_hours > 0.8: score += 15
-
-        # Бедный словарный запас
-        vocab_size = len(fp.get("unique_words", set()))
-        if fp["msg_count"] > 20 and vocab_size < 10: score += 15
-
-    return min(score, 100.0)
 
 
-async def get_fingerprint_report(guild_id: int, user_id: int) -> dict:
-    """Возвращает полный fingerprint отчёт для участника"""
-    key = (guild_id, user_id)
-    fp = _fp_cache.get(key, {})
 
-    # Также проверяем БД
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT * FROM fingerprints WHERE guild_id=? AND user_id=?",
-            (guild_id, user_id)
-        ) as c:
-            row = await c.fetchone()
-
-    if not fp and not row:
-        return {"error": "Нет данных для этого участника. Нужно время для накопления профиля."}
-
-    result = {}
-    if row:
-        cols = ["user_id", "guild_id", "first_seen", "last_seen", "msg_count",
-                "avg_msg_len", "active_hours", "join_pattern", "risk_score"]
-        result = dict(zip(cols, row))
-        try:
-            result["active_hours"] = json.loads(result.get("active_hours", "{}"))
-        except Exception:
-            result["active_hours"] = {}
-
-    if fp:
-        result["risk_score"] = round(_calculate_risk_score(fp), 1)
-        result["msg_count"] = fp.get("msg_count", 0)
-        result["mention_ratio"] = round(fp["mention_count"] / max(fp["msg_count"], 1), 2)
-        result["link_ratio"] = round(fp["link_count"] / max(fp["msg_count"], 1), 2)
-        result["vocab_size"] = len(fp.get("unique_words", set()))
-
-    return result
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ГРАФ СВЯЗЕЙ
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def update_social_graph(guild_id: int, user_id: int, message: discord.Message):
-    """Обновляет граф социальных связей на основе упоминаний"""
-    if not message.mentions:
-        return
-    now = datetime.datetime.utcnow().isoformat()
-    for mentioned in message.mentions:
-        if mentioned.id == user_id or mentioned.bot:
-            continue
-        key = (guild_id, min(user_id, mentioned.id), max(user_id, mentioned.id))
-        _graph_cache[key] += 1
-
-        # Сохраняем в БД каждые 10 взаимодействий
-        if _graph_cache[key] % 10 == 0:
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute("""
-                    INSERT INTO social_graph (guild_id,user_a,user_b,interactions,first_seen,last_seen)
-                    VALUES (?,?,?,?,?,?)
-                    ON CONFLICT(guild_id,user_a,user_b) DO UPDATE SET
-                        interactions=excluded.interactions, last_seen=excluded.last_seen
-                """, (guild_id, min(user_id, mentioned.id), max(user_id, mentioned.id),
-                      _graph_cache[key], now, now))
-                await db.commit()
 
 
-async def get_social_graph(guild_id: int, user_id: int, depth: int = 1) -> dict:
-    """Возвращает граф связей участника"""
-    connections = []
-
-    # In-memory кэш
-    for (g, a, b), count in _graph_cache.items():
-        if g != guild_id: continue
-        if a == user_id: connections.append({"user_id": b, "interactions": count})
-        elif b == user_id: connections.append({"user_id": a, "interactions": count})
-
-    # БД
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT user_a, user_b, interactions FROM social_graph WHERE guild_id=? AND (user_a=? OR user_b=?) ORDER BY interactions DESC LIMIT 20",
-            (guild_id, user_id, user_id)
-        ) as c:
-            rows = await c.fetchall()
-
-    for a, b, count in rows:
-        other = b if a == user_id else a
-        if not any(c["user_id"] == other for c in connections):
-            connections.append({"user_id": other, "interactions": count})
-
-    connections.sort(key=lambda x: x["interactions"], reverse=True)
-    return {"user_id": user_id, "connections": connections[:15]}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -969,7 +763,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         if not self._is_admin(ctx):
             await ctx.send(embed=discord.Embed(
                 title="🔒 Нет доступа",
-                description="Команды `-q` доступны только администраторам.",
+                description="Команды `/q` доступны только администраторам.",
                 color=SC.CRITICAL
             ), delete_after=5)
             return False
@@ -1026,10 +820,6 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
         # Проверяем whitelist
         if _lists_cache[gid].get(uid) == "white": return
-
-        # Обновляем fingerprint и граф
-        await update_fingerprint(gid, uid, message)
-        await update_social_graph(gid, uid, message)
 
         # Проверка дублирования контента
         if message.content:
@@ -1106,7 +896,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
     #  для их чтения, а слэш-команды работают без него.
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    @app_commands.command(name="q", description="Security-инструменты (сканы, фингерпринты, форензика)")
+    @app_commands.command(name="q", description="Security-инструменты (сканы, угрозы, форензика)")
     @app_commands.describe(subcmd="Подкоманда (help — список)",
                             target="Участник или аргумент",
                             extra="Дополнительные аргументы через пробел")
@@ -1131,9 +921,9 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                 e = discord.Embed(
                     color=0xFF6B35,
                     description=(
-                        "**-q commands require Security plan**\n\n"
+                        "**/q commands require Security plan**\n\n"
                         "🛡️ **Security** — €4.99/mo\n"
-                        "Advanced threat intelligence, fingerprinting,\n"
+                        "Advanced threat intelligence,\n"
                         "NLP analysis, forensics, signed mod actions\n\n"
                         "witnessbot.gg/premium"
                     ),
@@ -1147,8 +937,6 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         handlers = {
             "scan":        self._cmd_scan,
             "threat":      self._cmd_threat,
-            "graph":       self._cmd_graph,
-            "fp":          self._cmd_fp,
             "nlp":         self._cmd_nlp,
             "forensics":   self._cmd_forensics,
             "sig":         self._cmd_sig,
@@ -1165,25 +953,23 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         if handler:
             await handler(ctx, *args)
         else:
-            await ctx.send(f"❌ Неизвестная команда `{subcmd}`. Используй `-q help`", delete_after=5)
+            await ctx.send(f"❌ Неизвестная команда `{subcmd}`. Используй `/q help`", delete_after=5)
 
     # ── -q help ───────────────────────────────────────────────
     async def _cmd_help(self, ctx, *args):
         e = self._make_embed("🔐 Witness Advanced Security", color=SC.INFO)
         cmds = [
-            ("`-q scan @user`",      "Полный анализ участника (все проверки)"),
-            ("`-q threat @user`",    "Threat Intelligence проверка"),
-            ("`-q graph @user`",     "Граф социальных связей"),
-            ("`-q fp @user`",        "Fingerprint поведенческий профиль"),
-            ("`-q nlp [текст]`",     "NLP анализ текста (токсичность/угрозы/спам)"),
-            ("`-q forensics [id]`",  "Криминалистика сообщения (EXIF, хеш, дубли)"),
-            ("`-q sig [id]`",        "Проверить подпись модераторского действия"),
-            ("`-q alert`",           "Последние алерты безопасности"),
-            ("`-q network`",         "Сетевая статистика и аномалии сервера"),
-            ("`-q whitelist @user`", "Добавить в whitelist"),
-            ("`-q blacklist @user`", "Добавить в blacklist"),
-            ("`-q report @user`",    "Отправить в глобальную базу угроз"),
-            ("`-q status`",          "Статус всех систем безопасности"),
+            ("`/q scan @user`",      "Полный анализ участника (все проверки)"),
+            ("`/q threat @user`",    "Threat Intelligence проверка"),
+            ("`/q nlp [текст]`",     "NLP анализ текста (токсичность/угрозы/спам)"),
+            ("`/q forensics [id]`",  "Криминалистика сообщения (EXIF, хеш, дубли)"),
+            ("`/q sig [id]`",        "Проверить подпись модераторского действия"),
+            ("`/q alert`",           "Последние алерты безопасности"),
+            ("`/q network`",         "Сетевая статистика и аномалии сервера"),
+            ("`/q whitelist @user`", "Добавить в whitelist"),
+            ("`/q blacklist @user`", "Добавить в blacklist"),
+            ("`/q report @user`",    "Отправить в глобальную базу угроз"),
+            ("`/q status`",          "Статус всех систем безопасности"),
         ]
         for cmd, desc in cmds:
             e.add_field(name=cmd, value=desc, inline=False)
@@ -1197,10 +983,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
         await ctx.send(f"Scanning `{member.display_name}`...", delete_after=3)
 
-        threat_task = asyncio.create_task(check_threat_intelligence(member))
-        fp_task     = asyncio.create_task(get_fingerprint_report(ctx.guild.id, member.id))
-        graph_task  = asyncio.create_task(get_social_graph(ctx.guild.id, member.id))
-        threat, fp, graph = await asyncio.gather(threat_task, fp_task, graph_task)
+        threat = await check_threat_intelligence(member)
 
         score  = threat["risk_score"]
         level  = threat["threat_level"]
@@ -1235,29 +1018,8 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         ), inline=True)
 
         # ── Колонка 3: NLP ────────────────────────────────────
-        nlp_val = "No data yet\n*(use `-q nlp` to analyze)*"
+        nlp_val = "No data yet\n*(use `/q nlp` to analyze)*"
         e.add_field(name="NLP", value=nlp_val, inline=True)
-
-        # ── Fingerprint ───────────────────────────────────────
-        if "error" not in fp:
-            e.add_field(name="Fingerprint", value=(
-                f"Messages: **{fp.get('msg_count', 0):,}**\n"
-                f"Avg length: **{fp.get('avg_msg_len', 0):.0f}** chars\n"
-                f"FP risk: **{fp.get('risk_score', 0):.0f}/100**"
-            ), inline=True)
-        else:
-            e.add_field(name="Fingerprint", value="Not enough data yet", inline=True)
-
-        # ── Связи ─────────────────────────────────────────────
-        conn_count = len(graph.get("connections", []))
-        if conn_count > 0:
-            top = graph["connections"][:3]
-            lines = []
-            for c in top:
-                u = ctx.guild.get_member(c["user_id"])
-                name = u.display_name if u else f"ID:{c['user_id']}"
-                lines.append(f"**{name}** — {c['interactions']}x")
-            e.add_field(name=f"Connections ({conn_count})", value="\n".join(lines), inline=True)
 
         # ── Угрозы ────────────────────────────────────────────
         if threat["threats"]:
@@ -1303,96 +1065,12 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
         await ctx.send(embed=e)
 
-    # ── -q graph @user ────────────────────────────────────────
-    async def _cmd_graph(self, ctx, *args):
-        member = await self._resolve_member(ctx, args)
-        if not member: return
 
-        graph = await get_social_graph(ctx.guild.id, member.id)
-        connections = graph.get("connections", [])
-
-        e = self._make_embed(
-            f"🕸️ Граф связей: {member.display_name}",
-            color=SC.INFO
-        )
-        e.set_thumbnail(url=member.display_avatar.url)
-
-        if not connections:
-            e.description = "Нет данных о взаимодействиях. Нужно время для накопления."
-        else:
-            lines = []
-            for c in connections[:10]:
-                u = ctx.guild.get_member(c["user_id"])
-                name = u.display_name if u else f"ID:{c['user_id']}"
-                bar = "█" * min(c["interactions"] // 5 + 1, 10)
-                lines.append(f"**{name}** `{bar}` {c['interactions']} взаим.")
-            e.description = "\n".join(lines)
-            e.add_field(name="Всего связей", value=str(len(connections)), inline=True)
-
-            # Детектируем подозрительные кластеры
-            if len(connections) > 10:
-                new_accounts = []
-                for c in connections[:10]:
-                    u = ctx.guild.get_member(c["user_id"])
-                    if u:
-                        age = (datetime.datetime.utcnow() - u.created_at.replace(tzinfo=None)).days
-                        if age < 30:
-                            new_accounts.append(u.display_name)
-                if len(new_accounts) > 3:
-                    e.add_field(
-                        name="⚠️ Подозрительный кластер",
-                        value=f"{len(new_accounts)} новых аккаунтов среди связей: {', '.join(new_accounts[:3])}...",
-                        inline=False
-                    )
-
-        await ctx.send(embed=e)
-
-    # ── -q fp @user ───────────────────────────────────────────
-    async def _cmd_fp(self, ctx, *args):
-        member = await self._resolve_member(ctx, args)
-        if not member: return
-
-        fp = await get_fingerprint_report(ctx.guild.id, member.id)
-
-        if "error" in fp:
-            return await ctx.send(embed=self._make_embed("❓ Fingerprint", fp["error"], SC.NEUTRAL))
-
-        risk = fp.get("risk_score", 0)
-        color = self._risk_color(risk)
-        e = self._make_embed(f"🧬 Fingerprint: {member.display_name}", color=color)
-        e.set_thumbnail(url=member.display_avatar.url)
-
-        bar = "█" * round(risk / 10) + "░" * (10 - round(risk / 10))
-        e.add_field(name="Risk Score", value=f"`{bar}` **{risk:.0f}/100**", inline=True)
-        e.add_field(name="Сообщений", value=f"**{fp.get('msg_count', 0):,}**", inline=True)
-        e.add_field(name="Ср. длина", value=f"**{fp.get('avg_msg_len', 0):.0f}** симв.", inline=True)
-
-        if fp.get("mention_ratio") is not None:
-            e.add_field(name="Упоминания/сообщ.", value=f"**{fp['mention_ratio']:.0%}**", inline=True)
-        if fp.get("link_ratio") is not None:
-            e.add_field(name="Ссылки/сообщ.", value=f"**{fp['link_ratio']:.0%}**", inline=True)
-        if fp.get("vocab_size"):
-            e.add_field(name="Словарный запас", value=f"**{fp['vocab_size']}** уник. слов", inline=True)
-
-        # Активность по часам
-        hours = fp.get("active_hours", {})
-        if hours:
-            peak_hour = max(hours, key=hours.get, default="?")
-            e.add_field(name="Пик активности", value=f"**{peak_hour}:00 UTC**", inline=True)
-            # Ночная активность
-            night = sum(hours.get(str(h), 0) for h in range(0, 6))
-            total = sum(hours.values()) or 1
-            if night / total > 0.7:
-                e.add_field(name="⚠️ Аномалия", value="Преимущественно ночная активность (UTC 0-6)", inline=False)
-
-        e.add_field(name="Первый раз", value=fp.get("first_seen", "?")[:10], inline=True)
-        e.add_field(name="Последний раз", value=fp.get("last_seen", "?")[:10], inline=True)
-        await ctx.send(embed=e)
 
     # ── -q nlp [текст] ────────────────────────────────────────
     async def _cmd_nlp(self, ctx, *args):
         if not args:
-            return await ctx.send("❌ Использование: `-q nlp [текст для анализа]`", delete_after=5)
+            return await ctx.send("❌ Использование: `/q nlp [текст для анализа]`", delete_after=5)
 
         text = " ".join(args)
         await ctx.send("🔍 Анализирую текст...", delete_after=2)
@@ -1427,7 +1105,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
     # ── -q forensics [message_id] ─────────────────────────────
     async def _cmd_forensics(self, ctx, *args):
         if not args:
-            return await ctx.send("❌ Использование: `-q forensics [ID сообщения]`", delete_after=5)
+            return await ctx.send("❌ Использование: `/q forensics [ID сообщения]`", delete_after=5)
 
         try:
             msg_id = int(args[0])
@@ -1493,7 +1171,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
     # ── -q sig [action_id] ────────────────────────────────────
     async def _cmd_sig(self, ctx, *args):
         if not args:
-            return await ctx.send("❌ Использование: `-q sig [ID действия]`", delete_after=5)
+            return await ctx.send("❌ Использование: `/q sig [ID действия]`", delete_after=5)
 
         try:
             action_id = int(args[0])
@@ -1591,26 +1269,9 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
             alert_summary = " · ".join(f"{self._risk_emoji(sev)} {cnt}" for sev, cnt in alert_rows)
             e.add_field(name="🚨 Алертов за 24ч", value=alert_summary, inline=False)
 
-        # Топ риск-скор участников из кэша
-        risky = []
-        for (gid, uid), fp in _fp_cache.items():
-            if gid != guild.id: continue
-            risk = _calculate_risk_score(fp)
-            if risk > 40:
-                risky.append((uid, risk))
-        risky.sort(key=lambda x: x[1], reverse=True)
-
-        if risky:
-            lines = []
-            for uid, risk in risky[:5]:
-                m = guild.get_member(uid)
-                name = m.display_name if m else str(uid)
-                lines.append(f"{self._risk_emoji('HIGH' if risk>60 else 'MEDIUM')} **{name}** — {risk:.0f}/100")
-            e.add_field(name="⚠️ Топ по риску (FP)", value="\n".join(lines), inline=False)
-
         # Активность систем
         e.add_field(name="🟢 Активные системы", value=(
-            "Fingerprinting · Social Graph · Phishing Detection\n"
+            "Phishing Detection\n"
             "Duplicate Content · Threat Intelligence · Alerts"
         ), inline=False)
 
@@ -1666,8 +1327,6 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         e = self._make_embed("🛡️ Статус Advanced Security", color=SC.LOW)
 
         systems = [
-            ("🧬 Fingerprinting",       len(_fp_cache), "профилей в памяти"),
-            ("🕸️ Social Graph",         len(_graph_cache), "связей в памяти"),
             ("📋 Content Hashes",       sum(len(v) for v in _content_cache.values()), "хешей в памяти"),
             ("🚨 Алерты",               sum(len(v) for v in _alerts_cache.values()), "в памяти"),
             ("⛔ Черный список",        sum(1 for v in _lists_cache.values() for t in v.values() if t=="black"), "записей"),
@@ -1702,7 +1361,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                 for m in ctx.guild.members:
                     if m.display_name.lower().startswith(name) or m.name.lower().startswith(name):
                         return m
-        await ctx.send("❌ Укажи участника: `-q scan @user` или `-q scan ID`", delete_after=5)
+        await ctx.send("❌ Укажи участника: `/q scan @user` или `/q scan ID`", delete_after=5)
         return None
 
 
@@ -1715,11 +1374,6 @@ async def security_maintenance_loop(bot: commands.Bot):
     await bot.wait_until_ready()
     while not bot.is_closed():
         try:
-            # Сохраняем fingerprints в БД каждые 10 минут
-            for (guild_id, user_id), fp in list(_fp_cache.items()):
-                if fp.get("msg_count", 0) > 0:
-                    await _save_fingerprint(guild_id, user_id, fp)
-
             # Очищаем старые алерты из памяти (старше 24 часов)
             cutoff = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).isoformat()
             for guild_id in _alerts_cache:

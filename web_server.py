@@ -18,7 +18,6 @@ Routes:
   GET  /api/guild/:id/channels   — Channels + roles
   GET  /api/guild/:id/modlog     — Mod log
   GET  /api/guild/:id/invites    — Invite stats + search
-  GET  /api/guild/:id/twins      — Twin links
   GET  /api/guild/:id/appeals    — Appeals list
 """
 
@@ -683,49 +682,6 @@ async def api_invites(request):
     except Exception:
         return web.json_response([])
 
-# ── API: twins ────────────────────────────────────────────────
-
-@require_auth
-async def api_twins(request):
-    guild_id = int(request.match_info['guild_id'])
-    s        = request['session']
-    bot      = request.app['bot']
-
-    bg = bot.get_guild(guild_id)
-    if not bg:
-        return web.json_response([])
-    member = bg.get_member(int(s['user_id']))
-    if not member or not member.guild_permissions.manage_messages:
-        return web.json_response({'error': 'Forbidden'}, status=403)
-
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("""
-                SELECT id, user_a, user_b, similarity, reasons,
-                       confirmed, false_positive, detected_at
-                FROM twin_links WHERE guild_id=?
-                ORDER BY similarity DESC LIMIT 50
-            """, (guild_id,)) as c:
-                rows = await c.fetchall()
-        result = []
-        for lid, ua, ub, sim, reasons, conf, fp, ts in rows:
-            ma = bg.get_member(ua)
-            mb = bg.get_member(ub)
-            result.append({
-                'id':           lid,
-                'user_a':       ua,
-                'user_a_name':  ma.display_name if ma else None,
-                'user_b':       ub,
-                'user_b_name':  mb.display_name if mb else None,
-                'similarity':   sim,
-                'reasons':      reasons,
-                'confirmed':    conf,
-                'false_positive': fp,
-                'detected_at':  ts,
-            })
-        return web.json_response(result)
-    except Exception:
-        return web.json_response([])
 
 # ── API: Discord Activity ─────────────────────────────────────
 
@@ -865,11 +821,6 @@ async def api_automation_get(request):
             out['starboard_channel']  = str(g[0]) if g and g[0] else ''
             out['starboard_threshold']= (g[1] if g and g[1] else 3)
             out['birthday_channel']   = str(g[2]) if g and g[2] else ''
-
-            async with db.execute(
-                "SELECT twin_threshold FROM guild_settings WHERE guild_id=?", (guild_id,)) as c:
-                t = await c.fetchone()
-            out['twin_threshold'] = (t[0] if t and t[0] else 80)
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
     return web.json_response(out)
@@ -917,14 +868,12 @@ async def api_automation_post(request):
                 'starboard_channel':   'starboard_channel',
                 'starboard_threshold': 'starboard_threshold',
                 'birthday_channel':    'birthday_channel',
-                'twin_threshold':      'twin_threshold',
             }
             for key, col in gs_map.items():
                 if key in data:
                     v = data[key]
                     v = int(v or 0)
                     if key == 'starboard_threshold': v = max(1, min(100, v or 3))
-                    if key == 'twin_threshold':      v = max(50, min(99, v or 80))
                     await db.execute(
                         f"INSERT INTO guild_settings (guild_id, {col}) VALUES (?,?) "
                         f"ON CONFLICT(guild_id) DO UPDATE SET {col}=excluded.{col}",
@@ -971,7 +920,7 @@ async def api_member_lookup(request):
     }
     # Каждый блок изолирован: сбой одной выборки не должен ронять всё досье
     out.update({'warns': 0, 'history': [], 'appeals': [],
-                'twins': [], 'active_mute': None})
+                'active_mute': None})
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             try:
@@ -1021,26 +970,6 @@ async def api_member_lookup(request):
                     }
             except Exception as ex:
                 print(f"[LOOKUP] invite_log: {ex}")
-
-            try:
-                async with db.execute("""
-                    SELECT user_a, user_b, similarity, confirmed, false_positive
-                    FROM twin_links
-                    WHERE guild_id=? AND (user_a=? OR user_b=?)
-                    ORDER BY similarity DESC LIMIT 10
-                """, (guild_id, uid, uid)) as c:
-                    twins = []
-                    for a, b, sim, conf, fp in await c.fetchall():
-                        other = b if a == uid else a
-                        om = bg.get_member(other)
-                        twins.append({'user_id': str(other),
-                                      'name': om.display_name if om else str(other),
-                                      'similarity': sim or 0,
-                                      'confirmed': bool(conf),
-                                      'false_positive': bool(fp)})
-                    out['twins'] = twins
-            except Exception as ex:
-                print(f"[LOOKUP] twin_links: {ex}")
 
             try:
                 async with db.execute("""
@@ -1422,7 +1351,6 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/channels',              api_channels),
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),
-        ('GET',  '/guild/{guild_id}/twins',                 api_twins),
         ('GET',  '/guild/{guild_id}/appeals',               api_appeals),
         ('POST', '/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action),
         ('GET',  '/guild/{guild_id}/automation',            api_automation_get),

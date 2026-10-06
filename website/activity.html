@@ -583,7 +583,6 @@ async function openM(uid) {
   if (m.timed_out) chips.push('<span class="chip warn">в муте</span>');
   if (m.warns)   chips.push(`<span class="chip ${m.warns >= 3 ? "danger" : "warn"}">варнов ${m.warns}/3</span>`);
   if (!m.warns && m.on_server) chips.push('<span class="chip ok">чисто</span>');
-  if (m.twins && m.twins.length) chips.push(`<span class="chip danger">твинков ${m.twins.length}</span>`);
 
   box.innerHTML = `
    <div class="card">
