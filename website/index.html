@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<meta name="description" content="Продвинутая модерация Discord: стилометрия твинков, апелляции, авто-наказания, анти-нюк">
+<meta name="description" content="Продвинутая модерация Discord: логи сервера, антифишинг, апелляции, авто-наказания, анти-нюк">
 
 <style>
 :root {
@@ -344,8 +344,8 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
     <div class="hero-tag">SYSTEM ONLINE · v4.2</div>
     <h1>Discord-модерация на<br><span class="accent">профессиональном уровне</span></h1>
     <p class="hero-sub">
-      Стилометрия для детекта твинков, апелляционная система с авто-снятием наказаний,
-      прогрессивные наказания и анти-нюк. Всё что нужно команде модераторов в одном боте.
+      Подробные логи сервера, защита от фишинга и скама, апелляционная система
+      с авто-снятием наказаний, прогрессивные наказания и анти-нюк. Всё что нужно команде модераторов в одном боте.
     </p>
     <div class="hero-cta">
       <a href="__INVITE_URL__" class="btn btn-primary btn-lg">Добавить на сервер →</a>
@@ -376,9 +376,9 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
 
     <div class="features">
       <div class="feature">
-        <div class="feature-icon">🧬</div>
-        <h3>Стилометрия твинков</h3>
-        <p>Детект альт-аккаунтов по стилю письма: опечатки, биграммы, длина предложений, паттерны. Сравнение с базой забаненных.</p>
+        <div class="feature-icon">🎣</div>
+        <h3>Антифишинг и анти-скам</h3>
+        <p>Проверка ссылок в сообщениях на фишинг, фейковые раздачи Nitro и скам. Алерт модераторам в лог-канал.</p>
       </div>
 
       <div class="feature">
@@ -412,9 +412,9 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
       </div>
 
       <div class="feature">
-        <div class="feature-icon">🤖</div>
-        <h3>AI-объяснение твинков</h3>
-        <p>Когда бот находит похожих участников, AI объясняет модератору человеческим языком почему совпадение.</p>
+        <div class="feature-icon">📝</div>
+        <h3>Логи сервера</h3>
+        <p>Входы и выходы, баны, удалённые и изменённые сообщения, инвайты, роли и каналы — в выбранный лог-канал.</p>
       </div>
 
       <div class="feature">
@@ -450,10 +450,9 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
           <span class="line"><span class="success">✓ Таймаут 7 дней автоматически</span></span>
           <span class="line"><span class="success">✓ DM с кнопкой апелляции отправлен</span></span>
           <span class="line">&nbsp;</span>
-          <span class="line"><span class="dim">$</span> <span class="cmd">/twincheck</span> <span class="muted-text">@user1 @user2</span></span>
-          <span class="line"><span class="warn">⚠ Сходство стиля: 87%</span></span>
-          <span class="line"><span class="muted-text">  Опечатки: кароч, потамушта, щас</span></span>
-          <span class="line"><span class="muted-text">  Биграммы: 91% совпадение</span></span>
+          <span class="line"><span class="warn">⚠ Обнаружен фишинг в #general</span></span>
+          <span class="line"><span class="muted-text">  Тип: фейковая раздача Nitro</span></span>
+          <span class="line"><span class="success">✓ Алерт отправлен в лог-канал</span></span>
           <span class="line">&nbsp;</span>
           <span class="line"><span class="dim">$</span> <span class="cmd">/appeal</span> <span class="muted-text">accept 42</span></span>
           <span class="line"><span class="success">✓ Апелляция #42 принята</span></span>
@@ -486,16 +485,16 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
         </div>
       </div>
       <div class="tech-item">
-        <div class="tech-item-icon">🗜️</div>
+        <div class="tech-item-icon">🔐</div>
         <div class="tech-item-text">
-          <strong>zlib compression</strong>
-          <small>73% экономия на стилометрии</small>
+          <strong>HMAC-подписи</strong>
+          <small>Действия модераторов нельзя подделать</small>
         </div>
       </div>
       <div class="tech-item">
         <div class="tech-item-icon">🧠</div>
         <div class="tech-item-text">
-          <strong>Groq + Gemini</strong>
+          <strong>Groq + Gemini + Claude</strong>
           <small>Fallback цепочка AI</small>
         </div>
       </div>
