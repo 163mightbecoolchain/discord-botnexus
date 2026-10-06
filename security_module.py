@@ -835,7 +835,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                 await create_alert(gid, "phishing_detected", "HIGH", uid,
                                    f"Обнаружен фишинг/скам: {findings[0]['type']}", {"findings": findings})
                 # Пробуем отправить алерт в лог-канал
-                from main import get_log_ch  # import из основного файла
+                from witness.database import get_log_ch
                 ch = await get_log_ch(message.guild)
                 if ch:
                     e = self._make_embed("🎣 Обнаружен фишинг/скам!", color=SC.CRITICAL)
@@ -868,7 +868,7 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                                {"threats": threat["threats"]})
 
             try:
-                from main import get_log_ch
+                from witness.database import get_log_ch
                 ch = await get_log_ch(member.guild)
                 if ch:
                     color = self._risk_color(threat["risk_score"])
@@ -915,7 +915,8 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         if not await self._check_admin(ctx): return
         # Check Security tier
         try:
-            from main import get_tier, TIER_SECURITY
+            from witness.core import get_tier
+            from witness.config import TIER_SECURITY
             tier = await get_tier(ctx.guild.id)
             if tier < TIER_SECURITY:
                 e = discord.Embed(
