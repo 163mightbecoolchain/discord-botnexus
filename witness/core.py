@@ -169,7 +169,8 @@ intents.message_content = os.getenv("INTENT_MESSAGE_CONTENT", "1") != "0"
 # Message Content Intent, а весь функционал переехал на слэш-команды.
 # Префикс задан заведомо недостижимым — команды по тексту не сработают.
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
-OWNER_IDS = set()  # {YOUR_USER_ID}
+# ID владельцев бота через запятую или пробел: OWNER_IDS=123,456
+OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "").replace(",", " ").split() if x.isdigit()}
 
 def upsell_embed(req):
     e = make_embed(
