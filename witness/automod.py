@@ -52,8 +52,6 @@ SUSPICIOUS_REGEX = [
     r"(?i)(?:free|бесплатн)[^\n]{0,40}nitro|nitro[^\n]{0,40}(?:free|бесплатн)",
     r"(?i)claim[^\n]{0,30}nitro|nitro[^\n]{0,30}claim",
     r"(?i)free[^\n]{0,30}steam",
-    # окно короткое: длинное Discord отклоняет как «exceeded size limit»
-    r"(?i)@everyone[^\n]{0,50}https?://",
     r"(?i)send.{1,20}(?:btc|eth|usdt|crypto).{1,20}(?:back|return|double)",
     r"(?i)(?:double|2x|triple).{1,30}(?:bitcoin|eth|crypto)",
     r"(?i)investment.{1,50}(?:profit|return|guarantee)",
