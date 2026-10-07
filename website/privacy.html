@@ -69,6 +69,14 @@ code {
   border-radius: 10px; padding: 1.1rem 1.3rem; margin: 1.5rem 0;
 }
 .callout.warn { border-left-color: var(--danger); }
+.lang-switch { display: flex; gap: .5rem; justify-content: flex-end; margin-bottom: 1rem; }
+.lang-switch button {
+  background: var(--bg-3); color: inherit; border: 1px solid var(--border);
+  border-radius: 6px; padding: .35rem .8rem; font: inherit; cursor: pointer;
+}
+.lang-switch button.active { border-color: var(--accent); color: var(--accent); }
+[data-lang] { display: none; }
+[data-lang].shown { display: block; }
 .callout p:last-child { margin-bottom: 0; }
 table {
   width: 100%; border-collapse: collapse; margin: 1.2rem 0;
@@ -103,8 +111,14 @@ footer a:hover { color: var(--accent); }
 </header>
 
 <main>
+  <div class="lang-switch">
+    <button type="button" data-set-lang="en">English</button>
+    <button type="button" data-set-lang="ru">Русский</button>
+  </div>
+
+<div data-lang="ru" lang="ru">
   <h1>Политика конфиденциальности</h1>
-  <div class="updated">Последнее обновление: 6 октября 2026</div>
+  <div class="updated">Последнее обновление: 7 октября 2026</div>
 
   <p>
     Witness — бот для модерации Discord-серверов. Этот документ описывает, какие данные
@@ -135,6 +149,8 @@ footer a:hover { color: var(--accent); }
     <li>
       <strong>Проверка на фишинг и скам.</strong> Новые сообщения проверяются в оперативной памяти.
       При срабатывании модераторам в лог-канал сервера отправляется алерт с фрагментом сообщения.
+      В базе сохраняется только запись об алерте: тип угрозы, сработавшее правило и, для поддельных
+      ссылок, сама подозрительная ссылка — до 90 дней.
     </li>
     <li>
       <strong>Проверка на дублирование (спам).</strong> В базе хранится только хеш текста
@@ -257,11 +273,175 @@ footer a:hover { color: var(--accent); }
     бота после изменений означает согласие с новой редакцией.
   </p>
 
-  <h2>9. Контакты</h2>
+  <h2>9. Контакты и удаление данных</h2>
   <p>
     По вопросам обработки данных и запросам на удаление —
     <a href="__SUPPORT_URL__" style="color: var(--accent);">сервер поддержки Witness</a>.
+    Запросы обрабатываются вручную.
   </p>
+</div>
+
+<div data-lang="en" lang="en">
+  <h1>Privacy Policy</h1>
+  <div class="updated">Last updated: October 7, 2026</div>
+
+  <p>
+    Witness is a moderation bot for Discord servers. This document explains what data
+    the bot processes, why, how long it is kept and how to have it deleted. By using
+    Witness, a server administrator agrees to the data processing described here.
+  </p>
+
+  <div class="callout">
+    <p>
+      <strong>In short.</strong> Witness does not build user profiles and does not store conversations.
+      The bot reads message content only for moderation: phishing and scam detection,
+      logs of deleted and edited messages, and commands that a member runs themselves.
+      Data is never sold and is not used for advertising or for training any models.
+    </p>
+  </div>
+
+  <h2>1. What data is processed</h2>
+
+  <h3>Identifiers</h3>
+  <ul>
+    <li><strong>Discord User ID and display name</strong> — to link an action to a member</li>
+    <li><strong>Guild ID (server ID)</strong> — settings and records are kept separately for each server</li>
+    <li><strong>Channel and Role IDs</strong> — for logging, quarantine and reaction role settings</li>
+  </ul>
+
+  <h3>Message content</h3>
+  <ul>
+    <li>
+      <strong>Phishing and scam detection.</strong> New messages are checked in memory.
+      On a match, moderators receive an alert with an excerpt of the message in the server's log channel.
+      The database keeps only the alert record: threat type, matched rule and, for spoofed links,
+      the flagged link itself — for up to 90 days.
+    </li>
+    <li>
+      <strong>Duplicate (spam) detection.</strong> Only a one-way hash of the text is stored,
+      never the text itself — for 7 days.
+    </li>
+    <li>
+      <strong>Images.</strong> The bot checks image metadata for GPS coordinates and warns
+      moderators. Images are not stored.
+    </li>
+    <li>
+      <strong>Server logs.</strong> If an administrator enables logging, the text of deleted and
+      edited messages is posted to that server's log channel. It is not written to the bot's database.
+    </li>
+  </ul>
+
+  <h3>Moderation records</h3>
+  <ul>
+    <li>Warnings, timeouts, kicks, bans: who, whom, when, reason, duration</li>
+    <li>Appeals: the member's appeal text and the moderator's decision</li>
+    <li>Ban requests and security alerts</li>
+  </ul>
+
+  <h3>Data members enter themselves</h3>
+  <ul>
+    <li>Texts of reminders, suggestions and invite notes</li>
+    <li>Date of birth — only if the member set it with a command</li>
+    <li>In-game names — for game commands and Albion account linking</li>
+  </ul>
+
+  <h3>Service data</h3>
+  <ul>
+    <li>Invite tracking: invite code, who created it, who joined with it</li>
+    <li>Levels and coins: counters only, no message text</li>
+    <li>Messages per hour (for server statistics) — in memory only, not linked to members</li>
+    <li>Dashboard login tokens — in a signed cookie in the user's browser, not in the database</li>
+  </ul>
+
+  <h3>Shared threat list</h3>
+  <p>
+    An administrator can manually flag a member as a threat (<code>/q report</code>).
+    The list shared across all servers stores: User ID, threat level, reason, number of reports
+    and the IDs of the servers that reported. Other servers using the bot see this flag when checking the member.
+  </p>
+
+  <h2>2. Why this is needed</h2>
+  <table>
+    <tr><th>Data</th><th>Purpose</th></tr>
+    <tr><td>Message checks</td><td>Protecting members from phishing, scams and spam</td></tr>
+    <tr><td>Moderation log</td><td>History of decisions, transparency of moderation</td></tr>
+    <tr><td>Appeals</td><td>A way to dispute a punishment</td></tr>
+    <tr><td>Invite tracking</td><td>Traffic sources and raid protection</td></tr>
+    <tr><td>Server settings</td><td>Making bot features follow the server's rules</td></tr>
+  </table>
+
+  <h2>3. Retention</h2>
+  <table>
+    <tr><th>Record type</th><th>Kept for</th></tr>
+    <tr><td>Message hashes (spam detection)</td><td>7 days</td></tr>
+    <tr><td>Security alerts</td><td>30–90 days</td></tr>
+    <tr><td>Invite log</td><td>90 days</td></tr>
+    <tr><td>Automatic moderation records</td><td>180 days</td></tr>
+    <tr><td>Closed tickets</td><td>60 days</td></tr>
+    <tr><td>Completed reminders</td><td>7 days</td></tr>
+    <tr><td>Server settings</td><td>While the bot is on the server</td></tr>
+    <tr><td>Dashboard session</td><td>30 days</td></tr>
+  </table>
+  <p>
+    Removing the bot from a server stops data collection. To delete all stored records,
+    the administrator can contact support.
+  </p>
+
+  <h2>4. Where and how data is stored</h2>
+  <p>
+    The <code>SQLite</code> database is hosted on a private volume at our hosting provider (Railway)
+    and is accessible only by the bot process; there is no external access to it. Data is encrypted
+    at rest at the storage level by the hosting provider. The dashboard uses HTTPS, and login goes
+    through Discord's official OAuth2 — the bot never receives or knows your Discord password.
+  </p>
+
+  <h2>5. Third parties</h2>
+  <p>Data is <strong>never sold</strong>. Only what is necessary is shared with:</p>
+  <ul>
+    <li><strong>Discord</strong> — the platform the bot runs on</li>
+    <li><strong>Railway</strong> — hosting for the bot and its database</li>
+    <li>
+      <strong>Groq, Google Gemini, Anthropic</strong> — AI providers. They receive only what a command
+      the user ran needs: the question in <code>/ai</code> and <code>/askalbion</code>, the text in
+      <code>/translate</code>, the last messages of the channel (up to 50, with display names) in
+      <code>/summarize</code>, a member's name and roles in <code>/roast</code>.
+      Messages are never sent to AI providers automatically, without a command.
+    </li>
+    <li><strong>Pollinations</strong> — the image description in <code>/imagine</code></li>
+    <li>
+      <strong>Game APIs</strong> (Albion Online, Riot, Steam, Lost Ark, weather services) —
+      the name or query entered in a game command
+    </li>
+  </ul>
+
+  <h2>6. Your rights</h2>
+  <ul>
+    <li><strong>Find out what data is stored</strong> — via the server administrator or support</li>
+    <li><strong>Dispute a punishment</strong> — through the appeal system in the bot's DMs</li>
+    <li><strong>Request deletion</strong> — by contacting the server administrator or support</li>
+    <li><strong>Opt out of processing</strong> — by leaving the server where the bot is used</li>
+  </ul>
+
+  <h2>7. Children</h2>
+  <p>
+    Discord does not allow users under 13 (or the minimum age set by local law in some countries).
+    Witness does not knowingly collect data from such users. If we learn that data belongs to a person
+    below the permitted age, it will be deleted.
+  </p>
+
+  <h2>8. Changes to this policy</h2>
+  <p>
+    When the policy changes materially, the date at the top is updated and a notice is posted
+    on the support server. Continued use of the bot after changes means acceptance of the new version.
+  </p>
+
+  <h2>9. Contact and data deletion</h2>
+  <p>
+    For questions about data processing and deletion requests, contact us on the
+    <a href="__SUPPORT_URL__" style="color: var(--accent);">Witness support server</a>.
+    Requests are handled manually.
+  </p>
+</div>
 </main>
 
 <footer>
@@ -270,6 +450,27 @@ footer a:hover { color: var(--accent); }
   <a href="__SUPPORT_URL__">Поддержка</a>
   <div style="margin-top:.8rem; font-family: var(--mono); font-size:.8rem;">© 2026 Witness</div>
 </footer>
+<script>
+(function () {
+  // English by default; Russian for Russian-language browsers or ?lang=ru
+  var q = new URLSearchParams(location.search).get('lang');
+  var lang = (q === 'ru' || q === 'en') ? q
+           : ((navigator.language || '').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en');
+  function show(l) {
+    document.querySelectorAll('[data-lang]').forEach(function (el) {
+      el.classList.toggle('shown', el.getAttribute('data-lang') === l);
+    });
+    document.querySelectorAll('[data-set-lang]').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-set-lang') === l);
+    });
+    document.documentElement.lang = l;
+  }
+  document.querySelectorAll('[data-set-lang]').forEach(function (b) {
+    b.addEventListener('click', function () { show(b.getAttribute('data-set-lang')); });
+  });
+  show(lang);
+})();
+</script>
 
 </body>
 </html>
