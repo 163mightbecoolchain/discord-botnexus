@@ -52,7 +52,8 @@ SUSPICIOUS_REGEX = [
     r"(?i)(?:free|бесплатн)[^\n]{0,40}nitro|nitro[^\n]{0,40}(?:free|бесплатн)",
     r"(?i)claim[^\n]{0,30}nitro|nitro[^\n]{0,30}claim",
     r"(?i)free[^\n]{0,30}steam",
-    r"(?i)@everyone[\s\S]{0,300}https?://",
+    # окно короткое: длинное Discord отклоняет как «exceeded size limit»
+    r"(?i)@everyone[^\n]{0,50}https?://",
     r"(?i)send.{1,20}(?:btc|eth|usdt|crypto).{1,20}(?:back|return|double)",
     r"(?i)(?:double|2x|triple).{1,30}(?:bitcoin|eth|crypto)",
     r"(?i)investment.{1,50}(?:profit|return|guarantee)",
@@ -123,8 +124,15 @@ async def sync_guild(guild: discord.Guild):
         return
     ours = {r.name: r for r in existing
             if r.creator_id == bot.user.id and r.name.startswith(RULE_PREFIX)}
+    # Правило спама на сервере может быть только одно. Если его уже завёл
+    # админ или другой бот — сервер и так защищён, своё не создаём.
+    foreign_spam = any(r.trigger.type == TriggerType.spam and r.id not in {o.id for o in ours.values()}
+                       for r in existing)
 
-    for name, spec in _desired_rules(log_ch.id if log_ch else None).items():
+    desired = _desired_rules(log_ch.id if log_ch else None)
+    if foreign_spam:
+        desired[RULE_SPAM] = None
+    for name, spec in desired.items():
         rule = ours.get(name)
         try:
             if spec is None:
