@@ -9,6 +9,7 @@ import os, asyncio, random, time, json, datetime
 from datetime import timedelta
 from .config import (
     DB_PATH,
+    EVENT_LOGS,
     SUPPORT_URL,
     TIER_FREE,
     TIER_PREMIUM,
@@ -783,6 +784,7 @@ async def on_thread_create(thread):
 
 @bot.event
 async def on_interaction(interaction):
+    if not EVENT_LOGS: return
     if not await is_enabled(interaction.guild_id, "slash_commands"): return
     if interaction.type != discord.InteractionType.application_command: return
     ch = await get_log_ch(interaction.guild)

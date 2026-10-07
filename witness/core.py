@@ -11,6 +11,7 @@ from functools import wraps
 from .config import (
     ANTHROPIC_KEY,
     DB_PATH,
+    EVENT_LOGS,
     GEMINI_KEY,
     GEMINI_MODEL,
     GROQ_KEY,
@@ -150,6 +151,7 @@ async def notify_tier_expired(gid: int, old_tier: int):
         print(f"[TIER] notify error: {ex}")
 
 async def sec_check(guild, key):
+    if not EVENT_LOGS: return None
     if await get_tier(guild.id) < TIER_PREMIUM: return None
     if not await is_enabled(guild.id, key): return None
     return await get_log_ch(guild)

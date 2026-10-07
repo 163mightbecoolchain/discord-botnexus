@@ -25,6 +25,9 @@ SHEET_ID      = os.getenv("SHEET_ID")
 DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 # Security module
 HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!
+# EVENT_LOGS=0 глушит логи действий участников на всех серверах (например, когда
+# на сервере уже логирует другой бот). Алерты анти-рейда и анти-спама остаются.
+EVENT_LOGS      = os.getenv("EVENT_LOGS", "1") != "0"
 ALBION_BASE   = "https://gameinfo.albiononline.com/api/gameinfo"
 ALBION_DATA   = "https://west.albion-online-data.com/api/v2"
 
