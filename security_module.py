@@ -911,29 +911,12 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         await self.q_dispatch(ctx, subcmd, *args)
 
     async def q_dispatch(self, ctx, subcmd: str = "help", *args):
-        """Диспетчер -q команд — требует Security tier"""
+        """Диспетчер -q команд — требует Premium"""
         if not await self._check_admin(ctx): return
-        # Check Security tier
-        try:
-            from witness.core import get_tier
-            from witness.config import TIER_SECURITY
-            tier = await get_tier(ctx.guild.id)
-            if tier < TIER_SECURITY:
-                e = discord.Embed(
-                    color=0xFF6B35,
-                    description=(
-                        "**/q commands require Security plan**\n\n"
-                        "🛡️ **Security** — €4.99/mo\n"
-                        "Advanced threat intelligence,\n"
-                        "NLP analysis, forensics, signed mod actions\n\n"
-                        "witnessbot.gg/premium"
-                    ),
-                    timestamp=datetime.datetime.utcnow()
-                )
-                e.set_author(name="Witness Security · Upgrade required")
-                return await ctx.send(embed=e)
-        except Exception:
-            pass  # if import fails, allow (dev mode)
+        from witness.core import get_tier, upsell_embed
+        from witness.config import TIER_PREMIUM
+        if await get_tier(ctx.guild.id) < TIER_PREMIUM:
+            return await ctx.send(embed=upsell_embed("Premium"))
 
         handlers = {
             "scan":        self._cmd_scan,
