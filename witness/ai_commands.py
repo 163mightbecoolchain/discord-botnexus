@@ -14,6 +14,7 @@ from .core import (
     bot,
     cooldown,
     get_tier,
+    intents,
     upsell_embed,
 )
 
@@ -40,6 +41,11 @@ async def ai_cmd(interaction: discord.Interaction, question: str):
 @cooldown(30)
 async def summarize(interaction: discord.Interaction, count: int = 20):
     if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
+    if not intents.message_content:
+        # Без Message Content Intent Discord отдаёт историю с пустым текстом
+        return await interaction.response.send_message(
+            "⚠️ `/summarize` временно недоступна: боту не выдан доступ к тексту сообщений "
+            "(Message Content Intent).", ephemeral=True)
     await interaction.response.defer()
     msgs = []
     async for msg in interaction.channel.history(limit=min(count,50)):

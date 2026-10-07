@@ -344,6 +344,15 @@ async def api_guilds(request):
         })
     return web.json_response(result)
 
+async def _get_member(guild, user_id):
+    """
+    Участник сервера: из кэша, а если его там нет — запросом к Discord.
+    Без Server Members Intent кэш почти пустой, и проверка прав в панели
+    отказывала бы всем администраторам.
+    """
+    from witness.core import resolve_member
+    return await resolve_member(guild, user_id)
+
 # ── API: guild settings GET ───────────────────────────────────
 
 @require_auth
@@ -355,7 +364,7 @@ async def api_guild_settings_get(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Guild not found'}, status=404)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_guild:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -428,7 +437,7 @@ async def api_guild_settings_post(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Not found'}, status=404)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_guild:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -549,7 +558,7 @@ async def api_security_save(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Not found'}, status=404)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_guild:
         return web.json_response({'error': 'Forbidden'}, status=403)
     try:
@@ -577,7 +586,7 @@ async def api_channels(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response([], status=200)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_guild:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -599,7 +608,7 @@ async def api_modlog(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response([])
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_messages:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -640,7 +649,7 @@ async def api_invites(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response([])
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_messages:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -796,7 +805,7 @@ async def api_automation_get(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({}, status=404)
-    me = bg.get_member(int(s['user_id']))
+    me = await _get_member(bg, s['user_id'])
     if not me or not (me.guild_permissions.manage_guild or
                       me.guild_permissions.administrator):
         return web.json_response({'error': 'Forbidden'}, status=403)
@@ -835,7 +844,7 @@ async def api_automation_post(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Guild not found'}, status=404)
-    me = bg.get_member(int(s['user_id']))
+    me = await _get_member(bg, s['user_id'])
     if not me or not (me.guild_permissions.manage_guild or
                       me.guild_permissions.administrator):
         return web.json_response({'error': 'Forbidden'}, status=403)
@@ -900,13 +909,13 @@ async def api_member_lookup(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Guild not found'}, status=404)
-    me = bg.get_member(int(s['user_id']))
+    me = await _get_member(bg, s['user_id'])
     p  = me.guild_permissions if me else None
     if not p or not (p.manage_messages or p.moderate_members or
                      p.ban_members or p.administrator or p.manage_guild):
         return web.json_response({'error': 'Forbidden'}, status=403)
 
-    member = bg.get_member(uid)
+    member = await _get_member(bg, uid)
     out = {
         'user_id': str(uid),
         'name':    member.display_name if member else '',
@@ -996,7 +1005,7 @@ async def api_member_search(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response([])
-    me = bg.get_member(int(s['user_id']))
+    me = await _get_member(bg, s['user_id'])
     p  = me.guild_permissions if me else None
     if not p or not (p.manage_messages or p.moderate_members or
                      p.ban_members or p.administrator or p.manage_guild):
@@ -1006,7 +1015,7 @@ async def api_member_search(request):
 
     out = []
     if q.isdigit():
-        m = bg.get_member(int(q))
+        m = await _get_member(bg, int(q))
         if m:
             out.append({'id': str(m.id), 'name': m.display_name,
                         'tag': str(m), 'avatar': m.display_avatar.url})
@@ -1017,6 +1026,14 @@ async def api_member_search(request):
             if not any(o['id'] == str(m.id) for o in out):
                 out.append({'id': str(m.id), 'name': m.display_name,
                             'tag': str(m), 'avatar': m.display_avatar.url})
+    if not out and not q.isdigit():
+        # Без Server Members Intent кэш почти пустой — ищем по началу имени через Discord
+        try:
+            for m in await bg.query_members(query=q, limit=20):
+                out.append({'id': str(m.id), 'name': m.display_name,
+                            'tag': str(m), 'avatar': m.display_avatar.url})
+        except Exception:
+            pass
     return web.json_response(out)
 
 
@@ -1031,7 +1048,7 @@ async def api_ban_requests(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response([], status=200)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     p = member.guild_permissions if member else None
     if not p or not (p.ban_members or p.administrator or p.manage_guild):
         return web.json_response({'error': 'Forbidden'}, status=403)
@@ -1084,7 +1101,7 @@ async def api_ban_request_action(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Guild not found'}, status=404)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     p = member.guild_permissions if member else None
     if not p or not (p.ban_members or p.administrator):
         return web.json_response({'error': 'Forbidden'}, status=403)
@@ -1160,7 +1177,7 @@ async def api_appeal_action(request):
     bg  = bot.get_guild(guild_id)
     if not bg:
         return web.json_response({'error': 'Guild not found'}, status=404)
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -1214,7 +1231,7 @@ async def api_appeal_action(request):
                     except Exception:
                         pass
                 elif atype == 'MUTE':
-                    m = bg.get_member(uid)
+                    m = await _get_member(bg, uid)
                     if m and m.is_timed_out():
                         try:
                             await m.timeout(None, reason=f"Апелляция #{appeal_id}")
@@ -1272,7 +1289,7 @@ async def api_appeals(request):
     bg = bot.get_guild(guild_id)
     if not bg:
         return web.json_response([])
-    member = bg.get_member(int(s['user_id']))
+    member = await _get_member(bg, s['user_id'])
     if not member or not member.guild_permissions.manage_messages:
         return web.json_response({'error': 'Forbidden'}, status=403)
 

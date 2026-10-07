@@ -7,6 +7,7 @@ from discord import app_commands
 import aiosqlite
 import os, asyncio, random, time, json, datetime
 from datetime import timedelta
+from types import SimpleNamespace
 from .config import (
     DB_PATH,
     EVENT_LOGS,
@@ -33,11 +34,13 @@ from .core import (
     _audit_actor,
     bot,
     get_tier,
+    intents,
     _invite_cache,
     notify_mute_over,
     queue_log,
     _raid_tracker,
     refresh_invite_cache,
+    resolve_member,
     sec_check,
     _spam_tracker,
     _suppress_next_timeout_dm,
@@ -86,6 +89,14 @@ async def on_ready():
     _invite_cache.clear()
     for guild in bot.guilds:
         await refresh_invite_cache(guild)
+
+    # Без Server Members Intent входы распознаются по системному сообщению
+    # «X присоединился» (см. on_message) — предупреждаем, где оно выключено
+    if not intents.members:
+        for guild in bot.guilds:
+            if not (guild.system_channel and guild.system_channel_flags.join_notifications):
+                print(f"⚠️ {guild.name}: системные сообщения о входе выключены — "
+                      f"бот не увидит новых участников (антирейд, карантин, инвайты)")
 
     # Семафор Albion API создаётся сам при первом запросе (albion_fetch).
 
@@ -174,6 +185,13 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
+    # Без Server Members Intent событие входа участника не приходит. Зато Discord
+    # публикует в системный канал сообщение «X присоединился», и его автор —
+    # сам новый участник. Передаём его в обычные обработчики входа.
+    if message.type == discord.MessageType.new_member:
+        if not intents.members and message.guild and isinstance(message.author, discord.Member):
+            bot.dispatch("member_join", message.author)
+        return
     if message.author.bot or not message.guild: return
     gid, uid = message.guild.id, message.author.id
     # Счётчик активности по часам для /serverstats. Раньше жил в отдельном
@@ -572,6 +590,62 @@ async def on_member_update(before, after):
 
 
 @bot.event
+async def on_audit_log_entry_create(entry):
+    """
+    Без Server Members Intent не приходят события изменения и ухода участника.
+    Ник, роли, таймауты и кики видны в журнале аудита: по записи собираем
+    состояние «до» и передаём в on_member_update, а кик пишем в журнал модерации.
+    """
+    if intents.members:
+        return              # с интентом всё придёт обычными событиями
+    A = discord.AuditLogAction
+    guild = entry.guild
+    target_id = getattr(entry.target, "id", None)
+    if not target_id:
+        return
+
+    if entry.action == A.kick:
+        try:
+            await add_modlog(guild.id, target_id, entry.user_id or 0, "KICK",
+                             entry.reason or "Кик через Discord", "")
+            if entry.user_id:
+                await antinuke_check(guild, entry.user_id, "kick")
+        except Exception as ex:
+            print(f"[KICK_LOG] audit: {ex}")
+        return
+
+    if entry.action not in (A.member_update, A.member_role_update):
+        return
+    try:
+        # Нужно свежее состояние, а не из кэша resolve_member
+        after = await guild.fetch_member(target_id)
+    except discord.HTTPException:
+        return
+
+    before_roles = list(after.roles)
+    if entry.action == A.member_role_update:
+        added   = {r.id for r in getattr(entry.after, "roles", [])}
+        removed = [guild.get_role(r.id) for r in getattr(entry.before, "roles", [])]
+        before_roles = [r for r in after.roles if r.id not in added]
+        before_roles += [r for r in removed if r is not None]
+
+    before_timeout = after.timed_out_until          # таймаут в этой записи не менялся
+    if hasattr(entry.before, "timed_out_until"):
+        before_timeout = entry.before.timed_out_until
+        # Истёкший таймаут для on_member_update — то же самое, что его отсутствие
+        if before_timeout and before_timeout <= datetime.datetime.now(datetime.timezone.utc):
+            before_timeout = None
+
+    before = SimpleNamespace(
+        nick=getattr(entry.before, "nick", after.nick),
+        name=after.name,
+        roles=before_roles,
+        timed_out_until=before_timeout,
+    )
+    await on_member_update(before, after)
+
+
+@bot.event
 async def on_message_delete(message):
     if message.author.bot or not message.guild: return
     ch = await sec_check(message.guild, "msg_delete")
@@ -581,7 +655,8 @@ async def on_message_delete(message):
     e.set_author(name=t(gid8, "msg_deleted"))
     e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
     e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
-    e.add_field(name=t(gid8, "text"),    value=message.content[:1020] or "*(attachment)*",                inline=False)
+    no_text = "*(attachment)*" if intents.message_content else "*(текст недоступен без Message Content Intent)*"
+    e.add_field(name=t(gid8, "text"),    value=message.content[:1020] or no_text,                         inline=False)
 
     # Если к сообщению была прикреплена ветка — добавляем ссылку
     if message.guild:
@@ -854,7 +929,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if not row: return
     guild = bot.get_guild(payload.guild_id)
     if not guild: return
-    member = guild.get_member(payload.user_id)
+    # При добавлении реакции Discord сам присылает участника — кэш не нужен
+    member = payload.member or await resolve_member(guild, payload.user_id)
     if not member: return
     role = guild.get_role(row[0])
     if role:
@@ -876,7 +952,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if not row: return
     guild = bot.get_guild(payload.guild_id)
     if not guild: return
-    member = guild.get_member(payload.user_id)
+    member = await resolve_member(guild, payload.user_id)
     if not member: return
     role = guild.get_role(row[0])
     if role:

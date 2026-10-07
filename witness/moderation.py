@@ -30,6 +30,7 @@ from .core import (
     antinuke_check,
     bot,
     get_tier,
+    resolve_member,
     _suppress_next_timeout_dm,
     upsell_embed,
 )
@@ -164,7 +165,7 @@ class _BanRequestActions:
 
         reason  = row[1]
         guild   = interaction.guild
-        member  = guild.get_member(user_id)
+        member  = await resolve_member(guild, user_id)
         ps      = await get_punishment_settings(guild_id)
         ban_days = ps.get("ban3_days", 30)
         unban_at = (datetime.datetime.utcnow() + timedelta(days=ban_days)).isoformat()
@@ -899,7 +900,7 @@ async def appeal_cmd(interaction: discord.Interaction,
                 except discord.Forbidden:
                     unbanned_msg = " · ⚠️ нет прав разбанить"
             elif atype == "MUTE":
-                member = interaction.guild.get_member(uid)
+                member = await resolve_member(interaction.guild, uid)
                 if member and member.is_timed_out():
                     try:
                         await member.timeout(None, reason=f"Апелляция #{appeal_id}")

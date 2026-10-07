@@ -204,7 +204,8 @@ async def log_signed_action(guild_id: int, mod_id: int, action_type: str,
 
 # Список подозрительных фишинговых паттернов
 PHISHING_PATTERNS = [
-    r"discord\.gift\b(?!\.com)",
+    # discord.com.<домен>, discord.gg.<домен> — настоящие discord.gift/discord.com не трогаем
+    r"discord(?:app)?\.(?:com|gg|gift)\.[a-z]{2,}",
     r"discordnitro\.(?!com)",
     r"steamcommunity\.(?!com)",
     r"free.*nitro",
@@ -213,7 +214,6 @@ PHISHING_PATTERNS = [
     r"nitro.*claim",
     r"@everyone.*http",
     r"free.*steam",
-    r"discord\.com\.(?!)",
 ]
 
 SCAM_PATTERNS = [
@@ -1337,7 +1337,8 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         if args:
             try:
                 member_id = int(args[0].strip("<@!>"))
-                member = ctx.guild.get_member(member_id)
+                from witness.core import resolve_member
+                member = await resolve_member(ctx.guild, member_id)
                 if member: return member
             except ValueError:
                 # Поиск по имени
@@ -1345,6 +1346,12 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                 for m in ctx.guild.members:
                     if m.display_name.lower().startswith(name) or m.name.lower().startswith(name):
                         return m
+                # Без Server Members Intent кэш почти пустой — спрашиваем Discord
+                try:
+                    found = await ctx.guild.query_members(query=args[0], limit=1)
+                    if found: return found[0]
+                except Exception:
+                    pass
         await ctx.send("❌ Укажи участника: `/q scan @user` или `/q scan ID`", delete_after=5)
         return None
 

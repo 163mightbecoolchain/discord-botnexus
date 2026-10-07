@@ -174,6 +174,36 @@ bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 # ID владельцев бота через запятую или пробел: OWNER_IDS=123,456
 OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "").replace(",", " ").split() if x.isdigit()}
 
+# Без Server Members Intent кэш участников почти пустой: guild.get_member
+# возвращает None даже для тех, кто на сервере. Поэтому там, где нужен сам
+# участник (выдать роль, снять мут, проверить права), берём его запросом к API.
+_member_fetch_cache: dict = {}   # (guild_id, user_id) → (время, Member | None)
+MEMBER_FETCH_TTL = 60            # секунд; веб-панель дёргает одного и того же участника часто
+
+
+async def resolve_member(guild, user_id):
+    """Участник по ID: из кэша, а если его там нет — запросом к Discord."""
+    if guild is None or not user_id:
+        return None
+    user_id = int(user_id)
+    m = guild.get_member(user_id)
+    if m is not None:
+        return m
+    key = (guild.id, user_id)
+    hit = _member_fetch_cache.get(key)
+    if hit and time.time() - hit[0] < MEMBER_FETCH_TTL:
+        return hit[1]
+    try:
+        m = await guild.fetch_member(user_id)
+    except discord.NotFound:
+        m = None                 # не на сервере — это тоже ответ, кэшируем
+    except discord.HTTPException:
+        return None              # сбой API — не кэшируем, попробуем в следующий раз
+    if len(_member_fetch_cache) > 2000:
+        _member_fetch_cache.clear()
+    _member_fetch_cache[key] = (time.time(), m)
+    return m
+
 def upsell_embed(req):
     e = make_embed(
         title="🔒 Требуется апгрейд",

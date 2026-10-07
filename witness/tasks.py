@@ -30,6 +30,7 @@ from .core import (
     notify_mute_over,
     _raid_tracker,
     report_error,
+    resolve_member,
     _spam_tracker,
 )
 
@@ -313,7 +314,7 @@ async def quarantine_loop(bot_instance):
             for guild_id, user_id in rows:
                 guild = bot_instance.get_guild(guild_id)
                 if not guild: continue
-                member = guild.get_member(user_id)
+                member = await resolve_member(guild, user_id)
                 if not member: continue
                 # Получаем настройки карантина
                 async with aiosqlite.connect(DB_PATH) as db:
@@ -603,7 +604,7 @@ async def birthday_check_loop():
                     if not guild: continue
                     ch = guild.get_channel(ch_id) or discord.utils.get(guild.text_channels, name="general")
                     if not ch: continue
-                    member = guild.get_member(uid)
+                    member = await resolve_member(guild, uid)
                     if not member: continue
                     e = discord.Embed(title="🎂 День рождения!", color=0xFF69B4)
                     e.description = f"Сегодня день рождения у {member.mention}! 🎉\nПоздравьте его/её!"
