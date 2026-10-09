@@ -52,5 +52,8 @@ jobs:
                 try { new Function(m[1]); } catch (e) { console.log(`${f}: ${e.message}`); bad++; }
               }
             }
+            for (const f of ["website/static/dashboard-i18n.js"]) {
+              try { new Function(fs.readFileSync(f, "utf8")); } catch (e) { console.log(`${f}: ${e.message}`); bad++; }
+            }
             process.exit(bad ? 1 : 0);
           '
