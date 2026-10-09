@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<meta name="description" content="Продвинутая модерация Discord: логи сервера, антифишинг, апелляции, авто-наказания, анти-нюк">
+<meta name="description" content="Продвинутая модерация Discord: антифишинг на Discord AutoMod, логи сервера, апелляции, авто-наказания, анти-нюк">
 
 <style>
 :root {
@@ -341,10 +341,10 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
 <main>
 
   <div class="hero">
-    <div class="hero-tag">SYSTEM ONLINE · v4.2</div>
+    <div class="hero-tag">SYSTEM ONLINE · v4.3 · AutoMod</div>
     <h1>Discord-модерация на<br><span class="accent">профессиональном уровне</span></h1>
     <p class="hero-sub">
-      Подробные логи сервера, защита от фишинга и скама, апелляционная система
+      Блокировка фишинга через Discord AutoMod, подробные логи сервера, апелляции
       с авто-снятием наказаний, прогрессивные наказания и анти-нюк. Всё что нужно команде модераторов в одном боте.
     </p>
     <div class="hero-cta">
@@ -377,8 +377,8 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
     <div class="features">
       <div class="feature">
         <div class="feature-icon">🎣</div>
-        <h3>Антифишинг и анти-скам</h3>
-        <p>Проверка ссылок в сообщениях на фишинг, фейковые раздачи Nitro и скам. Алерт модераторам в лог-канал.</p>
+        <h3>Антифишинг на AutoMod</h3>
+        <p>Бот сам создаёт правила Discord AutoMod: поддельные домены Discord и Steam блокируются ещё до отправки. Фейковые раздачи Nitro, скам и спам — алерт в лог-канал.</p>
       </div>
 
       <div class="feature">
@@ -414,7 +414,7 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
       <div class="feature">
         <div class="feature-icon">📝</div>
         <h3>Логи сервера</h3>
-        <p>Входы и выходы, баны, удалённые и изменённые сообщения, инвайты, роли и каналы — в выбранный лог-канал.</p>
+        <p>Входы и выходы, баны и кики, удалённые и изменённые сообщения, инвайты, роли и каналы — в выбранный лог-канал. Кики и смены ролей подтягиваются из журнала аудита.</p>
       </div>
 
       <div class="feature">
@@ -450,8 +450,8 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
           <span class="line"><span class="success">✓ Таймаут 7 дней автоматически</span></span>
           <span class="line"><span class="success">✓ DM с кнопкой апелляции отправлен</span></span>
           <span class="line">&nbsp;</span>
-          <span class="line"><span class="warn">⚠ Обнаружен фишинг в #general</span></span>
-          <span class="line"><span class="muted-text">  Тип: фейковая раздача Nitro</span></span>
+          <span class="line"><span class="warn">⚠ AutoMod: фишинг-ссылка в #general</span></span>
+          <span class="line"><span class="muted-text">  discord-nitro.gift → заблокировано</span></span>
           <span class="line"><span class="success">✓ Алерт отправлен в лог-канал</span></span>
           <span class="line">&nbsp;</span>
           <span class="line"><span class="dim">$</span> <span class="cmd">/appeal</span> <span class="muted-text">accept 42</span></span>
@@ -499,7 +499,21 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
         </div>
       </div>
       <div class="tech-item">
-        <div class="tech-item-icon">🔐</div>
+        <div class="tech-item-icon">🛡️</div>
+        <div class="tech-item-text">
+          <strong>Discord AutoMod</strong>
+          <small>Правила создаются и обновляются сами</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">🧩</div>
+        <div class="tech-item-text">
+          <strong>Без привилегированных интентов</strong>
+          <small>Журнал аудита и API вместо кэша участников</small>
+        </div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-item-icon">🔑</div>
         <div class="tech-item-text">
           <strong>OAuth2 + HMAC</strong>
           <small>30-дневная сессия с refresh</small>
@@ -538,7 +552,7 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
       <a href="__INVITE_URL__">Invite</a>
       <a href="/privacy">Конфиденциальность</a>
     </div>
-    <div class="footer-copy">© 2025 Witness · MIT License</div>
+    <div class="footer-copy">© 2026 Witness · MIT License</div>
   </div>
 </footer>
 
