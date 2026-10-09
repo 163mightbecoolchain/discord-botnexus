@@ -821,9 +821,15 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         # Проверяем whitelist
         if _lists_cache[gid].get(uid) == "white": return
 
-        # Режимы угроз из дашборда: выключенное правило не проверяем
-        from witness.database import get_threats
-        modes = await get_threats(gid)
+        # Режимы угроз из дашборда: выключенное правило не проверяем,
+        # роли и каналы-исключения не проверяем вовсе (как в AutoMod)
+        from witness.database import get_threat_config
+        modes = await get_threat_config(gid)
+        ex_roles = set(modes["exempt_roles"])
+        if (str(message.channel.id) in modes["exempt_channels"]
+                or str(getattr(message.channel, "category_id", "")) in modes["exempt_channels"]
+                or any(str(r.id) in ex_roles for r in getattr(message.author, "roles", []))):
+            return
 
         # Проверка дублирования контента
         if message.content and modes["spam"] != "off":

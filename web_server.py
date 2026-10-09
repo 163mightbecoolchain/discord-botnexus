@@ -42,8 +42,13 @@ def _norm_url(v: str) -> str:
 SITE_URL      = _norm_url(os.getenv("SITE_URL", f"http://localhost:{PORT}"))
 # WEBSITE_URL — адрес отдельного сервиса с сайтом (лендинг + дашборд)
 WEBSITE_URL   = _norm_url(os.getenv("WEBSITE_URL", ""))
+# Права при приглашении: только то, чем бот пользуется (без Administrator).
+# Кик, бан, таймаут, роли (карантин, реакции), каналы (тикеты, slowmode),
+# сервер (AutoMod, инвайты), журнал аудита, сообщения, вложения (бэкапы).
+# Тот же набор — в witness/config.py и website/app.py.
+INVITE_PERMISSIONS = 1374658358518
 INVITE_URL    = (f"https://discord.com/api/oauth2/authorize?client_id={BOT_ID}"
-                 f"&permissions=8&scope=bot%20applications.commands") if BOT_ID else "#"
+                 f"&permissions={INVITE_PERMISSIONS}&scope=bot%20applications.commands") if BOT_ID else "#"
 SUPPORT_URL   = os.getenv("SUPPORT_URL", "https://discord.gg/witness")
 DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 TEMPLATES_DIR = Path(__file__).parent / "witness_web" / "templates"
@@ -591,7 +596,7 @@ async def api_security_overview(request):
 
     # Правила создаёт witness/automod.py; без Manage Server их нет и прочитать нельзя
     from witness.core import intents
-    from witness.database import get_log_ch, get_threats
+    from witness.database import get_log_ch, get_threat_config
     log_ch  = await get_log_ch(bg)
     automod = {'can_manage': bg.me.guild_permissions.manage_guild, 'rules': [],
                'foreign_spam': False}
@@ -613,27 +618,30 @@ async def api_security_overview(request):
         except Exception as ex:
             print(f"[SECURITY] automod rules: {ex}")
 
-    alerts, week = [], 0
+    alerts, week, open_count = [], 0, 0
     try:
         since = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).isoformat()
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM security_alerts WHERE guild_id=? AND created_at>=?",
+                "SELECT COUNT(*), COALESCE(SUM(resolved=0),0) FROM security_alerts "
+                "WHERE guild_id=? AND created_at>=?",
                 (guild_id, since)) as c:
-                week = (await c.fetchone())[0]
+                week, open_count = await c.fetchone()
             async with db.execute("""
-                SELECT alert_type, severity, user_id, description, metadata, created_at
+                SELECT id, alert_type, severity, user_id, description, metadata, resolved, created_at
                 FROM security_alerts WHERE guild_id=?
-                ORDER BY id DESC LIMIT 30
+                ORDER BY id DESC LIMIT 100
             """, (guild_id,)) as c:
                 rows = await c.fetchall()
-        for atype, sev, uid, desc, meta, ts in rows:
+        for aid, atype, sev, uid, desc, meta, resolved, ts in rows:
             try:
                 meta = json.loads(meta or '{}')
             except ValueError:
                 meta = {}
             u = bg.get_member(uid) if uid else None
             alerts.append({
+                'id':          aid,
+                'resolved':    bool(resolved),
                 'type':        atype,
                 'severity':    sev,
                 'user_id':     str(uid or ''),
@@ -648,16 +656,18 @@ async def api_security_overview(request):
 
     return web.json_response({
         'automod':   automod,
-        'threats':   await get_threats(guild_id),
+        'threats':   await get_threat_config(guild_id),
         'log_channel': str(log_ch.id) if log_ch else None,
         'message_content': intents.message_content,
         'alerts':    alerts,
         'alerts_7d': week,
+        'alerts_open_7d': open_count,
     })
 
 @require_auth
 async def api_threats_save(request):
-    """POST /api/guild/:id/threats — режимы правил {phishing|suspicious|spam: off|alert|block}"""
+    """POST /api/guild/:id/threats — режимы {phishing|suspicious|spam|custom: off|alert|block},
+    exempt_roles / exempt_channels (id) и custom_words (свои слова)."""
     guild_id = int(request.match_info['guild_id'])
     s        = request['session']
     bot      = request.app['bot']
@@ -673,13 +683,56 @@ async def api_threats_save(request):
         if not isinstance(data, dict):
             return web.json_response({'error': 'Bad request'}, status=400)
         from witness.database import save_threats
-        from witness.automod import sync_guild
+        from witness.automod import sync_guild, check_custom_words
+        # Роли и каналы — только существующие на этом сервере
+        if isinstance(data.get('exempt_roles'), list):
+            data['exempt_roles'] = [str(r) for r in data['exempt_roles']
+                                    if str(r).isdigit() and bg.get_role(int(r))]
+        if isinstance(data.get('exempt_channels'), list):
+            data['exempt_channels'] = [str(c) for c in data['exempt_channels']
+                                       if str(c).isdigit() and bg.get_channel(int(c))]
+        # Слова, которые задели бы обычные ссылки, не сохраняем — возвращаем список
+        if isinstance(data.get('custom_words'), list):
+            good, bad = check_custom_words(data['custom_words'])
+            if bad:
+                return web.json_response({
+                    'error': 'bad_words',
+                    'bad_words': [{'word': w, 'reason': r} for w, r in bad],
+                }, status=400)
+            data['custom_words'] = good
         modes = await save_threats(guild_id, data)
         # Применяем сразу, не дожидаясь планового обновления правил раз в 30 минут
         await sync_guild(bg)
         return web.json_response({'ok': True, 'threats': modes})
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
+
+@require_auth
+async def api_alert_resolve(request):
+    """POST /api/guild/:id/alert/:alert_id/resolve — {"resolved": true|false}"""
+    guild_id = int(request.match_info['guild_id'])
+    alert_id = int(request.match_info['alert_id'])
+    s        = request['session']
+    bot      = request.app['bot']
+
+    bg = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    resolved = 1 if (data or {}).get('resolved', True) else 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("UPDATE security_alerts SET resolved=? WHERE id=? AND guild_id=?",
+                               (resolved, alert_id, guild_id))
+        await db.commit()
+    if not cur.rowcount:
+        return web.json_response({'error': 'Not found'}, status=404)
+    return web.json_response({'ok': True, 'resolved': bool(resolved)})
 
 # ── API: channels ─────────────────────────────────────────────
 
@@ -1473,6 +1526,7 @@ def create_app(bot) -> web.Application:
         ('POST', '/guild/{guild_id}/security',              api_security_save),
         ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
         ('POST', '/guild/{guild_id}/threats',               api_threats_save),
+        ('POST', '/guild/{guild_id}/alert/{alert_id}/resolve', api_alert_resolve),
         ('GET',  '/guild/{guild_id}/channels',              api_channels),
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),
