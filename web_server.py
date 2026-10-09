@@ -590,11 +590,18 @@ async def api_security_overview(request):
         return web.json_response({'error': 'Forbidden'}, status=403)
 
     # Правила создаёт witness/automod.py; без Manage Server их нет и прочитать нельзя
-    automod = {'can_manage': bg.me.guild_permissions.manage_guild, 'rules': []}
+    from witness.core import intents
+    from witness.database import get_log_ch, get_threats
+    log_ch  = await get_log_ch(bg)
+    automod = {'can_manage': bg.me.guild_permissions.manage_guild, 'rules': [],
+               'foreign_spam': False}
     if automod['can_manage']:
         try:
             for r in await bg.fetch_automod_rules():
                 if r.creator_id != bot.user.id or not r.name.startswith("Witness · "):
+                    # Правило спама может быть одно: чужое займёт место нашего
+                    if r.trigger.type.name == 'spam':
+                        automod['foreign_spam'] = True
                     continue
                 kinds = {a.type.name for a in r.actions}
                 automod['rules'].append({
@@ -639,7 +646,40 @@ async def api_security_overview(request):
     except Exception as ex:
         print(f"[SECURITY] alerts: {ex}")
 
-    return web.json_response({'automod': automod, 'alerts': alerts, 'alerts_7d': week})
+    return web.json_response({
+        'automod':   automod,
+        'threats':   await get_threats(guild_id),
+        'log_channel': str(log_ch.id) if log_ch else None,
+        'message_content': intents.message_content,
+        'alerts':    alerts,
+        'alerts_7d': week,
+    })
+
+@require_auth
+async def api_threats_save(request):
+    """POST /api/guild/:id/threats — режимы правил {phishing|suspicious|spam: off|alert|block}"""
+    guild_id = int(request.match_info['guild_id'])
+    s        = request['session']
+    bot      = request.app['bot']
+
+    bg = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return web.json_response({'error': 'Bad request'}, status=400)
+        from witness.database import save_threats
+        from witness.automod import sync_guild
+        modes = await save_threats(guild_id, data)
+        # Применяем сразу, не дожидаясь планового обновления правил раз в 30 минут
+        await sync_guild(bg)
+        return web.json_response({'ok': True, 'threats': modes})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
 
 # ── API: channels ─────────────────────────────────────────────
 
@@ -1432,6 +1472,7 @@ def create_app(bot) -> web.Application:
         ('POST', '/guild/{guild_id}/settings',              api_guild_settings_post),
         ('POST', '/guild/{guild_id}/security',              api_security_save),
         ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
+        ('POST', '/guild/{guild_id}/threats',               api_threats_save),
         ('GET',  '/guild/{guild_id}/channels',              api_channels),
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),

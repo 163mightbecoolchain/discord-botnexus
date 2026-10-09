@@ -18,7 +18,7 @@
   --bg: #0a0e14; --bg-2: #0f1419; --bg-3: #151b23;
   --panel: #1a2028; --panel-2: #232b35;
   --border: #2a3441; --border-2: #3a4554;
-  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #6b7785;
+  --text: #e0e6ed; --text-2: #a8b3c1; --muted: #8592a0;
   --accent: #00d9a3; --accent-2: #00bfa5;
   --danger: #ff5470; --warning: #ffaa00; --info: #5a9eff;
   --mono: 'JetBrains Mono', 'Cascadia Code', monospace;
@@ -107,35 +107,35 @@ body {
 .logout-btn:hover { color: var(--danger); }
 
 /* Контент */
-.main { padding: 1.5rem 2rem; overflow-x: hidden; }
+.main { padding: 2rem 2.5rem; overflow-x: hidden; }
 .page-inner { max-width: 960px; }
 .page-inner-wide { max-width: 1200px; }
 .page-head {
   display: flex; justify-content: space-between; align-items: flex-end;
-  margin-bottom: 2rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border);
+  margin-bottom: 1.75rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); gap: 1rem; flex-wrap: wrap;
 }
-.page-title { font-size: 1.5rem; font-weight: 700; }
-.page-subtitle { color: var(--muted); font-size: .85rem; margin-top: .25rem; }
+.page-title { font-size: 1.65rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+.page-subtitle { color: var(--muted); font-size: .88rem; margin-top: .35rem; }
 
 /* Карточки */
 .card {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 10px; margin-bottom: 1.25rem; overflow: hidden;
+  border-radius: 12px; margin-bottom: 1.25rem; overflow: hidden;
   transition: border-color .2s, box-shadow .25s;
 }
 .card:hover { border-color: var(--border-2); }
 .card-head {
-  padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
+  padding: 1.1rem 1.4rem; border-bottom: 1px solid var(--border);
   display: flex; justify-content: space-between; align-items: center; gap: 1rem;
 }
-.card-title { font-size: .95rem; font-weight: 600; }
-.card-desc { font-size: .78rem; color: var(--muted); margin-top: .2rem; }
-.card-body { padding: 1.25rem; }
+.card-title { font-size: 1rem; font-weight: 600; }
+.card-desc { font-size: .8rem; color: var(--muted); margin-top: .25rem; line-height: 1.45; }
+.card-body { padding: 1.25rem 1.4rem; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
 .stat-card {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  padding: 1.25rem; position: relative; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.25rem 1.4rem; position: relative; overflow: hidden;
   transition: transform .18s ease, border-color .18s, box-shadow .22s;
 }
 .stat-card::before { content: ''; position: absolute; top: 0; left: 0; width: 3px; height: 100%; background: var(--accent); }
@@ -143,8 +143,8 @@ body {
 .stat-card.warning::before { background: var(--warning); }
 .stat-card.info::before    { background: var(--info); }
 .stat-card:hover { transform: translateY(-3px); border-color: var(--border-2); box-shadow: 0 10px 24px rgba(0,0,0,.25); }
-.stat-label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin-bottom: .4rem; }
-.stat-value { font-family: var(--mono); font-size: 1.6rem; font-weight: 700; line-height: 1; }
+.stat-label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin-bottom: .6rem; }
+.stat-value { font-family: var(--mono); font-size: 1.9rem; font-weight: 700; line-height: 1; letter-spacing: -.02em; }
 
 /* Формы */
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
@@ -160,7 +160,7 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 }
 .input-help { font-size: .72rem; color: var(--muted); margin-top: .3rem; }
 
-.toggle-row { display: flex; justify-content: space-between; align-items: center; padding: .75rem 0; border-top: 1px solid var(--border); gap: 1rem; }
+.toggle-row { display: flex; justify-content: space-between; align-items: center; padding: .9rem 0; border-top: 1px solid var(--border); gap: 1rem; }
 .toggle-row:first-child { border-top: 0; }
 .toggle-info { flex: 1; }
 .toggle-label { font-size: .9rem; font-weight: 600; }
@@ -198,15 +198,15 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Таблицы */
-.table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.table-wrap { border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; background: var(--panel); }
 .table { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .table thead { background: var(--bg-3); }
 .table th {
-  text-align: left; padding: .65rem 1rem; font-weight: 600; font-size: .73rem;
+  text-align: left; padding: .7rem 1.1rem; font-weight: 600; font-size: .7rem;
   color: var(--muted); text-transform: uppercase; letter-spacing: .08em;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-.table td { padding: .65rem 1rem; border-bottom: 1px solid var(--border); }
+.table td { padding: .8rem 1.1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 .table tr:last-child td { border-bottom: 0; }
 .table tbody tr { transition: background .12s; }
 .table tr:hover { background: rgba(var(--accent-rgb), .04); }
@@ -247,10 +247,28 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
   100% { opacity: 0; transform: translateX(40px); max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
 }
 
-.chip { font-size: .72rem; padding: .2rem .55rem; border-radius: 999px; background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); }
+.chip { font-size: .72rem; font-weight: 600; padding: .2rem .6rem; border-radius: 999px; background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); white-space: nowrap; }
 .chip.warn { background: rgba(255,170,0,.12); color: var(--warning); border-color: transparent; }
 .chip.danger { background: rgba(255,84,112,.12); color: var(--danger); border-color: transparent; }
 .chip.ok { background: rgba(var(--accent-rgb), .12); color: var(--accent); border-color: transparent; }
+
+/* Режимы угроз: Выкл / Алерт / Блок */
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 9px; flex-shrink: 0; }
+.seg button {
+  border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: .8rem; font-weight: 600;
+  padding: .45rem .85rem; border-radius: 6px; cursor: pointer; min-height: 34px;
+  transition: background .15s, color .15s;
+}
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.seg button[aria-pressed="true"][data-mode="block"] { background: rgba(var(--accent-rgb), .16); color: var(--accent); }
+.seg button[aria-pressed="true"][data-mode="alert"] { background: rgba(255,170,0,.14); color: var(--warning); }
+.threat-row { display: flex; align-items: center; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.threat-row:first-child { border-top: 0; padding-top: 0; }
+.threat-row .toggle-info { min-width: 220px; }
+.threat-meta { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
+.notice { display: flex; gap: .6rem; padding: .75rem .9rem; border-radius: 8px; font-size: .8rem; line-height: 1.45; margin-bottom: 1rem; background: rgba(255,170,0,.08); border: 1px solid rgba(255,170,0,.25); color: var(--text-2); }
+.notice b { color: var(--text); }
 
 /* Поиск */
 .search-bar { display: flex; gap: .75rem; margin-bottom: 1rem; }
@@ -437,7 +455,14 @@ html.theme-anim *::before, html.theme-anim *::after {
   .sidebar.open { transform: translateX(0); }
   .burger { display: flex; }
   .main { padding: 4rem 1rem 1rem; }
+  .seg { width: 100%; }
+  .seg button { flex: 1; }
   .form-row { grid-template-columns: 1fr; }
+}
+
+/* Фокус с клавиатуры */
+.nav-item:focus-visible, .btn:focus-visible, .toggle:focus-visible, .seg button:focus-visible, .guild-selector:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
 }
 
 /* Утилиты */
@@ -1040,12 +1065,16 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="card">
         <div class="card-head">
           <div>
-            <div class="card-title">Правила AutoMod</div>
-            <div class="card-desc">Бот создаёт их сам и проверяет каждые 30 минут. Discord проверяет сообщения до отправки</div>
+            <div class="card-title">Правила защиты</div>
+            <div class="card-desc">Что делать с угрозой: пропустить, прислать алерт модераторам или заблокировать сообщение до отправки</div>
           </div>
+          <button class="btn btn-primary" id="threatsSaveBtn" onclick="btnBusy(this, saveThreats)">Сохранить</button>
         </div>
-        <div class="card-body" id="secAutomod">
-          <div class="empty" style="padding:1.5rem;"><div class="empty-sub">Загрузка...</div></div>
+        <div class="card-body">
+          <div id="secNotices"></div>
+          <div id="secThreats">
+            <div class="empty" style="padding:1.5rem;"><div class="empty-sub">Загрузка...</div></div>
+          </div>
         </div>
       </div>
 
@@ -2284,37 +2313,87 @@ async function loadModlog() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const SEV_CHIP = { HIGH: 'danger', CRITICAL: 'danger', MEDIUM: 'warn', LOW: '' };
 
+// Ключ режима → название правила AutoMod (без префикса «Witness · »), заголовок, описание
+const THREATS = [
+  ['phishing',   'фишинг-ссылки',            'Фишинг-ссылки', 'Поддельные домены Discord и Steam: discord-nitro.gift, steamcommunlty.com и похожие'],
+  ['suspicious', 'подозрительные сообщения', 'Скам',          'Фейковые раздачи Nitro и Steam, крипто-схемы «удвою», ссылки с подменой букв'],
+  ['spam',       'спам',                     'Спам',          'Встроенный детектор спама Discord и повтор одного и того же текста'],
+];
+const MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['block', 'Блок']];
+let _threats = {}, _secData = null;
+
+function setThreat(key, mode) {
+  _threats[key] = mode;
+  document.querySelectorAll(`.seg[data-threat="${key}"] button`).forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+}
+
+function renderThreats() {
+  const d = _secData;
+  const rules = Object.fromEntries((d.automod.rules || []).map(r => [r.name, r]));
+  const notes = [];
+  if (!d.automod.can_manage)
+    notes.push('У бота нет права <b>«Управлять сервером»</b> — правила AutoMod не создаются. Выдайте право, и режимы применятся.');
+  if (!d.log_channel)
+    notes.push('Не выбран <b>лог-канал</b> (Логирование) — режиму «Алерт» некуда писать, а «Блок» сработает без уведомления модераторам.');
+  document.getElementById('secNotices').innerHTML = notes.map(n => `<div class="notice">⚠️<div>${n}</div></div>`).join('');
+
+  document.getElementById('secThreats').innerHTML = THREATS.map(([key, rule, title, desc]) => {
+    const r = rules[rule];
+    let status;
+    if (r) status = `<span class="chip ok">AutoMod: ${[r.blocks ? 'блокирует' : '', r.alerts ? 'алерт' : ''].filter(Boolean).join(' + ')}</span>`;
+    else if (key === 'spam' && d.automod.foreign_spam) status = '<span class="chip">на сервере уже есть своё правило спама</span>';
+    else if (_threats[key] === 'alert' && key !== 'phishing' && d.message_content) status = '<span class="chip">проверяет сам бот</span>';
+    else if (_threats[key] === 'off') status = '<span class="chip">выключено</span>';
+    else status = '<span class="chip warn">правило не создано</span>';
+    return `
+      <div class="threat-row">
+        <div class="toggle-info">
+          <div class="toggle-label">${title}</div>
+          <div class="toggle-desc">${desc}</div>
+          <div class="threat-meta">${status}</div>
+        </div>
+        <div class="seg" role="group" aria-label="${title}: режим" data-threat="${key}">
+          ${MODE_LABELS.map(([m, l]) => `<button type="button" data-mode="${m}" aria-pressed="${_threats[key] === m}"
+            onclick="setThreat('${key}', '${m}')">${l}</button>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function saveThreats() {
+  if (!currentGuild) return false;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/threats`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_threats)
+    });
+    if (!r.ok) { showToast('Не удалось сохранить', 'error'); return false; }
+    showToast('✓ Режимы сохранены и применены', 'success');
+    await loadSecurity();
+    return true;
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+    return false;
+  }
+}
+
 async function loadSecurity() {
   if (!currentGuild) return;
-  const box   = document.getElementById('secAutomod');
+  const box   = document.getElementById('secThreats');
   const tbody = document.getElementById('secAlertsTable');
   tbody.innerHTML = skeletonRows(5, 4);
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/security/overview`);
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
+    _secData = d;
+    _threats = { ...(d.threats || {}) };
 
     const rules = d.automod.rules || [];
     document.getElementById('secRulesCount').textContent = rules.filter(x => x.enabled).length;
     document.getElementById('secAlerts7d').textContent   = d.alerts_7d ?? 0;
-
-    if (!d.automod.can_manage) {
-      box.innerHTML = `<div class="empty" style="padding:1.5rem;"><div class="empty-title">Нет права «Управлять сервером»</div>
-        <div class="empty-sub">Выдайте его боту — правила AutoMod создадутся автоматически</div></div>`;
-    } else if (!rules.length) {
-      box.innerHTML = `<div class="empty" style="padding:1.5rem;"><div class="empty-title">Правила ещё не созданы</div>
-        <div class="empty-sub">Бот создаст их при следующей проверке (до 30 минут)</div></div>`;
-    } else {
-      box.innerHTML = rules.map(x => `
-        <div class="toggle-row">
-          <div class="toggle-info">
-            <div class="toggle-label">${escapeHtml(x.name)}</div>
-            <div class="toggle-desc">${[x.blocks ? 'блокирует сообщение' : '', x.alerts ? 'алерт в лог-канал' : '']
-              .filter(Boolean).join(' · ') || 'без действий'}</div>
-          </div>
-          <span class="chip ${x.enabled ? 'ok' : ''}">${x.enabled ? 'активно' : 'выключено'}</span>
-        </div>`).join('');
-    }
+    renderThreats();
 
     const alerts = d.alerts || [];
     if (!alerts.length) {

@@ -821,8 +821,12 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         # Проверяем whitelist
         if _lists_cache[gid].get(uid) == "white": return
 
+        # Режимы угроз из дашборда: выключенное правило не проверяем
+        from witness.database import get_threats
+        modes = await get_threats(gid)
+
         # Проверка дублирования контента
-        if message.content:
+        if message.content and modes["spam"] != "off":
             dup = await check_duplicate_content(gid, uid, message.content)
             if dup["is_duplicate"]:
                 await create_alert(gid, "duplicate_content", dup["severity"],
@@ -830,7 +834,8 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
         # Проверка фишинга и скама
         if message.content:
-            findings = check_phishing(message.content)
+            findings = [f for f in check_phishing(message.content)
+                        if modes["phishing" if f["type"] == "phishing" else "suspicious"] != "off"]
             if findings:
                 await create_alert(gid, "phishing_detected", "HIGH", uid,
                                    f"Обнаружен фишинг/скам: {findings[0]['type']}", {"findings": findings})
