@@ -33,6 +33,8 @@ async def db_init():
                 PRIMARY KEY (guild_id, user_id));
             CREATE TABLE IF NOT EXISTS security_settings (
                 guild_id INTEGER PRIMARY KEY, log_channel INTEGER DEFAULT 0, settings TEXT DEFAULT '{}');
+            CREATE TABLE IF NOT EXISTS threat_settings (
+                guild_id INTEGER PRIMARY KEY, settings TEXT DEFAULT '{}');
             CREATE TABLE IF NOT EXISTS warnings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL, mod_id INTEGER NOT NULL, reason TEXT, created_at TEXT);
@@ -374,6 +376,36 @@ async def save_security(gid, log_channel, settings):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT INTO security_settings (guild_id,log_channel,settings) VALUES(?,?,?) ON CONFLICT(guild_id) DO UPDATE SET log_channel=excluded.log_channel,settings=excluded.settings", (gid,log_channel,json.dumps(settings)))
         await db.commit()
+
+# Режимы правил защиты: off — выключено, alert — только алерт в лог-канал,
+# block — блокировать сообщение и прислать алерт. Применяются в automod.py
+# (правила AutoMod) и в security_module.py (проверка текста самим ботом).
+THREAT_MODES   = ("off", "alert", "block")
+DEFAULT_THREATS = {"phishing": "block", "suspicious": "alert", "spam": "alert"}
+_threat_cache: dict = {}
+
+async def get_threats(gid):
+    if gid in _threat_cache:
+        return dict(_threat_cache[gid])
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT settings FROM threat_settings WHERE guild_id=?", (gid,)) as c:
+            row = await c.fetchone()
+    saved = json.loads(row[0] or "{}") if row else {}
+    modes = {k: saved[k] if saved.get(k) in THREAT_MODES else v for k, v in DEFAULT_THREATS.items()}
+    _threat_cache[gid] = modes
+    return dict(modes)
+
+async def save_threats(gid, modes):
+    """Сохраняет режимы; неизвестные ключи и значения отбрасываются."""
+    clean = await get_threats(gid)
+    clean.update({k: v for k, v in modes.items() if k in DEFAULT_THREATS and v in THREAT_MODES})
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT INTO threat_settings (guild_id,settings) VALUES(?,?) "
+                         "ON CONFLICT(guild_id) DO UPDATE SET settings=excluded.settings",
+                         (gid, json.dumps(clean)))
+        await db.commit()
+    _threat_cache[gid] = clean
+    return dict(clean)
 
 async def is_enabled(gid, key):
     _, s = await get_security(gid); return s.get(key, False)

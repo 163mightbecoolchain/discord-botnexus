@@ -6,9 +6,12 @@
 интент для этого не нужен: бот только создаёт правила и получает срабатывания.
 
 Правила бот создаёт сам на каждом сервере, где у него есть право Manage Server:
-  • «фишинг-ссылки» — поддельные домены Discord и Steam: блокируются всегда;
-  • «подозрительные сообщения» и «спам» — только алерт модераторам. Нужны лишь
-    пока нет Message Content Intent: с ним то же самое проверяет security_module.
+  • «фишинг-ссылки» — поддельные домены Discord и Steam;
+  • «подозрительные сообщения» — фейковые раздачи Nitro, крипто-скам;
+  • «спам» — встроенный детектор спама Discord.
+Режим каждого правила (off / alert / block) сервер выбирает в дашборде, по
+умолчанию фишинг блокируется, остальное — только алерт. Правило в режиме alert
+с Message Content Intent не создаётся: то же самое проверяет security_module.
 Алерты уходят в лог-канал сервера и пишутся в security_alerts, как раньше.
 """
 
@@ -19,7 +22,7 @@ from discord import AutoModRuleAction, AutoModRuleActionType as ActionType
 from discord import AutoModRuleEventType, AutoModRuleTriggerType as TriggerType, AutoModTrigger
 
 from .core import bot, intents
-from .database import get_log_ch
+from .database import get_log_ch, get_threats
 
 RULE_PREFIX = "Witness · "
 RULE_PHISHING = RULE_PREFIX + "фишинг-ссылки"
@@ -60,32 +63,37 @@ SUSPICIOUS_REGEX = [
     r"(?i)https?://[^\s/]*(?:[a-z][аеорсхуνωκρο]|[аеорсхуνωκρο][a-z])[^\s/]*",
 ]
 
-BLOCK_MESSAGE = "Witness: ссылка похожа на фишинг и заблокирована."
+BLOCK_MESSAGES = {
+    "phishing":   "Witness: ссылка похожа на фишинг и заблокирована.",
+    "suspicious": "Witness: сообщение похоже на скам и заблокировано.",
+    "spam":       "Witness: сообщение похоже на спам и заблокировано.",
+}
 
 # rule_id → (вид алерта, есть ли у правила алерт-действие)
 _our_rules: dict = {}
 _no_perms_reported: set = set()
 
 
-def _desired_rules(log_channel_id):
+def _desired_rules(log_channel_id, modes):
     """Какие правила должны быть на сервере: имя → (триггер, действия) или None (удалить)."""
     alert = [AutoModRuleAction(channel_id=log_channel_id)] if log_channel_id else []
-    need_fallback = not intents.message_content
-    return {
-        RULE_PHISHING: (
-            AutoModTrigger(type=TriggerType.keyword, regex_patterns=PHISHING_REGEX),
-            [AutoModRuleAction(custom_message=BLOCK_MESSAGE)] + alert,
-        ),
-        # Только алерт: без лог-канала правило бесполезно
-        RULE_SUSPICIOUS: (
-            AutoModTrigger(type=TriggerType.keyword, regex_patterns=SUSPICIOUS_REGEX),
-            alert,
-        ) if need_fallback and alert else None,
-        RULE_SPAM: (
-            AutoModTrigger(type=TriggerType.spam),
-            alert,
-        ) if need_fallback and alert else None,
+    triggers = {
+        "phishing":   (RULE_PHISHING, AutoModTrigger(type=TriggerType.keyword, regex_patterns=PHISHING_REGEX)),
+        "suspicious": (RULE_SUSPICIOUS, AutoModTrigger(type=TriggerType.keyword, regex_patterns=SUSPICIOUS_REGEX)),
+        "spam":       (RULE_SPAM, AutoModTrigger(type=TriggerType.spam)),
     }
+    desired = {}
+    for kind, (name, trigger) in triggers.items():
+        mode = modes.get(kind, "off")
+        if mode == "block":
+            desired[name] = (trigger, [AutoModRuleAction(custom_message=BLOCK_MESSAGES[kind])] + alert)
+        elif mode == "alert" and alert and not (kind != "phishing" and intents.message_content):
+            # Без лог-канала алерт-правило бесполезно. Скам и спам с Message
+            # Content Intent проверяет сам бот — второе правило дало бы двойные алерты.
+            desired[name] = (trigger, alert)
+        else:
+            desired[name] = None
+    return desired
 
 
 def _actions_key(actions):
@@ -127,7 +135,7 @@ async def sync_guild(guild: discord.Guild):
     foreign_spam = any(r.trigger.type == TriggerType.spam and r.id not in {o.id for o in ours.values()}
                        for r in existing)
 
-    desired = _desired_rules(log_ch.id if log_ch else None)
+    desired = _desired_rules(log_ch.id if log_ch else None, await get_threats(guild.id))
     if foreign_spam:
         desired[RULE_SPAM] = None
     for name, spec in desired.items():
@@ -143,7 +151,7 @@ async def sync_guild(guild: discord.Guild):
                 rule = await guild.create_automod_rule(
                     name=name, event_type=AutoModRuleEventType.message_send,
                     trigger=trigger, actions=actions, enabled=True,
-                    reason="Witness: защита без доступа к тексту сообщений")
+                    reason="Witness: защита от фишинга, скама и спама")
                 print(f"[AUTOMOD] {guild.name}: создано правило «{name}»")
             elif not _is_same(rule, trigger, actions):
                 rule = await rule.edit(trigger=trigger, actions=actions, enabled=True,
