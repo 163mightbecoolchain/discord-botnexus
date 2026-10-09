@@ -575,6 +575,72 @@ async def api_security_save(request):
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
 
+@require_auth
+async def api_security_overview(request):
+    """GET /api/guild/:id/security/overview — правила AutoMod Witness и последние угрозы"""
+    guild_id = int(request.match_info['guild_id'])
+    s        = request['session']
+    bot      = request.app['bot']
+
+    bg = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    # Правила создаёт witness/automod.py; без Manage Server их нет и прочитать нельзя
+    automod = {'can_manage': bg.me.guild_permissions.manage_guild, 'rules': []}
+    if automod['can_manage']:
+        try:
+            for r in await bg.fetch_automod_rules():
+                if r.creator_id != bot.user.id or not r.name.startswith("Witness · "):
+                    continue
+                kinds = {a.type.name for a in r.actions}
+                automod['rules'].append({
+                    'name':    r.name.removeprefix("Witness · "),
+                    'enabled': r.enabled,
+                    'blocks':  'block_message' in kinds,
+                    'alerts':  'send_alert_message' in kinds,
+                })
+        except Exception as ex:
+            print(f"[SECURITY] automod rules: {ex}")
+
+    alerts, week = [], 0
+    try:
+        since = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM security_alerts WHERE guild_id=? AND created_at>=?",
+                (guild_id, since)) as c:
+                week = (await c.fetchone())[0]
+            async with db.execute("""
+                SELECT alert_type, severity, user_id, description, metadata, created_at
+                FROM security_alerts WHERE guild_id=?
+                ORDER BY id DESC LIMIT 30
+            """, (guild_id,)) as c:
+                rows = await c.fetchall()
+        for atype, sev, uid, desc, meta, ts in rows:
+            try:
+                meta = json.loads(meta or '{}')
+            except ValueError:
+                meta = {}
+            u = bg.get_member(uid) if uid else None
+            alerts.append({
+                'type':        atype,
+                'severity':    sev,
+                'user_id':     str(uid or ''),
+                'user_name':   u.display_name if u else None,
+                'description': desc,
+                'source':      meta.get('source', 'bot'),
+                'matched':     meta.get('matched'),
+                'created_at':  ts,
+            })
+    except Exception as ex:
+        print(f"[SECURITY] alerts: {ex}")
+
+    return web.json_response({'automod': automod, 'alerts': alerts, 'alerts_7d': week})
+
 # ── API: channels ─────────────────────────────────────────────
 
 @require_auth
@@ -1365,6 +1431,7 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/settings',              api_guild_settings_get),
         ('POST', '/guild/{guild_id}/settings',              api_guild_settings_post),
         ('POST', '/guild/{guild_id}/security',              api_security_save),
+        ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
         ('GET',  '/guild/{guild_id}/channels',              api_channels),
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),
