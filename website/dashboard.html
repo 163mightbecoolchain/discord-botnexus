@@ -303,6 +303,14 @@ tr.resolved td { opacity: .55; }
 .stepper input { width: 3.4rem; border: 0; background: transparent; color: var(--text); text-align: center; font-family: var(--mono); font-size: .9rem; -moz-appearance: textfield; appearance: textfield; }
 .stepper input::-webkit-inner-spin-button, .stepper input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .stepper input:focus { outline: none; background: rgba(var(--accent-rgb), .08); }
+.ready-row { display: flex; gap: .75rem; align-items: flex-start; padding: .8rem 0; border-top: 1px solid var(--border); }
+.ready-row:first-child { border-top: 0; padding-top: 0; }
+.ready-row:last-child { padding-bottom: 0; }
+.ready-icon { flex-shrink: 0; width: 1.4rem; text-align: center; }
+.ready-body { flex: 1; min-width: 0; }
+.ready-title { font-weight: 600; font-size: .9rem; display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.ready-fix { font-size: .8rem; color: var(--muted); margin-top: .2rem; line-height: 1.45; }
+.ready-row .btn { flex-shrink: 0; }
 .card-foot { padding: .9rem 1.4rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
 
 /* Поиск */
@@ -669,6 +677,17 @@ html.theme-anim *::before, html.theme-anim *::after {
           <div class="stat-label">Активных апелляций</div>
           <div class="stat-value" id="ovAppeals">—</div>
         </div>
+      </div>
+
+      <div class="card hidden" id="readyCard">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Готовность защиты</div>
+            <div class="card-desc" id="readySummary">Проверяем права и настройки сервера...</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="loadReadiness()">⟳ Проверить</button>
+        </div>
+        <div class="card-body" id="readyList"></div>
       </div>
 
       <div class="card">
@@ -2455,8 +2474,84 @@ function getToggle(id) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  OVERVIEW
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── Готовность защиты ────────────────────────────────────────
+// Сервер присылает ключи и данные, тексты — здесь (и переводятся dashboard-i18n.js)
+const PERM_RU = {
+  manage_guild: 'Управлять сервером', view_audit_log: 'Просматривать журнал аудита',
+  manage_roles: 'Управлять ролями', ban_members: 'Банить участников', kick_members: 'Выгонять участников',
+  moderate_members: 'Таймаут участников', manage_messages: 'Управлять сообщениями',
+  send_messages: 'Отправлять сообщения', embed_links: 'Встраивать ссылки',
+};
+const chips = list => list.map(x => `<span class="chip">${escapeHtml(x)}</span>`).join('');
+const pageBtn = (page, label) => `<button class="btn btn-ghost btn-sm" onclick="showPage('${page}')">${label}</button>`;
+
+function readinessRow(c) {
+  const d = c.data || {};
+  // Функции, а не значения: вычисляется только текст своего пункта
+  const R = ({
+    bot_perms: () => c.level === 'ok'
+      ? ['У бота есть все нужные права']
+      : ['Боту не хватает прав', chips(d.missing.map(p => PERM_RU[p] || p)),
+         'Настройки сервера → Роли → роль Witness: включите эти права'],
+    log_channel: () => d.state === 'missing'
+      ? ['Не выбран лог-канал', '', 'Туда приходят алерты защиты и логи сервера', pageBtn('logging', 'Логирование')]
+      : d.state === 'no_access'
+        ? ['Бот не может писать в лог-канал', chips(['#' + d.channel]),
+           'Дайте роли Witness право видеть канал, отправлять сообщения и встраивать ссылки']
+        : ['Лог-канал', chips(['#' + d.channel])],
+    role_position: () => c.level === 'ok'
+      ? ['Роль Witness выше всех ролей с опасными правами']
+      : ['Эти роли выше роли Witness — анти-нюк не сможет их снять', chips(d.roles),
+         'Настройки сервера → Роли: перетащите роль Witness выше них'],
+    trusted_roles: () => c.level === 'ok'
+      ? ['Доверенные роли выбраны']
+      : ['Не выбраны доверенные роли', '',
+         'Без них анти-нюк снимет роли и модератору, который массово банит рейдеров', pageBtn('security', 'Безопасность')],
+    join_messages: () => c.level === 'ok'
+      ? ['Бот видит входы участников']
+      : ['Выключены системные сообщения о входе', '',
+         'Без них бот не видит новых участников: не работают анти-рейд, карантин и учёт инвайтов. Настройки сервера → Обзор → «Отправлять приветствие при входе участника»'],
+    raid_premium: () => c.level === 'ok'
+      ? ['Анти-рейд активен']
+      : ['Анти-рейд включён, но работает только на Premium'],
+    quarantine_role: () => d.state === 'missing'
+      ? ['Не выбрана роль карантина', '', 'Анти-рейд кикнет участников волны вместо карантина', pageBtn('moderation', 'Модерация')]
+      : d.state === 'too_high'
+        ? ['Роль карантина выше роли Witness', chips([d.role]), 'Бот не сможет её выдать — перетащите роль Witness выше']
+        : ['Роль карантина', chips([d.role])],
+  })[c.key];
+  if (!R) return '';
+  const [title, extra = '', fix = '', action = ''] = R();
+  const icon = { ok: '✅', info: 'ℹ️', warn: '⚠️', error: '⛔' }[c.level];
+  return `<div class="ready-row"><span class="ready-icon" aria-hidden="true">${icon}</span>
+    <div class="ready-body"><div class="ready-title"><span>${title}</span>${extra}</div>
+    ${fix ? `<div class="ready-fix">${fix}</div>` : ''}</div>${action}</div>`;
+}
+
+async function loadReadiness() {
+  const card = document.getElementById('readyCard');
+  if (!currentGuild || !hasPerm('manage_guild')) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/readiness`);
+    if (!r.ok) throw new Error(r.status);
+    const checks = (await r.json()).checks || [];
+    // Сначала проблемы, потом то, что в порядке
+    const order = { error: 0, warn: 1, info: 2, ok: 3 };
+    checks.sort((a, b) => order[a.level] - order[b.level]);
+    document.getElementById('readyList').innerHTML = checks.map(readinessRow).join('');
+    const bad = checks.filter(c => c.level === 'warn' || c.level === 'error').length;
+    const sum = document.getElementById('readySummary');
+    sum.textContent = bad ? 'Есть что поправить' : 'Всё готово — защита сработает как настроено';
+    sum.style.color = bad ? 'var(--warning)' : 'var(--accent)';
+  } catch(e) {
+    document.getElementById('readySummary').textContent = 'Не удалось проверить';
+  }
+}
+
 async function loadOverview() {
   if (!currentGuild) return;
+  loadReadiness();
   animateNum(document.getElementById('ovMembers'), currentGuild.member_count || 0);
 
   try {
@@ -2586,8 +2681,32 @@ function renderAlerts() {
       <td>${escapeHtml(a.user_name || a.user_id || '—')}</td>
       <td class="text-mono text-muted">${a.source === 'automod' ? 'AutoMod' : 'бот'}</td>
       <td class="text-mono text-muted">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id}, ${!a.resolved})">${a.resolved ? 'Вернуть' : 'Решено'}</button></td>
+      <td><div class="flex gap-1" style="flex-wrap:wrap;">
+        ${a.restorable ? `<button class="btn btn-primary btn-sm" onclick="btnBusy(this, () => restoreAlert(${a.id}))">↩ Вернуть роли</button>` : ''}
+        ${a.restored ? '<span class="chip ok">роли возвращены</span>' : ''}
+        <button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id}, ${!a.resolved})">${a.resolved ? 'Вернуть' : 'Решено'}</button>
+      </div></td>
     </tr>`).join('');
+}
+
+async function restoreAlert(id) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/alert/${id}/restore`, { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      showToast({
+        already_restored: 'Роли уже возвращены', member_gone: 'Участника уже нет на сервере',
+        nothing_to_restore: 'Нечего возвращать', discord: 'Discord не дал вернуть роли — проверьте положение роли Witness',
+      }[d.error] || 'Не удалось вернуть роли', 'error');
+      return false;
+    }
+    showToast(d.skipped ? '✓ Роли возвращены, часть пропущена' : '✓ Роли возвращены', 'success');
+    await loadSecurity();
+    return true;
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+    return false;
+  }
 }
 
 async function resolveAlert(id, resolved) {

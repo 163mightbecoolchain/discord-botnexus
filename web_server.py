@@ -649,6 +649,10 @@ async def api_security_overview(request):
                 'description': desc,
                 'source':      meta.get('source', 'bot'),
                 'matched':     meta.get('matched'),
+                # Анти-нюк снял роли или дал таймаут — их можно вернуть кнопкой
+                'restorable':  bool((meta.get('removed_roles') or meta.get('timed_out'))
+                                    and not meta.get('restored')),
+                'restored':    bool(meta.get('restored')),
                 'created_at':  ts,
             })
     except Exception as ex:
@@ -762,6 +766,40 @@ async def api_protection(request):
         return web.json_response({'ok': True, **(await _protection_payload(bg))})
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
+
+async def _guild_for_manager(request):
+    """(guild, member) для запросов, которым нужно право «Управлять сервером», или (None, ответ)."""
+    guild_id = int(request.match_info['guild_id'])
+    bg = request.app['bot'].get_guild(guild_id)
+    if not bg:
+        return None, web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, request['session']['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return None, web.json_response({'error': 'Forbidden'}, status=403)
+    return bg, member
+
+@require_auth
+async def api_readiness(request):
+    """GET /api/guild/:id/readiness — всё ли настроено, чтобы защита сработала."""
+    bg, err = await _guild_for_manager(request)
+    if not bg:
+        return err
+    from witness.protection import readiness
+    try:
+        return web.json_response({'checks': await readiness(bg)})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+@require_auth
+async def api_alert_restore(request):
+    """POST /api/guild/:id/alert/:alert_id/restore — вернуть роли, снятые анти-нюком."""
+    bg, err = await _guild_for_manager(request)
+    if not bg:
+        return err
+    from witness.protection import restore_from_alert
+    res = await restore_from_alert(bg, int(request.match_info['alert_id']), request['session']['user_id'])
+    status = 200 if res.get('ok') else (404 if res.get('error') == 'not_found' else 400)
+    return web.json_response(res, status=status)
 
 @require_auth
 async def api_alert_resolve(request):
@@ -1581,6 +1619,8 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
         ('POST', '/guild/{guild_id}/threats',               api_threats_save),
         ('POST', '/guild/{guild_id}/alert/{alert_id}/resolve', api_alert_resolve),
+        ('POST', '/guild/{guild_id}/alert/{alert_id}/restore', api_alert_restore),
+        ('GET',  '/guild/{guild_id}/readiness',             api_readiness),
         ('GET',  '/guild/{guild_id}/protection',            api_protection),
         ('POST', '/guild/{guild_id}/protection',            api_protection),
         ('GET',  '/guild/{guild_id}/channels',              api_channels),

@@ -247,12 +247,14 @@ async def _on_member_role_grant(entry):
         return
     target = await resolve_member(guild, entry.target.id)
     taken = "Только уведомление."
+    undo = {}
     if cfg["escalation"] == "revert" and target:
         removable = [r for r in risky if r < guild.me.top_role and not r.managed]
         try:
             if removable:
                 await target.remove_roles(*removable, reason="Witness: откат выдачи опасной роли")
                 taken = "Сняты роли: " + ", ".join(r.mention for r in removable)
+                undo = {"removed_roles": [str(r.id) for r in removable], "member_id": str(target.id)}
             if len(removable) < len(risky):
                 taken += "\nЧасть ролей выше роли Witness — не сняты."
         except discord.HTTPException as ex:
@@ -260,10 +262,10 @@ async def _on_member_role_grant(entry):
     gained = sorted({p for r in risky for p in ESCALATION_PERMS if getattr(r.permissions, p)})
     who = target.mention if target else f"`{entry.target.id}`"
     await _escalation_alert(guild, actor, f"{who} выданы роли {', '.join(r.mention for r in risky)}",
-                            gained, taken)
+                            gained, taken, undo)
 
 
-async def _escalation_alert(guild, actor, what, perms, taken):
+async def _escalation_alert(guild, actor, what, perms, taken, undo=None):
     by = await resolve_member(guild, actor)
     e = build_embed(C.DANGER)
     e.set_author(name="⚠️ Выданы опасные права")
@@ -273,4 +275,126 @@ async def _escalation_alert(guild, actor, what, perms, taken):
     e.add_field(name="Что сделано", value=taken[:1024], inline=False)
     await _notify(guild, e, "permission_escalation", "HIGH", actor,
                   "Выданы опасные права: " + ", ".join(PERM_NAMES.get(p, p) for p in perms),
-                  {"source": "antinuke", "taken": taken}, dm_owner=True)
+                  {"source": "antinuke", "taken": taken, **(undo or {})}, dm_owner=True)
+
+
+# ── Откат ответа анти-нюка (кнопка «Вернуть роли» в дашборде) ─
+
+async def restore_from_alert(guild, alert_id: int, by_user_id: int) -> dict:
+    """Возвращает роли (и снимает таймаут), снятые анти-нюком по алерту alert_id.
+    Роли, которые с тех пор удалили или подняли выше роли Witness, пропускаются."""
+    import json
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id, metadata FROM security_alerts WHERE id=? AND guild_id=?",
+                              (alert_id, guild.id)) as c:
+            row = await c.fetchone()
+    if not row:
+        return {"error": "not_found"}
+    meta = json.loads(row[1] or "{}")
+    if meta.get("restored"):
+        return {"error": "already_restored"}
+    role_ids = meta.get("removed_roles") or []
+    if not role_ids and not meta.get("timed_out"):
+        return {"error": "nothing_to_restore"}
+    member = await resolve_member(guild, int(meta.get("member_id") or row[0] or 0))
+    if not member:
+        return {"error": "member_gone"}
+
+    me = guild.me
+    roles = [r for rid in role_ids if (r := guild.get_role(int(rid)))]
+    addable = [r for r in roles if r < me.top_role and not r.managed and r not in member.roles]
+    skipped = len(role_ids) - len(roles) + len([r for r in roles if r not in addable and r not in member.roles])
+    restored = []
+    try:
+        if addable:
+            await member.add_roles(*addable, reason=f"Witness: роли возвращены из дашборда ({by_user_id})")
+            restored = [r.mention for r in addable]
+        if meta.get("timed_out"):
+            await member.timeout(None, reason="Witness: таймаут анти-нюка снят из дашборда")
+    except discord.HTTPException as ex:
+        return {"error": "discord", "detail": str(ex)}
+
+    meta["restored"] = {"by": str(by_user_id), "at": _utcnow().isoformat(), "roles": [str(r.id) for r in addable]}
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE security_alerts SET metadata=?, resolved=1 WHERE id=? AND guild_id=?",
+                         (json.dumps(meta), alert_id, guild.id))
+        await db.commit()
+
+    by = await resolve_member(guild, by_user_id)
+    e = build_embed(C.SUCCESS)
+    e.set_author(name="↩️ Анти-нюк: роли возвращены")
+    e.add_field(name="Участник", value=member.mention, inline=True)
+    e.add_field(name="Вернул", value=by.mention if by else f"`{by_user_id}`", inline=True)
+    e.add_field(name="Роли", value=", ".join(restored) or "—", inline=False)
+    if meta.get("timed_out"):
+        e.add_field(name="Таймаут", value="снят", inline=True)
+    if skipped:
+        e.add_field(name="Пропущено", value=f"{skipped} — роль удалена или выше роли Witness", inline=True)
+    ch = await get_log_ch(guild)
+    if ch:
+        queue_log(ch, e)
+    return {"ok": True, "restored": len(addable), "skipped": skipped, "untimed": bool(meta.get("timed_out"))}
+
+
+# ── Проверка готовности (блок на «Обзоре» дашборда) ───────────
+# Каждый пункт: {"key", "level": ok|info|warn|error, "data": {...}}; info — к сведению,
+# не проблема. Тексты рисует
+# дашборд по key — так их можно перевести.
+NEEDED_PERMS = {
+    # право: насколько критично без него
+    "manage_guild": "error",      # правила AutoMod, инвайты
+    "view_audit_log": "error",    # анти-нюк, кики и роли без интентов
+    "manage_roles": "error",      # снять роли анти-нюком, карантин
+    "ban_members": "warn", "kick_members": "warn", "moderate_members": "warn",
+    "manage_messages": "warn", "send_messages": "warn", "embed_links": "warn",
+}
+
+
+async def readiness(guild) -> list:
+    from .core import DANGEROUS_PERMS, intents
+    me = guild.me
+    cfg = await get_protection(guild.id)
+    _, sec = await get_security(guild.id)
+    out = []
+
+    perms = me.guild_permissions
+    missing = [p for p in NEEDED_PERMS if not getattr(perms, p)]
+    level = "ok" if not missing else ("error" if any(NEEDED_PERMS[p] == "error" for p in missing) else "warn")
+    out.append({"key": "bot_perms", "level": level, "data": {"missing": missing}})
+
+    ch = await get_log_ch(guild)
+    if not ch:
+        out.append({"key": "log_channel", "level": "error", "data": {"state": "missing"}})
+    else:
+        cp = ch.permissions_for(me)
+        ok = cp.view_channel and cp.send_messages and cp.embed_links
+        out.append({"key": "log_channel", "level": "ok" if ok else "error",
+                    "data": {"state": "ok" if ok else "no_access", "channel": ch.name}})
+
+    if cfg["antinuke_enabled"] and cfg["antinuke_action"] != "alert":
+        above = [r.name for r in guild.roles
+                 if not r.is_default() and not r.managed and r >= me.top_role and r not in me.roles
+                 and any(getattr(r.permissions, p) for p in DANGEROUS_PERMS)]
+        out.append({"key": "role_position", "level": "warn" if above else "ok",
+                    "data": {"roles": above[:10], "bot_role": me.top_role.name}})
+        out.append({"key": "trusted_roles", "level": "ok" if cfg["trusted_roles"] else "warn",
+                    "data": {"count": len(cfg["trusted_roles"])}})
+
+    if not intents.members:
+        on = bool(guild.system_channel and guild.system_channel_flags.join_notifications)
+        out.append({"key": "join_messages", "level": "ok" if on else "warn", "data": {}})
+
+    if sec.get("anti_raid"):
+        tier_ok = await get_tier(guild.id) >= TIER_PREMIUM
+        # Анти-рейд включён по умолчанию у всех — без Premium это не ошибка настройки
+        out.append({"key": "raid_premium", "level": "ok" if tier_ok else "info", "data": {}})
+        if cfg["raid_action"] == "quarantine":
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute("SELECT role_id FROM quarantine_settings WHERE guild_id=?",
+                                      (guild.id,)) as c:
+                    q = await c.fetchone()
+            role = guild.get_role(q[0]) if q and q[0] else None
+            state = "missing" if not role else ("too_high" if role >= me.top_role else "ok")
+            out.append({"key": "quarantine_role", "level": "ok" if state == "ok" else "warn",
+                        "data": {"state": state, "role": role.name if role else None}})
+    return out

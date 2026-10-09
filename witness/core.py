@@ -79,18 +79,21 @@ async def antinuke_check(guild: discord.Guild, mod_id: int, action: str) -> bool
     if now - _antinuke_cooldown.get((guild.id, mod_id), 0) < 60:
         return True                     # уже отреагировали, действие всё равно блокируем
     _antinuke_cooldown[(guild.id, mod_id)] = now
-    taken = await _antinuke_respond(guild, mod_id, cfg["antinuke_action"])
-    await _antinuke_alert(guild, mod_id, action, len(_antinuke_tracker[key]), window, taken)
+    taken, undo = await _antinuke_respond(guild, mod_id, cfg["antinuke_action"])
+    await _antinuke_alert(guild, mod_id, action, len(_antinuke_tracker[key]), window, taken, undo)
     return True
 
 
-async def _antinuke_respond(guild: discord.Guild, mod_id: int, mode: str) -> str:
-    """Обезвреживает нарушителя по настройке сервера. Возвращает описание сделанного."""
+async def _antinuke_respond(guild: discord.Guild, mod_id: int, mode: str):
+    """Обезвреживает нарушителя по настройке сервера.
+    Возвращает (описание сделанного, что откатывать): {"removed_roles": [id], "timed_out": bool}
+    — по этому кнопка «Вернуть роли» в дашборде восстанавливает участника."""
+    undo = {"removed_roles": [], "timed_out": False}
     if mode == "alert":
-        return "Только уведомление (так настроено в дашборде)."
+        return "Только уведомление (так настроено в дашборде).", undo
     member = await resolve_member(guild, mod_id)
     if not member:
-        return "Участник не найден на сервере — ничего не сделано."
+        return "Участник не найден на сервере — ничего не сделано.", undo
     me = guild.me
     dangerous = [r for r in member.roles
                  if not r.is_default() and any(getattr(r.permissions, p) for p in DANGEROUS_PERMS)]
@@ -101,6 +104,7 @@ async def _antinuke_respond(guild: discord.Guild, mod_id: int, mode: str) -> str
         try:
             await member.remove_roles(*removable, reason="Witness анти-нюк: превышен лимит действий")
             lines.append("Сняты роли: " + ", ".join(r.mention for r in removable))
+            undo["removed_roles"] = [str(r.id) for r in removable]
         except discord.HTTPException as ex:
             lines.append(f"Не удалось снять роли: {ex}")
     elif removable:
@@ -113,13 +117,14 @@ async def _antinuke_respond(guild: discord.Guild, mod_id: int, mode: str) -> str
         try:
             await member.timeout(datetime.timedelta(hours=1), reason="Witness анти-нюк")
             lines.append("Таймаут на 1 час.")
+            undo["timed_out"] = True
         except discord.HTTPException:
             lines.append("Таймаут выдать не удалось (у участника права администратора или нет прав у бота).")
-    return "\n".join(lines)
+    return "\n".join(lines), undo
 
 
 async def _antinuke_alert(guild: discord.Guild, mod_id: int,
-                           action: str, count: int, window: int, taken: str = ""):
+                           action: str, count: int, window: int, taken: str = "", undo: dict = None):
     """Алерт владельцу и в лог-канал при обнаружении нюка, плюс запись в ленту угроз."""
     ch  = await get_log_ch(guild)
     mod = await resolve_member(guild, mod_id)
@@ -134,7 +139,8 @@ async def _antinuke_alert(guild: discord.Guild, mod_id: int,
     if taken:
         e.add_field(name="Что сделано", value=taken[:1024], inline=False)
     e.add_field(name="Рекомендация",
-                value="Проверь права этого модератора. Лимиты и действие — в дашборде, «Безопасность».",
+                value="Проверь права этого модератора. Если это ложное срабатывание — "
+                      "роли можно вернуть кнопкой в дашборде, «Безопасность → Последние угрозы».",
                 inline=False)
     if ch:
         try: await ch.send(embed=e)
@@ -146,7 +152,8 @@ async def _antinuke_alert(guild: discord.Guild, mod_id: int,
         from security_module import create_alert
         await create_alert(guild.id, "antinuke", "CRITICAL", mod_id,
                            f"Анти-нюк: {count} {ANTINUKE_LABELS.get(action, action)} за {window} сек.",
-                           {"source": "antinuke", "action": action, "taken": taken})
+                           {"source": "antinuke", "action": action, "taken": taken,
+                            **(undo or {})})
     except Exception as ex:
         print(f"[ANTINUKE] alert: {ex}")
 

@@ -221,6 +221,40 @@
     'Сгоревший варн остаётся в истории, но к наказанию больше не ведёт. Выключено — варны не сгорают':
       'An expired warning stays in the history but no longer leads to punishment. Off — warnings never expire',
 
+    // Готовность защиты и откат анти-нюка
+    'Готовность защиты': 'Protection readiness', 'Проверяем права и настройки сервера...': 'Checking server permissions and settings...',
+    '⟳ Проверить': '⟳ Check', 'Есть что поправить': 'Some things need fixing',
+    'Всё готово — защита сработает как настроено': 'All set — protection will work as configured',
+    'Не удалось проверить': 'Could not check',
+    'У бота есть все нужные права': 'The bot has every permission it needs', 'Боту не хватает прав': 'The bot is missing permissions',
+    'Настройки сервера → Роли → роль Witness: включите эти права': 'Server Settings → Roles → Witness role: turn these permissions on',
+    'Управлять сервером': 'Manage Server', 'Просматривать журнал аудита': 'View Audit Log', 'Управлять ролями': 'Manage Roles',
+    'Банить участников': 'Ban Members', 'Выгонять участников': 'Kick Members', 'Таймаут участников': 'Timeout Members',
+    'Управлять сообщениями': 'Manage Messages', 'Отправлять сообщения': 'Send Messages', 'Встраивать ссылки': 'Embed Links',
+    'Не выбран лог-канал': 'No log channel selected', 'Туда приходят алерты защиты и логи сервера': 'Protection alerts and server logs go there',
+    'Бот не может писать в лог-канал': 'The bot cannot post in the log channel',
+    'Дайте роли Witness право видеть канал, отправлять сообщения и встраивать ссылки':
+      'Give the Witness role permission to view the channel, send messages and embed links',
+    'Роль Witness выше всех ролей с опасными правами': 'The Witness role is above every role with dangerous permissions',
+    'Эти роли выше роли Witness — анти-нюк не сможет их снять': 'These roles are above the Witness role — anti-nuke cannot remove them',
+    'Настройки сервера → Роли: перетащите роль Witness выше них': 'Server Settings → Roles: drag the Witness role above them',
+    'Доверенные роли выбраны': 'Trusted roles are set', 'Не выбраны доверенные роли': 'No trusted roles set',
+    'Без них анти-нюк снимет роли и модератору, который массово банит рейдеров':
+      'Without them, anti-nuke will also strip a moderator who mass-bans raiders',
+    'Бот видит входы участников': 'The bot sees members joining', 'Выключены системные сообщения о входе': 'Join system messages are off',
+    'Без них бот не видит новых участников: не работают анти-рейд, карантин и учёт инвайтов. Настройки сервера → Обзор → «Отправлять приветствие при входе участника»':
+      'Without them the bot does not see new members: anti-raid, quarantine and invite tracking do not work. Server Settings → Overview → “Send a welcome message when someone joins”',
+    'Анти-рейд активен': 'Anti-raid is active', 'Анти-рейд включён, но работает только на Premium': 'Anti-raid is on, but it works only on Premium',
+    'Не выбрана роль карантина': 'No quarantine role selected', 'Анти-рейд кикнет участников волны вместо карантина': 'Anti-raid will kick the wave instead of quarantining it',
+    'Роль карантина выше роли Witness': 'The quarantine role is above the Witness role',
+    'Бот не сможет её выдать — перетащите роль Witness выше': 'The bot cannot assign it — drag the Witness role higher',
+    'Роль карантина': 'Quarantine role',
+    '↩ Вернуть роли': '↩ Restore roles', 'роли возвращены': 'roles restored', '✓ Роли возвращены': '✓ Roles restored',
+    '✓ Роли возвращены, часть пропущена': '✓ Roles restored, some skipped', 'Роли уже возвращены': 'Roles were already restored',
+    'Участника уже нет на сервере': 'The member is no longer on the server', 'Нечего возвращать': 'Nothing to restore',
+    'Discord не дал вернуть роли — проверьте положение роли Witness': 'Discord refused to restore the roles — check the Witness role position',
+    'Не удалось вернуть роли': 'Could not restore roles',
+
     // Поиск участника
     'Полное досье: наказания, апелляции, инвайты': 'Full record: punishments, appeals, invites',
     'Найди участника': 'Find a member', 'Ник или ID участника...': 'Member nickname or ID...',
