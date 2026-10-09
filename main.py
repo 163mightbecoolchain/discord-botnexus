@@ -48,7 +48,7 @@ from witness.config import TOKEN
 from witness.core import bot, flush_log_queue, intents
 from witness.tasks import graceful_shutdown
 # Импорт модулей регистрирует их слэш-команды и обработчики событий на общем объекте bot.
-from witness import moderation, admin, invites, general, ai_commands, games, albion, events, automod  # noqa: F401
+from witness import moderation, admin, invites, general, ai_commands, games, albion, events, automod, protection  # noqa: F401
 
 async def _graceful_shutdown():
     """

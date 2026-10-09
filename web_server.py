@@ -707,6 +707,53 @@ async def api_threats_save(request):
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
 
+async def _protection_payload(bg):
+    from witness.core import get_tier
+    from witness.config import TIER_PREMIUM
+    from witness.database import get_protection, get_security
+    from witness.protection import lockdown_active
+    cfg = await get_protection(bg.id)
+    _, sec = await get_security(bg.id)
+    return {
+        **cfg,
+        'raid_enabled': bool(sec.get('anti_raid')),
+        'premium':      await get_tier(bg.id) >= TIER_PREMIUM,
+        'lockdown':     await lockdown_active(bg),
+    }
+
+@require_auth
+async def api_protection(request):
+    """GET/POST /api/guild/:id/protection — анти-нюк, анти-рейд, сгорание варнов."""
+    guild_id = int(request.match_info['guild_id'])
+    s        = request['session']
+    bot      = request.app['bot']
+
+    bg = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    if request.method == 'GET':
+        return web.json_response(await _protection_payload(bg))
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return web.json_response({'error': 'Bad request'}, status=400)
+        from witness.database import save_protection, get_security, save_security
+        data.pop('lockdown_until', None)            # служебное поле, из дашборда не меняется
+        if isinstance(data.get('trusted_roles'), list):
+            data['trusted_roles'] = [str(r) for r in data['trusted_roles']
+                                     if str(r).isdigit() and bg.get_role(int(r))]
+        await save_protection(guild_id, data)
+        if 'raid_enabled' in data:
+            log_ch, sec = await get_security(guild_id)
+            sec['anti_raid'] = bool(data['raid_enabled'])
+            await save_security(guild_id, log_ch, sec)
+        return web.json_response({'ok': True, **(await _protection_payload(bg))})
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
 @require_auth
 async def api_alert_resolve(request):
     """POST /api/guild/:id/alert/:alert_id/resolve — {"resolved": true|false}"""
@@ -1092,10 +1139,8 @@ async def api_member_lookup(request):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             try:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM warnings WHERE guild_id=? AND user_id=?",
-                    (guild_id, uid)) as c:
-                    out['warns'] = (await c.fetchone())[0]
+                from witness.database import get_active_warnings
+                out['warns'] = len(await get_active_warnings(guild_id, uid))
             except Exception as ex:
                 print(f"[LOOKUP] warnings: {ex}")
 
@@ -1527,6 +1572,8 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
         ('POST', '/guild/{guild_id}/threats',               api_threats_save),
         ('POST', '/guild/{guild_id}/alert/{alert_id}/resolve', api_alert_resolve),
+        ('GET',  '/guild/{guild_id}/protection',            api_protection),
+        ('POST', '/guild/{guild_id}/protection',            api_protection),
         ('GET',  '/guild/{guild_id}/channels',              api_channels),
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),

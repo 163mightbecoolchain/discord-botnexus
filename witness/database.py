@@ -35,6 +35,8 @@ async def db_init():
                 guild_id INTEGER PRIMARY KEY, log_channel INTEGER DEFAULT 0, settings TEXT DEFAULT '{}');
             CREATE TABLE IF NOT EXISTS threat_settings (
                 guild_id INTEGER PRIMARY KEY, settings TEXT DEFAULT '{}');
+            CREATE TABLE IF NOT EXISTS protection_settings (
+                guild_id INTEGER PRIMARY KEY, settings TEXT DEFAULT '{}');
             CREATE TABLE IF NOT EXISTS warnings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL, mod_id INTEGER NOT NULL, reason TEXT, created_at TEXT);
@@ -424,6 +426,113 @@ async def save_threats(gid, data):
         await db.commit()
     _threat_cache[gid] = clean
     return await get_threat_config(gid)
+
+# ── Анти-нюк, анти-рейд, сгорание варнов ──────────────────────
+# Всё настраивается из дашборда (вкладка «Безопасность» и «Модерация»).
+# limits: действие → [сколько, за сколько секунд]. Действия:
+#   ban, kick, mute — наказания; channel, role — удаления; webhook — создание вебхуков.
+# antinuke_action: alert — только алерт; strip — снять опасные роли;
+#   strip_timeout — снять роли и выдать таймаут на час.
+# bot_add: off | alert | kick (выгнать бота, добавленного не владельцем и не доверенной ролью).
+# escalation (кто-то выдал роли «Администратор» и т.п.): off | alert | revert.
+# raid_action: alert | kick | quarantine — что делать со всеми, кто зашёл в волне рейда.
+# warn_expiry_days: через сколько дней варн перестаёт считаться (0 — никогда).
+PROTECTION_DEFAULTS = {
+    "antinuke_enabled": True,
+    "antinuke_action": "strip",
+    "limits": {"ban": [5, 30], "kick": [5, 30], "mute": [8, 30],
+               "channel": [3, 20], "role": [3, 20], "webhook": [3, 60]},
+    "trusted_roles": [],
+    "bot_add": "alert",
+    "escalation": "alert",
+    "raid_joins": 8,
+    "raid_window": 10,
+    "raid_action": "kick",
+    "raid_lockdown_minutes": 10,
+    "warn_expiry_days": 0,
+}
+PROTECTION_CHOICES = {
+    "antinuke_action": ("alert", "strip", "strip_timeout"),
+    "bot_add": ("off", "alert", "kick"),
+    "escalation": ("off", "alert", "revert"),
+    "raid_action": ("alert", "kick", "quarantine"),
+}
+# (минимум, максимум) для чисел; лимиты анти-нюка — те же для всех действий
+PROTECTION_RANGES = {
+    "raid_joins": (3, 100), "raid_window": (3, 120), "raid_lockdown_minutes": (0, 1440),
+    "warn_expiry_days": (0, 3650), "limit_count": (2, 100), "limit_window": (5, 600),
+}
+_protection_cache: dict = {}
+
+
+def _clamp(v, lo, hi, default):
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_protection(data, base):
+    """Сливает data поверх base, отбрасывая неизвестное и обрезая числа по диапазонам."""
+    out = json.loads(json.dumps(base))
+    if not isinstance(data, dict):
+        return out
+    if "antinuke_enabled" in data:
+        out["antinuke_enabled"] = bool(data["antinuke_enabled"])
+    for k, choices in PROTECTION_CHOICES.items():
+        if data.get(k) in choices:
+            out[k] = data[k]
+    for k in ("raid_joins", "raid_window", "raid_lockdown_minutes", "warn_expiry_days"):
+        if k in data:
+            out[k] = _clamp(data[k], *PROTECTION_RANGES[k], out[k])
+    if isinstance(data.get("limits"), dict):
+        for act, cur in out["limits"].items():
+            v = data["limits"].get(act)
+            if isinstance(v, (list, tuple)) and len(v) == 2:
+                out["limits"][act] = [_clamp(v[0], *PROTECTION_RANGES["limit_count"], cur[0]),
+                                      _clamp(v[1], *PROTECTION_RANGES["limit_window"], cur[1])]
+    if isinstance(data.get("trusted_roles"), list):
+        ids = [str(r) for r in data["trusted_roles"] if str(r).isdigit()]
+        out["trusted_roles"] = list(dict.fromkeys(ids))[:25]
+    return out
+
+
+async def get_protection(gid):
+    if gid not in _protection_cache:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT settings FROM protection_settings WHERE guild_id=?", (gid,)) as c:
+                row = await c.fetchone()
+        saved = json.loads(row[0] or "{}") if row else {}
+        cfg = _clean_protection(saved, PROTECTION_DEFAULTS)
+        # Время конца авто-локдауна — служебное поле, в дашборде не редактируется
+        cfg["lockdown_until"] = saved.get("lockdown_until") or ""
+        _protection_cache[gid] = cfg
+    return json.loads(json.dumps(_protection_cache[gid]))
+
+
+async def save_protection(gid, data):
+    cur = await get_protection(gid)
+    clean = _clean_protection(data, cur)
+    clean["lockdown_until"] = data.get("lockdown_until", cur.get("lockdown_until", "")) \
+        if isinstance(data, dict) else cur.get("lockdown_until", "")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT INTO protection_settings (guild_id,settings) VALUES(?,?) "
+                         "ON CONFLICT(guild_id) DO UPDATE SET settings=excluded.settings",
+                         (gid, json.dumps(clean)))
+        await db.commit()
+    _protection_cache[gid] = clean
+    return await get_protection(gid)
+
+
+async def get_active_warnings(gid, uid):
+    """Варны, которые ещё считаются (с учётом warn_expiry_days)."""
+    warns = await get_warnings(gid, uid)
+    days = (await get_protection(gid))["warn_expiry_days"]
+    if not days:
+        return warns
+    cutoff = (datetime.datetime.utcnow() - timedelta(days=days)).isoformat()
+    return [w for w in warns if (w[3] or "") >= cutoff]
+
 
 async def is_enabled(gid, key):
     _, s = await get_security(gid); return s.get(key, False)

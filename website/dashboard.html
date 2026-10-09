@@ -283,6 +283,7 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .check { display: inline-flex; align-items: center; gap: .45rem; margin: 0; font-weight: 500; color: var(--text-2); cursor: pointer; }
 .check input { accent-color: var(--accent); width: 16px; height: 16px; }
 tr.resolved td { opacity: .55; }
+.input-num { width: 90px; padding: .4rem .55rem; }
 
 /* Поиск */
 .search-bar { display: flex; gap: .75rem; margin-bottom: 1rem; }
@@ -831,6 +832,11 @@ html.theme-anim *::before, html.theme-anim *::after {
               <input type="number" class="input" id="mod-ban3" value="30" min="1">
             </div>
           </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label for="mod-warnexp">Варн сгорает через (дней)</label>
+            <input type="number" class="input" id="mod-warnexp" value="0" min="0" max="3650" style="max-width: 200px;">
+            <div class="input-help">0 — варны не сгорают. Сгоревший варн виден в истории, но к наказанию не ведёт</div>
+          </div>
         </div>
       </div>
 
@@ -1186,25 +1192,108 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Анти-нюк</div>
-            <div class="card-desc">Лимиты на массовые действия модераторов</div>
+            <div class="card-desc">Защита от взломанного или недобросовестного модератора: лимиты на массовые действия и что делать при превышении</div>
           </div>
+          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
         </div>
         <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Анти-нюк включён</div>
+              <div class="toggle-desc">Владелец сервера, Witness и доверенные роли не проверяются</div>
+            </div>
+            <div class="toggle" id="pn-enabled" role="switch" tabindex="0" aria-label="Анти-нюк включён" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="form-row" style="margin-top:1rem;">
+            <div class="form-group">
+              <label for="pn-action">При превышении лимита</label>
+              <select class="select" id="pn-action">
+                <option value="alert">Только уведомить</option>
+                <option value="strip">Снять опасные роли</option>
+                <option value="strip_timeout">Снять роли и таймаут на час</option>
+              </select>
+              <div class="input-help">Опасные — роли с правами бана, кика, таймаута, управления сервером, ролями, каналами или вебхуками</div>
+            </div>
+            <div class="form-group">
+              <label for="pnTrustAdd">Доверенные роли</label>
+              <div class="chip-list" id="pnTrusted"></div>
+              <select class="select" id="pnTrustAdd" onchange="addTrusted(this)">
+                <option value="">+ добавить роль</option>
+              </select>
+              <div class="input-help">Например, старшие модераторы, которые чистят сервер после рейда массовыми банами</div>
+            </div>
+          </div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>Действие</th><th>Лимит</th><th>За период</th></tr></thead>
-              <tbody>
-                <tr><td>Баны</td><td>5</td><td>30 сек</td></tr>
-                <tr><td>Кики</td><td>5</td><td>30 сек</td></tr>
-                <tr><td>Муты</td><td>8</td><td>30 сек</td></tr>
-                <tr><td>Удаление каналов</td><td>3</td><td>20 сек</td></tr>
-                <tr><td>Удаление ролей</td><td>3</td><td>20 сек</td></tr>
-              </tbody>
+              <thead><tr><th>Действие</th><th>Не больше</th><th>За (сек)</th></tr></thead>
+              <tbody id="pnLimits"></tbody>
             </table>
           </div>
-          <div class="input-help" style="margin-top:.75rem;">
-            При превышении действие блокируется, а владелец сервера получает уведомление.
-            Владелец сервера из проверки исключён.
+          <div class="form-row" style="margin-top:1rem; margin-bottom:0;">
+            <div class="form-group">
+              <label for="pn-botadd">Добавили бота</label>
+              <select class="select" id="pn-botadd">
+                <option value="off">Ничего не делать</option>
+                <option value="alert">Уведомить</option>
+                <option value="kick">Выгнать бота</option>
+              </select>
+              <div class="input-help">Если бота добавил не владелец и не доверенная роль</div>
+            </div>
+            <div class="form-group">
+              <label for="pn-escalation">Выдали опасные права</label>
+              <select class="select" id="pn-escalation">
+                <option value="off">Ничего не делать</option>
+                <option value="alert">Уведомить</option>
+                <option value="revert">Откатить</option>
+              </select>
+              <div class="input-help">Роли дали «Администратор», «Управлять сервером» и т.п., или такую роль выдали участнику</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Анти-рейд</div>
+            <div class="card-desc">Волна входов за короткое время: что делать с участниками волны и включать ли локдаун</div>
+          </div>
+          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
+        </div>
+        <div class="card-body">
+          <div id="raidNotices"></div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Анти-рейд включён</div>
+              <div class="toggle-desc" id="raidLockState"></div>
+            </div>
+            <div class="toggle" id="pr-enabled" role="switch" tabindex="0" aria-label="Анти-рейд включён" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="form-row" style="margin-top:1rem;">
+            <div class="form-group">
+              <label for="pr-joins">Рейд — это входов</label>
+              <input type="number" class="input" id="pr-joins" min="3" max="100">
+            </div>
+            <div class="form-group">
+              <label for="pr-window">За (секунд)</label>
+              <input type="number" class="input" id="pr-window" min="3" max="120">
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom:0;">
+            <div class="form-group">
+              <label for="pr-action">Участников волны</label>
+              <select class="select" id="pr-action">
+                <option value="alert">Не трогать, только уведомить</option>
+                <option value="kick">Кикнуть</option>
+                <option value="quarantine">Отправить в карантин</option>
+              </select>
+              <div class="input-help">Карантин использует роль из «Модерация → Карантин»</div>
+            </div>
+            <div class="form-group">
+              <label for="pr-lock">Авто-локдаун (минут)</label>
+              <input type="number" class="input" id="pr-lock" min="0" max="1440">
+              <div class="input-help">На это время новые аккаунты младше минимального возраста не смогут зайти. 0 — не включать</div>
+            </div>
           </div>
         </div>
       </div>
@@ -2077,7 +2166,8 @@ async function showPage(name) {
   if (name === 'appeals') { await loadAppeals(); }
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation') await loadAutomation();
-  if (name === 'security') await loadSecurity();
+  if (name === 'security') await Promise.all([loadSecurity(), loadProtection()]);
+  if (name === 'moderation') await loadProtection();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') await loadInvites('');
 }
@@ -2323,8 +2413,8 @@ async function saveLogging() {
   return false;
 }
 
-function saveModeration() {
-  return saveSettings({
+async function saveModeration() {
+  const ok = await saveSettings({
     mute1_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute1')) || 7)),
     mute2_days: Math.max(1, Math.min(27, parseInt(getVal('mod-mute2')) || 7)),
     ban3_days:  Math.max(1, parseInt(getVal('mod-ban3')) || 30),
@@ -2334,6 +2424,8 @@ function saveModeration() {
     quarantine_min_age: parseInt(getVal('mod-qage')) || 7,
     quarantine_hours: parseInt(getVal('mod-qhours')) || 24,
   });
+  const ok2 = await postProtection({ warn_expiry_days: parseInt(getVal('mod-warnexp')) || 0 });
+  return ok !== false && ok2;
 }
 
 function getVal(id) {
@@ -2466,7 +2558,7 @@ function renderAlerts() {
   const showResolved = document.getElementById('alShowResolved').checked;
   const alerts = ((_secData && _secData.alerts) || []).filter(a =>
     (showResolved || !a.resolved) &&
-    (!src || a.source === src) &&
+    (!src || (src === 'automod' ? a.source === 'automod' : a.source !== 'automod')) &&
     (!sev || (sev === 'high' ? ['HIGH', 'CRITICAL'].includes(a.severity) : a.severity === sev)));
   if (!alerts.length) {
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
@@ -2566,6 +2658,102 @@ async function saveThreats() {
     showToast('Ошибка соединения', 'error');
     return false;
   }
+}
+
+// ── Анти-нюк, анти-рейд, сгорание варнов ──────────────────
+const NUKE_LIMITS = [
+  ['ban', 'Баны'], ['kick', 'Кики'], ['mute', 'Муты'],
+  ['channel', 'Удаление каналов'], ['role', 'Удаление ролей'], ['webhook', 'Создание вебхуков'],
+];
+let _prot = null, _trusted = [];
+
+function renderTrusted() {
+  const name = id => (_roles.find(r => String(r.id) === String(id)) || {}).name || id;
+  document.getElementById('pnTrusted').innerHTML = _trusted.map(id => `<span class="chip-x">@${escapeHtml(name(id))}
+      <button type="button" aria-label="Убрать @${escapeHtml(name(id))}" onclick="removeTrusted('${id}')">×</button></span>`).join('');
+  document.getElementById('pnTrustAdd').innerHTML = '<option value="">+ добавить роль</option>' +
+    _roles.filter(r => !_trusted.includes(String(r.id)))
+      .map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`).join('');
+  csSync();
+}
+function addTrusted(sel) {
+  if (sel.value && !_trusted.includes(sel.value)) _trusted.push(sel.value);
+  sel.value = '';
+  renderTrusted();
+}
+function removeTrusted(id) {
+  _trusted = _trusted.filter(x => x !== String(id));
+  renderTrusted();
+}
+
+function renderProtection() {
+  const p = _prot;
+  setToggle('pn-enabled', p.antinuke_enabled);
+  setVal('pn-action', p.antinuke_action);
+  setVal('pn-botadd', p.bot_add);
+  setVal('pn-escalation', p.escalation);
+  document.getElementById('pnLimits').innerHTML = NUKE_LIMITS.map(([k, label]) => `
+    <tr><td>${label}</td>
+      <td><input type="number" class="input input-num" id="pnl-${k}-n" min="2" max="100" value="${p.limits[k][0]}" aria-label="${label}: не больше"></td>
+      <td><input type="number" class="input input-num" id="pnl-${k}-s" min="5" max="600" value="${p.limits[k][1]}" aria-label="${label}: за секунд"></td></tr>`).join('');
+  _trusted = (p.trusted_roles || []).map(String);
+  renderTrusted();
+
+  setToggle('pr-enabled', p.raid_enabled);
+  setVal('pr-joins', p.raid_joins);
+  setVal('pr-window', p.raid_window);
+  setVal('pr-action', p.raid_action);
+  setVal('pr-lock', p.raid_lockdown_minutes);
+  document.getElementById('raidLockState').textContent =
+    p.lockdown ? 'Локдаун сейчас включён' : 'Локдаун сейчас выключен';
+  document.getElementById('raidNotices').innerHTML = p.premium ? '' :
+    '<div class="notice">⚠️<div>Анти-рейд работает на тарифе <b>Premium</b>. Настройки сохранятся и включатся вместе с тарифом.</div></div>';
+  setVal('mod-warnexp', p.warn_expiry_days);
+  csSync();
+}
+
+async function loadProtection() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/protection`);
+    if (!r.ok) return;
+    _prot = await r.json();
+    renderProtection();
+  } catch(e) {}
+}
+
+async function postProtection(payload) {
+  if (!currentGuild) return false;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/protection`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) { showToast('Не удалось сохранить', 'error'); return false; }
+    _prot = await r.json();
+    return true;
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+    return false;
+  }
+}
+
+async function saveProtection() {
+  const num = (id, d) => { const v = parseInt(getVal(id)); return Number.isFinite(v) ? v : d; };
+  const limits = Object.fromEntries(NUKE_LIMITS.map(([k]) =>
+    [k, [num(`pnl-${k}-n`, _prot.limits[k][0]), num(`pnl-${k}-s`, _prot.limits[k][1])]]));
+  const ok = await postProtection({
+    antinuke_enabled: !!getToggle('pn-enabled'),
+    antinuke_action: getVal('pn-action'),
+    bot_add: getVal('pn-botadd'),
+    escalation: getVal('pn-escalation'),
+    limits, trusted_roles: _trusted,
+    raid_enabled: !!getToggle('pr-enabled'),
+    raid_joins: num('pr-joins', 8), raid_window: num('pr-window', 10),
+    raid_action: getVal('pr-action'), raid_lockdown_minutes: num('pr-lock', 10),
+  });
+  if (ok) { showToast('✓ Сохранено', 'success'); renderProtection(); }
+  return ok;
 }
 
 async function loadSecurity() {

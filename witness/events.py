@@ -38,7 +38,6 @@ from .core import (
     _invite_cache,
     notify_mute_over,
     queue_log,
-    _raid_tracker,
     refresh_invite_cache,
     resolve_member,
     sec_check,
@@ -226,28 +225,14 @@ async def on_message(message):
 @bot.event
 async def on_member_join(member):
     gid = member.guild.id
-    if await get_tier(gid) >= TIER_PREMIUM and await is_enabled(gid, "anti_raid"):
-        now = time.time()
-        _raid_tracker.setdefault(gid, [])
-        _raid_tracker[gid] = [t for t in _raid_tracker[gid] if now-t<10]
-        _raid_tracker[gid].append(now)
-        if len(_raid_tracker[gid]) >= 8:
-            try:
-                await member.kick(reason="Anti-raid")
-                ch = await get_log_ch(member.guild)
-                if ch:
-                    e = build_embed(C.DANGER)
-                    e.set_author(name=t(gid, "raid_title"))
-                    e.add_field(name=t(gid, "member"), value=member.mention, inline=False)
-                    e.add_field(name=t(gid, "reason"), value=t(gid, "raid_reason"), inline=False)
-                    queue_log(ch, e)
-                return
-            except Exception: pass
+    # Локдаун и анти-рейд (пороги и действия — в дашборде, witness/protection.py)
+    from .protection import handle_join
+    if await handle_join(member):
+        return
 
     # ── Invite tracking ────────────────────────────────────────
     # Снимок кэша ДО того как Discord обновит счётчики
     old_snapshot = {k: v for k, v in _invite_cache.items() if k.startswith(f"{gid}:")}
-    print(f"[INVITE DEBUG] {member.name} joined {member.guild.name}. Cache snapshot: {old_snapshot}")
 
     used_code = None
     inviter_name = "неизвестно"
@@ -258,20 +243,17 @@ async def on_member_join(member):
 
     try:
         fresh_invites = await member.guild.invites()
-        print(f"[INVITE DEBUG] Fresh invites: {[(inv.code, inv.uses) for inv in fresh_invites]}")
 
         for inv in fresh_invites:
             cache_key = f"{gid}:{inv.code}"
             old_uses = old_snapshot.get(cache_key, 0)
             new_uses = inv.uses or 0
-            print(f"[INVITE DEBUG] {inv.code}: old={old_uses} new={new_uses}")
             if new_uses > old_uses:
                 used_code = inv.code
                 if inv.inviter:
                     inviter_name = inv.inviter.name
                     inviter_id = inv.inviter.id
                 _invite_cache[cache_key] = new_uses
-                print(f"[INVITE DEBUG] ✅ Found! code={used_code} inviter={inviter_name}")
                 break
 
         # Синхронизируем весь кэш
@@ -279,9 +261,9 @@ async def on_member_join(member):
             _invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
 
     except discord.Forbidden:
-        print(f"[INVITE DEBUG] ❌ Forbidden — нет прав MANAGE_GUILD на {member.guild.name}")
+        print(f"[INVITE] {member.guild.name}: нет права Manage Server — инвайт не определён")
     except Exception as ex:
-        print(f"[INVITE DEBUG] ❌ Error: {ex}")
+        print(f"[INVITE] {member.guild.name}: {ex}")
 
     # Разовые инвайты — исчезли из списка после использования
     if not used_code:
@@ -292,12 +274,10 @@ async def on_member_join(member):
                     used_code = cache_key.split(":", 1)[1]
                     inviter_name = "неизвестно (разовый инвайт)"
                     _invite_cache.pop(cache_key, None)
-                    print(f"[INVITE DEBUG] Single-use invite detected: {used_code}")
                     break
         except Exception:
             pass
 
-    print(f"[INVITE DEBUG] Result: code={used_code}, inviter={inviter_name} ({inviter_id})")
 
     # Пишем в БД всегда (для /invcheck и /invuser)
     if used_code and inviter_id:
@@ -793,11 +773,8 @@ async def on_guild_channel_delete(channel_deleted):
     e.set_author(name="Channel deleted")
     e.add_field(name="Канал", value=channel_deleted.name, inline=True)
     await ch.send(embed=e)
-    try:
-        async for entry in channel_deleted.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-            await antinuke_check(channel_deleted.guild, entry.user.id, "channel")
-            break
-    except Exception: pass
+    # Анти-нюк по удалению каналов — в witness/protection.py, по журналу аудита:
+    # он работает и тогда, когда лог каналов выключен
 
 @bot.event
 async def on_guild_role_create(role):
@@ -816,11 +793,7 @@ async def on_guild_role_delete(role):
     e.set_author(name="Role deleted")
     e.add_field(name="Роль", value=role.name, inline=True)
     await ch.send(embed=e)
-    try:
-        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-            await antinuke_check(role.guild, entry.user.id, "role")
-            break
-    except Exception: pass
+    # Анти-нюк по удалению ролей — в witness/protection.py, по журналу аудита
 
 @bot.event
 async def on_guild_update(before, after):

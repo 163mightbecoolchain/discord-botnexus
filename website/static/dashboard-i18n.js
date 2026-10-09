@@ -161,6 +161,39 @@
       'Going over the limit blocks the action and notifies the server owner. The owner is not checked.',
     'фишинг-ссылки': 'phishing links', 'подозрительные сообщения': 'suspicious messages', 'спам': 'spam', 'свои слова': 'own words',
 
+    // Анти-нюк, анти-рейд, сгорание варнов
+    'Защита от взломанного или недобросовестного модератора: лимиты на массовые действия и что делать при превышении':
+      'Protection against a compromised or rogue moderator: limits on mass actions and what to do when exceeded',
+    'Анти-нюк включён': 'Anti-nuke on', 'Владелец сервера, Witness и доверенные роли не проверяются': 'The server owner, Witness and trusted roles are not checked',
+    'При превышении лимита': 'When a limit is exceeded', 'Только уведомить': 'Only notify',
+    'Снять опасные роли': 'Remove dangerous roles', 'Снять роли и таймаут на час': 'Remove roles and time out for an hour',
+    'Опасные — роли с правами бана, кика, таймаута, управления сервером, ролями, каналами или вебхуками':
+      'Dangerous roles are those with ban, kick, timeout, manage server, roles, channels or webhooks permissions',
+    'Доверенные роли': 'Trusted roles',
+    'Например, старшие модераторы, которые чистят сервер после рейда массовыми банами':
+      'For example, senior moderators who clean up after a raid with mass bans',
+    'Не больше': 'At most', 'За (сек)': 'Within (s)', 'Создание вебхуков': 'Webhooks created',
+    'Добавили бота': 'A bot was added', 'Ничего не делать': 'Do nothing', 'Уведомить': 'Notify', 'Выгнать бота': 'Kick the bot',
+    'Если бота добавил не владелец и не доверенная роль': 'If the bot was added by someone other than the owner or a trusted role',
+    'Выдали опасные права': 'Dangerous permissions granted', 'Откатить': 'Revert',
+    'Роли дали «Администратор», «Управлять сервером» и т.п., или такую роль выдали участнику':
+      'A role got “Administrator”, “Manage Server” and the like, or such a role was given to a member',
+    'Волна входов за короткое время: что делать с участниками волны и включать ли локдаун':
+      'A wave of joins in a short time: what to do with the wave and whether to turn on lockdown',
+    'Анти-рейд включён': 'Anti-raid on', 'Локдаун сейчас включён': 'Lockdown is on now', 'Локдаун сейчас выключен': 'Lockdown is off now',
+    'Рейд — это входов': 'A raid is this many joins', 'За (секунд)': 'Within (seconds)',
+    'Участников волны': 'Members of the wave', 'Не трогать, только уведомить': 'Leave them, only notify',
+    'Кикнуть': 'Kick', 'Отправить в карантин': 'Send to quarantine',
+    'Карантин использует роль из «Модерация → Карантин»': 'Quarantine uses the role from “Moderation → Quarantine”',
+    'Авто-локдаун (минут)': 'Auto-lockdown (minutes)',
+    'На это время новые аккаунты младше минимального возраста не смогут зайти. 0 — не включать':
+      'For this long, accounts younger than the minimum age cannot join. 0 — don’t turn on',
+    'Анти-рейд работает на тарифе': 'Anti-raid works on the', '. Настройки сохранятся и включатся вместе с тарифом.':
+      ' plan. Settings are saved and take effect with the plan.',
+    'Варн сгорает через (дней)': 'A warning expires after (days)',
+    '0 — варны не сгорают. Сгоревший варн виден в истории, но к наказанию не ведёт':
+      '0 — warnings never expire. An expired warning stays in the history but no longer leads to punishment',
+
     // Поиск участника
     'Полное досье: наказания, апелляции, инвайты': 'Full record: punishments, appeals, invites',
     'Найди участника': 'Find a member', 'Ник или ID участника...': 'Member nickname or ID...',
@@ -209,6 +242,14 @@
       `AutoMod: ${({ 'фишинг-ссылка': 'phishing link', 'подозрение на фишинг/скам': 'suspected phishing/scam',
                     'подозрение на спам': 'suspected spam', 'запрещённое слово сервера': 'server-banned word' })[x] || x}`
       + (how === 'заблокировано' ? ' — blocked' : ' — not blocked')],
+    [/^Анти-нюк: (\d+) (банов|киков|мутов|удалений каналов|удалений ролей|созданных вебхуков) за (\d+) сек\.$/, (m, n, what, s) =>
+      `Anti-nuke: ${n} ${({ 'банов': 'bans', 'киков': 'kicks', 'мутов': 'mutes', 'удалений каналов': 'channel deletions',
+                           'удалений ролей': 'role deletions', 'созданных вебхуков': 'webhooks created' })[what]} in ${s} s`],
+    [/^Анти-рейд: (\d+) входов за (\d+) сек\.$/, (m, n, s) => `Anti-raid: ${n} joins in ${s} s`],
+    [/^Добавлен бот (\d+)$/, (m, id) => `Bot added: ${id}`],
+    [/^Выданы опасные права: (.+)$/, (m, list) => 'Dangerous permissions granted: ' + list.split(', ').map(p => ({
+      'Администратор': 'Administrator', 'Управлять сервером': 'Manage Server', 'Управлять ролями': 'Manage Roles',
+      'Банить участников': 'Ban Members', 'Управлять вебхуками': 'Manage Webhooks' })[p] || p).join(', ')],
     [/^короче (\d+) символов$/, (m, n) => `shorter than ${n} characters`],
     [/^длиннее (\d+) символов$/, (m, n) => `longer than ${n} characters`],
     [/^звёздочка только в начале или в конце$/, () => 'an asterisk is only allowed at the start or end'],
