@@ -1,0 +1,56 @@
+# Проверка перед слиянием: ловит поломки до того, как Railway задеплоит main.
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r website/requirements.txt pyflakes
+
+      # Ошибки вроде undefined name / syntax error валят проверку.
+      # Предупреждения (unused import, f-string без плейсхолдеров) — нет.
+      - name: Pyflakes
+        run: |
+          python -m pyflakes main.py witness/*.py security_module.py web_server.py website/app.py \
+            | grep -vE "imported but unused|is assigned to but never used|f-string is missing placeholders|redefinition of unused|unable to detect undefined names" \
+            | tee pyflakes.txt
+          test ! -s pyflakes.txt
+
+      # Бот импортируется и регистрирует команды; токен не нужен, бот не запускается
+      - name: Import bot
+        env:
+          DISCORD_TOKEN: ci
+        run: |
+          python -c "import main; n = len(main.bot.tree.get_commands()); print(f'{n} slash commands'); assert n >= 70, n"
+
+      - name: Import website
+        run: python -c "import sys; sys.path.insert(0, 'website'); import app; print('website ok')"
+
+      # Синтаксис встроенного JavaScript в страницах сайта
+      - name: Check page scripts
+        run: |
+          node -e '
+            const fs = require("fs");
+            let bad = 0;
+            for (const f of ["website/index.html", "website/dashboard.html", "website/activity.html", "website/privacy.html"]) {
+              const html = fs.readFileSync(f, "utf8");
+              for (const m of html.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g)) {
+                try { new Function(m[1]); } catch (e) { console.log(`${f}: ${e.message}`); bad++; }
+              }
+            }
+            process.exit(bad ? 1 : 0);
+          '
