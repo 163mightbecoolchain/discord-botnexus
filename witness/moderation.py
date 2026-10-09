@@ -14,6 +14,8 @@ from .database import (
     get_log_ch,
     get_punishment_settings,
     get_security,
+    get_active_warnings,
+    get_protection,
     get_warnings,
     remove_warning,
     save_security,
@@ -522,7 +524,8 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
     if not interaction.user.guild_permissions.moderate_members:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
     await add_warning(interaction.guild_id, member.id, interaction.user.id, reason)
-    warns = await get_warnings(interaction.guild_id, member.id)
+    # Сгоревшие варны (старше warn_expiry_days из дашборда) к наказанию не ведут
+    warns = await get_active_warnings(interaction.guild_id, member.id)
     warn_count = len(warns)
     color = C.WARNING if warn_count < 3 else C.DANGER
     e = build_embed(color)
@@ -564,18 +567,24 @@ async def warnings(interaction: discord.Interaction, member: discord.Member):
     if await get_tier(interaction.guild_id) < TIER_PREMIUM:
         return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
     rows = await get_warnings(interaction.guild_id, member.id)
-    color = C.DANGER if len(rows) >= 3 else C.WARNING if rows else C.SUCCESS
+    active_ids = {w[0] for w in await get_active_warnings(interaction.guild_id, member.id)}
+    expiry = (await get_protection(interaction.guild_id))["warn_expiry_days"]
+    active = len(active_ids)
+    color = C.DANGER if active >= 3 else C.WARNING if active else C.SUCCESS
     e = build_embed(color, thumbnail=member.display_avatar.url)
     e.set_author(name=f"Варны: {member.display_name}", icon_url=member.display_avatar.url)
     if not rows:
         e.description = "Варнов нет."
     else:
-        warn_bar = bar(len(rows), 3, 8)
-        e.add_field(name="Всего", value=f"**{len(rows)}/3** `{warn_bar}`", inline=False)
-        for wid, mod_id, reason, created in rows:
+        warn_bar = bar(active, 3, 8)
+        e.add_field(name="Действуют", value=f"**{active}/3** `{warn_bar}`", inline=False)
+        if expiry:
+            e.description = f"Варн перестаёт считаться через {expiry} дн."
+        for wid, mod_id, reason, created in rows[:20]:
             mod = interaction.guild.get_member(mod_id)
+            mark = "" if wid in active_ids else " · сгорел"
             e.add_field(
-                name=f"#{wid} · {created[:10]}",
+                name=f"#{wid} · {created[:10]}{mark}",
                 value=f"Модератор: {mod.mention if mod else mod_id}\nПричина: {reason}",
                 inline=False
             )

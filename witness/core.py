@@ -30,54 +30,111 @@ _spam_tracker: dict = {}
 _suppress_next_timeout_dm: set = set()
 _raid_tracker: dict = {}
 
-# ── Анти-нюк трекер ──────────────────────────────────────────
+# ── Анти-нюк ─────────────────────────────────────────────────
 # Ключ: (guild_id, mod_id, action_type) → [timestamps]
 _antinuke_tracker: dict = {}
-ANTINUKE_LIMITS = {
-    "ban":     (5, 30),   # 5 банов за 30 сек
-    "kick":    (5, 30),   # 5 киков за 30 сек
-    "mute":    (8, 30),   # 8 мутов за 30 сек
-    "channel": (3, 20),   # 3 удаления каналов за 20 сек
-    "role":    (3, 20),   # 3 удаления ролей за 20 сек
-}
+# После срабатывания не реагируем на того же человека повторно минуту:
+# роли уже сняты, а остальные его действия из той же волны — не новая атака
+_antinuke_cooldown: dict = {}
+ANTINUKE_LABELS = {"ban": "банов", "kick": "киков", "mute": "мутов",
+                   "channel": "удалений каналов", "role": "удалений ролей",
+                   "webhook": "созданных вебхуков"}
+# Права, которые делают роль опасной в чужих руках
+DANGEROUS_PERMS = ("administrator", "ban_members", "kick_members", "manage_guild",
+                   "manage_roles", "manage_channels", "manage_webhooks", "moderate_members")
+
+
+async def is_trusted(guild: discord.Guild, user_id: int, cfg: dict = None) -> bool:
+    """Владелец, сам бот и участники с доверенными ролями анти-нюк не трогает."""
+    if not user_id or user_id == guild.owner_id or (bot.user and user_id == bot.user.id):
+        return True
+    if cfg is None:
+        from .database import get_protection
+        cfg = await get_protection(guild.id)
+    trusted = set(cfg.get("trusted_roles") or [])
+    if not trusted:
+        return False
+    member = await resolve_member(guild, user_id)
+    return bool(member and any(str(r.id) in trusted for r in member.roles))
 
 
 async def antinuke_check(guild: discord.Guild, mod_id: int, action: str) -> bool:
-    """Возвращает True если лимит превышён (нюк-атака)."""
+    """Возвращает True если лимит превышен (нюк-атака). Лимиты и ответ — из настроек сервера."""
     if not guild or not mod_id:
         return False
-    # Владелец сервера исключён из проверки
-    if guild.owner_id == mod_id:
+    from .database import get_protection
+    cfg = await get_protection(guild.id)
+    if not cfg["antinuke_enabled"] or await is_trusted(guild, mod_id, cfg):
         return False
-    limit, window = ANTINUKE_LIMITS.get(action, (10, 60))
+    limit, window = cfg["limits"].get(action, (10, 60))
+    if not limit:
+        return False                    # этот лимит выключен в дашборде
     key = (guild.id, mod_id, action)
     now = time.time()
     _antinuke_tracker.setdefault(key, [])
     _antinuke_tracker[key] = [t for t in _antinuke_tracker[key] if now - t < window]
     _antinuke_tracker[key].append(now)
-    if len(_antinuke_tracker[key]) >= limit:
-        await _antinuke_alert(guild, mod_id, action, len(_antinuke_tracker[key]), window)
-        return True
-    return False
+    if len(_antinuke_tracker[key]) < limit:
+        return False
+    if now - _antinuke_cooldown.get((guild.id, mod_id), 0) < 60:
+        return True                     # уже отреагировали, действие всё равно блокируем
+    _antinuke_cooldown[(guild.id, mod_id)] = now
+    taken = await _antinuke_respond(guild, mod_id, cfg["antinuke_action"])
+    await _antinuke_alert(guild, mod_id, action, len(_antinuke_tracker[key]), window, taken)
+    return True
+
+
+async def _antinuke_respond(guild: discord.Guild, mod_id: int, mode: str) -> str:
+    """Обезвреживает нарушителя по настройке сервера. Возвращает описание сделанного."""
+    if mode == "alert":
+        return "Только уведомление (так настроено в дашборде)."
+    member = await resolve_member(guild, mod_id)
+    if not member:
+        return "Участник не найден на сервере — ничего не сделано."
+    me = guild.me
+    dangerous = [r for r in member.roles
+                 if not r.is_default() and any(getattr(r.permissions, p) for p in DANGEROUS_PERMS)]
+    removable = [r for r in dangerous if not r.managed and r < me.top_role]
+    stuck = [r for r in dangerous if r not in removable]
+    lines = []
+    if removable and me.guild_permissions.manage_roles:
+        try:
+            await member.remove_roles(*removable, reason="Witness анти-нюк: превышен лимит действий")
+            lines.append("Сняты роли: " + ", ".join(r.mention for r in removable))
+        except discord.HTTPException as ex:
+            lines.append(f"Не удалось снять роли: {ex}")
+    elif removable:
+        lines.append("Нет права «Управлять ролями» — роли не сняты.")
+    if stuck:
+        lines.append("Не сняты (выше роли бота или интеграция): " + ", ".join(r.mention for r in stuck))
+    if not dangerous:
+        lines.append("Опасных ролей у участника нет.")
+    if mode == "strip_timeout":
+        try:
+            await member.timeout(datetime.timedelta(hours=1), reason="Witness анти-нюк")
+            lines.append("Таймаут на 1 час.")
+        except discord.HTTPException:
+            lines.append("Таймаут выдать не удалось (у участника права администратора или нет прав у бота).")
+    return "\n".join(lines)
 
 
 async def _antinuke_alert(guild: discord.Guild, mod_id: int,
-                           action: str, count: int, window: int):
-    """Алерт владельцу и в лог-канал при обнаружении нюка."""
+                           action: str, count: int, window: int, taken: str = ""):
+    """Алерт владельцу и в лог-канал при обнаружении нюка, плюс запись в ленту угроз."""
     ch  = await get_log_ch(guild)
-    mod = guild.get_member(mod_id)
-    labels = {"ban": "банов", "kick": "киков", "mute": "мутов",
-              "channel": "удалений каналов", "role": "удалений ролей"}
+    mod = await resolve_member(guild, mod_id)
     e = build_embed(C.DANGER)
     e.set_author(name="🚨 Анти-нюк — подозрительная активность")
     e.add_field(name="Модератор",
                 value=f"{mod.mention if mod else mod_id} (`{mod.display_name if mod else mod_id}`)",
                 inline=True)
     e.add_field(name="Действие",
-                value=f"**{count} {labels.get(action, action)}** за {window} сек.",
+                value=f"**{count} {ANTINUKE_LABELS.get(action, action)}** за {window} сек.",
                 inline=True)
+    if taken:
+        e.add_field(name="Что сделано", value=taken[:1024], inline=False)
     e.add_field(name="Рекомендация",
-                value="Немедленно проверь права этого модератора.",
+                value="Проверь права этого модератора. Лимиты и действие — в дашборде, «Безопасность».",
                 inline=False)
     if ch:
         try: await ch.send(embed=e)
@@ -85,6 +142,13 @@ async def _antinuke_alert(guild: discord.Guild, mod_id: int,
     if guild.owner:
         try: await guild.owner.send(embed=e)
         except Exception: pass
+    try:
+        from security_module import create_alert
+        await create_alert(guild.id, "antinuke", "CRITICAL", mod_id,
+                           f"Анти-нюк: {count} {ANTINUKE_LABELS.get(action, action)} за {window} сек.",
+                           {"source": "antinuke", "action": action, "taken": taken})
+    except Exception as ex:
+        print(f"[ANTINUKE] alert: {ex}")
 
 def cooldown(seconds: int):
     def decorator(func):
