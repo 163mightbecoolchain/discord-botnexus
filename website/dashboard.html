@@ -1021,7 +1021,50 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Безопасность</div>
-          <div class="page-subtitle">Анти-нюк</div>
+          <div class="page-subtitle">AutoMod, угрозы и анти-нюк</div>
+        </div>
+        <button class="btn btn-ghost" onclick="loadSecurity()">Обновить</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Правил AutoMod активно</div>
+          <div class="stat-value" id="secRulesCount">—</div>
+        </div>
+        <div class="stat-card danger">
+          <div class="stat-label">Угроз за 7 дней</div>
+          <div class="stat-value" id="secAlerts7d">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Правила AutoMod</div>
+            <div class="card-desc">Бот создаёт их сам и проверяет каждые 30 минут. Discord проверяет сообщения до отправки</div>
+          </div>
+        </div>
+        <div class="card-body" id="secAutomod">
+          <div class="empty" style="padding:1.5rem;"><div class="empty-sub">Загрузка...</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Последние угрозы</div>
+            <div class="card-desc">Срабатывания AutoMod и проверок бота, 30 последних</div>
+          </div>
+        </div>
+        <div class="table-wrap" style="border: 0; border-radius: 0;">
+          <table class="table">
+            <thead>
+              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th></tr>
+            </thead>
+            <tbody id="secAlertsTable">
+              <tr><td colspan="5"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1058,7 +1101,7 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Поиск участника</div>
-          <div class="page-subtitle">Полное досье: наказания, апелляции, твинки</div>
+          <div class="page-subtitle">Полное досье: наказания, апелляции, инвайты</div>
         </div>
       </div>
 
@@ -1896,7 +1939,8 @@ async function showPage(name) {
   if (name === 'modlog') await loadModlog();
   if (name === 'appeals') { await loadAppeals(); }
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
-  if (name === 'automation' || name === 'security') await loadAutomation();
+  if (name === 'automation') await loadAutomation();
+  if (name === 'security') await loadSecurity();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') await loadInvites('');
 }
@@ -2233,6 +2277,62 @@ async function loadModlog() {
       </tr>
     `).join('');
   } catch(e) {}
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SECURITY: AutoMod и угрозы
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const SEV_CHIP = { HIGH: 'danger', CRITICAL: 'danger', MEDIUM: 'warn', LOW: '' };
+
+async function loadSecurity() {
+  if (!currentGuild) return;
+  const box   = document.getElementById('secAutomod');
+  const tbody = document.getElementById('secAlertsTable');
+  tbody.innerHTML = skeletonRows(5, 4);
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/security/overview`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+
+    const rules = d.automod.rules || [];
+    document.getElementById('secRulesCount').textContent = rules.filter(x => x.enabled).length;
+    document.getElementById('secAlerts7d').textContent   = d.alerts_7d ?? 0;
+
+    if (!d.automod.can_manage) {
+      box.innerHTML = `<div class="empty" style="padding:1.5rem;"><div class="empty-title">Нет права «Управлять сервером»</div>
+        <div class="empty-sub">Выдайте его боту — правила AutoMod создадутся автоматически</div></div>`;
+    } else if (!rules.length) {
+      box.innerHTML = `<div class="empty" style="padding:1.5rem;"><div class="empty-title">Правила ещё не созданы</div>
+        <div class="empty-sub">Бот создаст их при следующей проверке (до 30 минут)</div></div>`;
+    } else {
+      box.innerHTML = rules.map(x => `
+        <div class="toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-label">${escapeHtml(x.name)}</div>
+            <div class="toggle-desc">${[x.blocks ? 'блокирует сообщение' : '', x.alerts ? 'алерт в лог-канал' : '']
+              .filter(Boolean).join(' · ') || 'без действий'}</div>
+          </div>
+          <span class="chip ${x.enabled ? 'ok' : ''}">${x.enabled ? 'активно' : 'выключено'}</span>
+        </div>`).join('');
+    }
+
+    const alerts = d.alerts || [];
+    if (!alerts.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = alerts.map((a, i) => `
+      <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
+        <td><span class="chip ${SEV_CHIP[a.severity] ?? ''}">${escapeHtml(a.severity)}</span></td>
+        <td>${escapeHtml(a.description || a.type)}${a.matched ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
+        <td>${escapeHtml(a.user_name || a.user_id || '—')}</td>
+        <td class="text-mono text-muted">${a.source === 'automod' ? 'AutoMod' : 'бот'}</td>
+        <td class="text-mono text-muted">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+      </tr>`).join('');
+  } catch(e) {
+    box.innerHTML = '<div class="empty" style="padding:1.5rem;"><div class="empty-sub">Не удалось загрузить</div></div>';
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
