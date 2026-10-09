@@ -579,6 +579,8 @@ async def on_audit_log_entry_create(entry):
     if intents.members:
         return              # с интентом всё придёт обычными событиями
     A = discord.AuditLogAction
+    if entry.action not in (A.kick, A.member_update, A.member_role_update):
+        return              # entry.target у записей о каналах может упасть на пустом ID
     guild = entry.guild
     target_id = getattr(entry.target, "id", None)
     if not target_id:
@@ -594,8 +596,6 @@ async def on_audit_log_entry_create(entry):
             print(f"[KICK_LOG] audit: {ex}")
         return
 
-    if entry.action not in (A.member_update, A.member_role_update):
-        return
     try:
         # Нужно свежее состояние, а не из кэша resolve_member
         after = await guild.fetch_member(target_id)
