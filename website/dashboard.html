@@ -460,6 +460,15 @@ html.theme-anim *::before, html.theme-anim *::after {
   .form-row { grid-template-columns: 1fr; }
 }
 
+/* Плашка «бот перезапускается» */
+.bot-down {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1100;
+  display: flex; align-items: center; justify-content: center; gap: .6rem;
+  padding: .65rem 1rem; font-size: .85rem; text-align: center;
+  background: #2b2110; color: #ffd27a; border-bottom: 1px solid rgba(255,170,0,.35);
+}
+.bot-down .spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(255,210,122,.3); border-top-color: currentColor; animation: spin .7s linear infinite; flex-shrink: 0; }
+
 /* Фокус с клавиатуры */
 .nav-item:focus-visible, .btn:focus-visible, .toggle:focus-visible, .seg button:focus-visible, .guild-selector:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
@@ -476,6 +485,11 @@ html.theme-anim *::before, html.theme-anim *::after {
 </style>
 </head>
 <body>
+
+<div id="botDownBar" class="bot-down hidden" role="status">
+  <span class="spin"></span>
+  Бот перезапускается после обновления — переподключимся автоматически, обычно это 1–3 минуты.
+</div>
 
 <div id="bgImage"></div>
 <div id="bgDim"></div>
@@ -1717,11 +1731,33 @@ function setToken(t) {
   else localStorage.removeItem('ws_token');
 }
 
+// Бот перезапускается после деплоя (~1–3 мин): Railway отвечает 502/503 без CORS,
+// поэтому fetch падает с TypeError. Показываем плашку и не выкидываем на вход.
+let _botDownTimer = null;
+function setBotDown(down) {
+  document.getElementById('botDownBar').classList.toggle('hidden', !down);
+  if (down && !_botDownTimer) {
+    _botDownTimer = setInterval(async () => {
+      try {
+        const r = await fetch(API + '/health', {cache: 'no-store'});
+        if (r.ok) { clearInterval(_botDownTimer); _botDownTimer = null; location.reload(); }
+      } catch(e) {}
+    }, 8000);
+  }
+}
+
 async function apiFetch(path, opts={}, retry=true) {
   const t = getToken();
   const headers = opts.headers || {};
   if (t) headers['Authorization'] = 'Bearer ' + t;
-  const resp = await fetch(API + path, {...opts, headers, credentials: 'include'});
+  let resp;
+  try {
+    resp = await fetch(API + path, {...opts, headers, credentials: 'include'});
+  } catch(e) {
+    setBotDown(true);
+    throw e;
+  }
+  if (resp.status >= 502 && resp.status <= 504) { setBotDown(true); return resp; }
   if (resp.status === 401 && retry) {
     const refreshed = await tryRefreshToken();
     if (refreshed) return apiFetch(path, opts, false);
@@ -1796,6 +1832,7 @@ async function init() {
 
   try {
     const r = await apiFetch('/api/me');
+    if (r.status >= 502 && r.status <= 504) return;   // плашка уже показана, ждём бота
     if (!r.ok) return showLogin();
     const me = await r.json();
     document.getElementById('userName').textContent = me.username;
@@ -1806,7 +1843,7 @@ async function init() {
       document.getElementById('userAvatar').textContent = me.username.charAt(0).toUpperCase();
     }
   } catch(e) {
-    return showLogin();
+    return;   // сеть/бот недоступны — setBotDown уже показал плашку и ждёт
   }
 
   showApp();

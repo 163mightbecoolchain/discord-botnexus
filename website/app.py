@@ -2,7 +2,7 @@
 Witness Website Server
 """
 import os
-from aiohttp import web
+from aiohttp import web, ClientSession, ClientTimeout
 
 BOT_API_URL = os.getenv("BOT_API_URL", "").rstrip("/")
 if BOT_API_URL and not BOT_API_URL.startswith("http"):
@@ -120,9 +120,44 @@ async def handle_callback(request):
 async def handle_dashboard(request):
     return await html_response("dashboard.html")
 
+RESTARTING_HTML = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="10">
+<title>Witness перезапускается</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0a0e14;color:#e0e6ed;
+font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:16px;box-sizing:border-box}
+.c{max-width:420px;text-align:center}
+.s{width:28px;height:28px;margin:0 auto 20px;border-radius:50%;border:3px solid #2a3441;border-top-color:#00d9a3;
+animation:r .8s linear infinite}@keyframes r{to{transform:rotate(360deg)}}
+h1{font-size:1.3rem;margin:0 0 8px}p{color:#a8b3c1;margin:0 0 20px;line-height:1.6}a{color:#00d9a3}
+</style></head><body><div class="c"><div class="s"></div>
+<h1>Бот перезапускается</h1>
+<p>Обычно это занимает 1–3 минуты после обновления. Страница обновится сама и продолжит вход.</p>
+<a href="/">← На главную</a></div></body></html>"""
+
+
+async def bot_is_up() -> bool:
+    try:
+        timeout = ClientTimeout(total=4)
+        async with ClientSession(timeout=timeout) as s:
+            async with s.get(f"{BOT_API_URL}/health") as r:
+                return r.status < 500
+    except Exception:
+        return False
+
+
 async def handle_login(request):
     if not BOT_API_URL:
         return web.Response(text="BOT_API_URL not set", status=500)
+    # Пока бот перезапускается, Railway отдаёт на /login голый 502 —
+    # показываем понятную страницу, которая сама повторит вход
+    if not await bot_is_up():
+        resp = web.Response(text=RESTARTING_HTML, content_type="text/html", status=503)
+        resp.headers["Retry-After"] = "10"
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     raise web.HTTPFound(f"{BOT_API_URL}/login")
 
 async def handle_logout(request):
