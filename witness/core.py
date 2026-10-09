@@ -67,6 +67,8 @@ async def antinuke_check(guild: discord.Guild, mod_id: int, action: str) -> bool
     if not cfg["antinuke_enabled"] or await is_trusted(guild, mod_id, cfg):
         return False
     limit, window = cfg["limits"].get(action, (10, 60))
+    if not limit:
+        return False                    # этот лимит выключен в дашборде
     key = (guild.id, mod_id, action)
     now = time.time()
     _antinuke_tracker.setdefault(key, [])

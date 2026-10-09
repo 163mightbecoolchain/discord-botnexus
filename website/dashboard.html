@@ -283,7 +283,27 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .check { display: inline-flex; align-items: center; gap: .45rem; margin: 0; font-weight: 500; color: var(--text-2); cursor: pointer; }
 .check input { accent-color: var(--accent); width: 16px; height: 16px; }
 tr.resolved td { opacity: .55; }
-.input-num { width: 90px; padding: .4rem .55rem; }
+/* Конструктор правил */
+.rule-group-title { font-size: .7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin: 1.25rem 0 .2rem; }
+.rule-group-title:first-child { margin-top: 0; }
+.rule { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .65rem; padding: .7rem 0; border-top: 1px solid var(--border); font-size: .9rem; }
+.rule-group-title + .rule, .rule-group-title + div > .rule:first-child { border-top: 0; }
+.rule > .toggle { margin-right: .2rem; }
+.rule.off > :not(.toggle) { opacity: .4; pointer-events: none; }
+#pnBody.off { opacity: .4; pointer-events: none; }
+.rule-arrow { color: var(--muted); }
+.rule-word { font-weight: 700; color: var(--accent); min-width: 4.2rem; }
+.rule-noun { min-width: 9.5rem; }
+.rule-then { border-top: 1px dashed var(--border-2); margin-top: .35rem; padding-top: .9rem; }
+.rule-chips .cs-wrap { width: 210px; }
+.chip-fixed { padding-right: .65rem; color: var(--muted); }
+.stepper { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-3); }
+.stepper button { width: 32px; min-height: 34px; border: 0; background: transparent; color: var(--text-2); font-size: 1rem; cursor: pointer; font-family: inherit; }
+.stepper button:hover { color: var(--accent); background: rgba(var(--accent-rgb), .08); }
+.stepper input { width: 3.4rem; border: 0; background: transparent; color: var(--text); text-align: center; font-family: var(--mono); font-size: .9rem; -moz-appearance: textfield; appearance: textfield; }
+.stepper input::-webkit-inner-spin-button, .stepper input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper input:focus { outline: none; background: rgba(var(--accent-rgb), .08); }
+.card-foot { padding: .9rem 1.4rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
 
 /* Поиск */
 .search-bar { display: flex; gap: .75rem; margin-bottom: 1rem; }
@@ -832,11 +852,13 @@ html.theme-anim *::before, html.theme-anim *::after {
               <input type="number" class="input" id="mod-ban3" value="30" min="1">
             </div>
           </div>
-          <div class="form-group" style="margin-bottom:0;">
-            <label for="mod-warnexp">Варн сгорает через (дней)</label>
-            <input type="number" class="input" id="mod-warnexp" value="0" min="0" max="3650" style="max-width: 200px;">
-            <div class="input-help">0 — варны не сгорают. Сгоревший варн виден в истории, но к наказанию не ведёт</div>
+          <div class="rule" data-rule="mod-warnexp">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Сгорание варнов" onclick="toggleRule(this)"></div>
+            <span>Варн сгорает через</span>
+            <span class="stepper" data-step="mod-warnexp" data-min="1" data-max="3650"></span>
+            <span>дн.</span>
           </div>
+          <div class="input-help">Сгоревший варн остаётся в истории, но к наказанию больше не ведёт. Выключено — варны не сгорают</div>
         </div>
       </div>
 
@@ -1192,63 +1214,60 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Анти-нюк</div>
-            <div class="card-desc">Защита от взломанного или недобросовестного модератора: лимиты на массовые действия и что делать при превышении</div>
+            <div class="card-desc">Защита от взломанного или недобросовестного модератора. Собери правила: что считать атакой и что делать</div>
           </div>
-          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
+          <div class="toggle" id="pn-enabled" role="switch" tabindex="0" aria-label="Анти-нюк включён" onclick="toggleBlock(this, 'pnBody')"></div>
         </div>
-        <div class="card-body">
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">Анти-нюк включён</div>
-              <div class="toggle-desc">Владелец сервера, Witness и доверенные роли не проверяются</div>
-            </div>
-            <div class="toggle" id="pn-enabled" role="switch" tabindex="0" aria-label="Анти-нюк включён" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="form-row" style="margin-top:1rem;">
-            <div class="form-group">
-              <label for="pn-action">При превышении лимита</label>
-              <select class="select" id="pn-action">
-                <option value="alert">Только уведомить</option>
-                <option value="strip">Снять опасные роли</option>
-                <option value="strip_timeout">Снять роли и таймаут на час</option>
-              </select>
-              <div class="input-help">Опасные — роли с правами бана, кика, таймаута, управления сервером, ролями, каналами или вебхуками</div>
-            </div>
-            <div class="form-group">
-              <label for="pnTrustAdd">Доверенные роли</label>
-              <div class="chip-list" id="pnTrusted"></div>
-              <select class="select" id="pnTrustAdd" onchange="addTrusted(this)">
-                <option value="">+ добавить роль</option>
-              </select>
-              <div class="input-help">Например, старшие модераторы, которые чистят сервер после рейда массовыми банами</div>
+        <div class="card-body" id="pnBody">
+          <div class="rule-group-title">Если модератор сделает больше…</div>
+          <div id="pnLimits"></div>
+
+          <div class="rule rule-then">
+            <span class="rule-word">Тогда</span>
+            <div class="seg" role="group" aria-label="Что делать при превышении" data-seg="pn-action">
+              <button type="button" data-mode="alert">Уведомить</button>
+              <button type="button" data-mode="strip">Снять опасные роли</button>
+              <button type="button" data-mode="strip_timeout">Снять роли + таймаут 1 ч</button>
             </div>
           </div>
-          <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>Действие</th><th>Не больше</th><th>За (сек)</th></tr></thead>
-              <tbody id="pnLimits"></tbody>
-            </table>
+          <div class="input-help" style="margin: -.25rem 0 .75rem;">
+            Опасные роли — с правами бана, кика, таймаута, управления сервером, ролями, каналами или вебхуками.
+            Роли выше роли Witness бот снять не может и напишет об этом.
           </div>
-          <div class="form-row" style="margin-top:1rem; margin-bottom:0;">
-            <div class="form-group">
-              <label for="pn-botadd">Добавили бота</label>
-              <select class="select" id="pn-botadd">
-                <option value="off">Ничего не делать</option>
-                <option value="alert">Уведомить</option>
-                <option value="kick">Выгнать бота</option>
-              </select>
-              <div class="input-help">Если бота добавил не владелец и не доверенная роль</div>
-            </div>
-            <div class="form-group">
-              <label for="pn-escalation">Выдали опасные права</label>
-              <select class="select" id="pn-escalation">
-                <option value="off">Ничего не делать</option>
-                <option value="alert">Уведомить</option>
-                <option value="revert">Откатить</option>
-              </select>
-              <div class="input-help">Роли дали «Администратор», «Управлять сервером» и т.п., или такую роль выдали участнику</div>
+
+          <div class="rule-group-title">Ещё следить за</div>
+          <div class="rule" data-rule="pn-botadd">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Добавление ботов" onclick="toggleRule(this)"></div>
+            <span>Если кто-то добавит на сервер бота</span>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <div class="seg" role="group" aria-label="Добавили бота" data-seg="pn-botadd">
+              <button type="button" data-mode="alert">Уведомить</button>
+              <button type="button" data-mode="kick">Выгнать бота</button>
             </div>
           </div>
+          <div class="rule" data-rule="pn-escalation">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Выдача опасных прав" onclick="toggleRule(this)"></div>
+            <span>Если роли или участнику выдадут «Администратор», «Управлять сервером» и т.п.</span>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <div class="seg" role="group" aria-label="Выдали опасные права" data-seg="pn-escalation">
+              <button type="button" data-mode="alert">Уведомить</button>
+              <button type="button" data-mode="revert">Откатить</button>
+            </div>
+          </div>
+
+          <div class="rule-group-title">Не проверять</div>
+          <div class="rule rule-chips">
+            <span class="chip-x chip-fixed">Владелец</span>
+            <span class="chip-x chip-fixed">Witness</span>
+            <span class="chip-list" id="pnTrusted" style="margin:0;"></span>
+            <select class="select" id="pnTrustAdd" onchange="addTrusted(this)" aria-label="Добавить доверенную роль">
+              <option value="">+ доверенная роль</option>
+            </select>
+          </div>
+          <div class="input-help">Например, старшие модераторы, которые чистят сервер после рейда массовыми банами</div>
+        </div>
+        <div class="card-foot">
+          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
         </div>
       </div>
 
@@ -1256,45 +1275,41 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Анти-рейд</div>
-            <div class="card-desc">Волна входов за короткое время: что делать с участниками волны и включать ли локдаун</div>
+            <div class="card-desc" id="raidLockState"></div>
           </div>
-          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
         </div>
         <div class="card-body">
           <div id="raidNotices"></div>
-          <div class="toggle-row">
-            <div class="toggle-info">
-              <div class="toggle-label">Анти-рейд включён</div>
-              <div class="toggle-desc" id="raidLockState"></div>
-            </div>
-            <div class="toggle" id="pr-enabled" role="switch" tabindex="0" aria-label="Анти-рейд включён" onclick="this.classList.toggle('on')"></div>
-          </div>
-          <div class="form-row" style="margin-top:1rem;">
-            <div class="form-group">
-              <label for="pr-joins">Рейд — это входов</label>
-              <input type="number" class="input" id="pr-joins" min="3" max="100">
-            </div>
-            <div class="form-group">
-              <label for="pr-window">За (секунд)</label>
-              <input type="number" class="input" id="pr-window" min="3" max="120">
+          <div class="rule" data-rule="pr-enabled">
+            <div class="toggle" id="pr-enabled" role="switch" tabindex="0" aria-label="Анти-рейд включён" onclick="toggleRule(this)"></div>
+            <span>Если за</span>
+            <span class="stepper" data-step="pr-window" data-min="3" data-max="120"></span>
+            <span>сек зайдут</span>
+            <span class="stepper" data-step="pr-joins" data-min="3" data-max="100"></span>
+            <span>человек</span>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <div class="seg" role="group" aria-label="Что делать с участниками волны" data-seg="pr-action">
+              <button type="button" data-mode="alert">Уведомить</button>
+              <button type="button" data-mode="kick">Кикнуть</button>
+              <button type="button" data-mode="quarantine">В карантин</button>
             </div>
           </div>
-          <div class="form-row" style="margin-bottom:0;">
-            <div class="form-group">
-              <label for="pr-action">Участников волны</label>
-              <select class="select" id="pr-action">
-                <option value="alert">Не трогать, только уведомить</option>
-                <option value="kick">Кикнуть</option>
-                <option value="quarantine">Отправить в карантин</option>
-              </select>
-              <div class="input-help">Карантин использует роль из «Модерация → Карантин»</div>
-            </div>
-            <div class="form-group">
-              <label for="pr-lock">Авто-локдаун (минут)</label>
-              <input type="number" class="input" id="pr-lock" min="0" max="1440">
-              <div class="input-help">На это время новые аккаунты младше минимального возраста не смогут зайти. 0 — не включать</div>
-            </div>
+          <div class="rule" data-rule="pr-lock">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Авто-локдаун" onclick="toggleRule(this)"></div>
+            <span>и включить локдаун на</span>
+            <span class="stepper" data-step="pr-lock" data-min="1" data-max="1440"></span>
+            <span>мин</span>
           </div>
+          <div class="rule">
+            <span class="rule-word">Локдаун</span>
+            <span>не пускает аккаунты моложе</span>
+            <span class="stepper" data-step="pr-minage" data-min="1" data-max="365"></span>
+            <span>дн. — и при авто-локдауне, и после <span class="text-mono">/lockdown</span></span>
+          </div>
+          <div class="input-help">Карантин использует роль из «Модерация → Карантин». Если она не настроена — участники волны будут кикнуты</div>
+        </div>
+        <div class="card-foot">
+          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
         </div>
       </div>
     </div></div>
@@ -2424,7 +2439,7 @@ async function saveModeration() {
     quarantine_min_age: parseInt(getVal('mod-qage')) || 7,
     quarantine_hours: parseInt(getVal('mod-qhours')) || 24,
   });
-  const ok2 = await postProtection({ warn_expiry_days: parseInt(getVal('mod-warnexp')) || 0 });
+  const ok2 = await postProtection({ warn_expiry_days: warnExpiryDays() });
   return ok !== false && ok2;
 }
 
@@ -2660,18 +2675,82 @@ async function saveThreats() {
   }
 }
 
-// ── Анти-нюк, анти-рейд, сгорание варнов ──────────────────
+// ── Конструктор защиты: анти-нюк, анти-рейд, сгорание варнов ──
+// Правило = строка «Если … → …»: тумблер включает правило, сегменты выбирают
+// вариант, степперы − / + задают числа. Значения читаются из разметки при сохранении.
 const NUKE_LIMITS = [
-  ['ban', 'Баны'], ['kick', 'Кики'], ['mute', 'Муты'],
-  ['channel', 'Удаление каналов'], ['role', 'Удаление ролей'], ['webhook', 'Создание вебхуков'],
+  ['ban', 'банов'], ['kick', 'киков'], ['mute', 'мутов'],
+  ['channel', 'удалений каналов'], ['role', 'удалений ролей'], ['webhook', 'созданных вебхуков'],
 ];
 let _prot = null, _trusted = [];
+
+function stepperHtml(id, min, max) {
+  return `<button type="button" aria-label="Меньше" onclick="stepBy('${id}', -1)">−</button>` +
+    `<input type="number" id="${id}" min="${min}" max="${max}" inputmode="numeric" onchange="stepBy('${id}', 0)">` +
+    `<button type="button" aria-label="Больше" onclick="stepBy('${id}', 1)">+</button>`;
+}
+function initSteppers(root) {
+  root.querySelectorAll('.stepper[data-step]').forEach(el => {
+    if (!el.firstChild) el.innerHTML = stepperHtml(el.dataset.step, el.dataset.min, el.dataset.max);
+  });
+}
+function stepBy(id, delta) {
+  const el = document.getElementById(id);
+  const min = +el.min, max = +el.max;
+  // крупные числа листаются крупным шагом
+  const v = parseInt(el.value) || min;
+  const step = v >= 100 ? 10 : v >= 30 ? 5 : 1;
+  el.value = Math.max(min, Math.min(max, v + delta * step));
+}
+function setStep(id, v) { const el = document.getElementById(id); if (el) el.value = v; }
+function getStep(id, d) { const v = parseInt(getVal(id)); return Number.isFinite(v) ? v : d; }
+
+function setSegValue(name, mode) {
+  document.querySelectorAll(`.seg[data-seg="${name}"] button`).forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+}
+function getSegValue(name, d) {
+  const b = document.querySelector(`.seg[data-seg="${name}"] button[aria-pressed="true"]`);
+  return b ? b.dataset.mode : d;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.seg[data-seg] button');
+  if (b) setSegValue(b.closest('.seg').dataset.seg, b.dataset.mode);
+});
+// Тумблеры-«переключатели» работают и с клавиатуры
+document.addEventListener('keydown', e => {
+  if ((e.key === ' ' || e.key === 'Enter') && e.target.matches('.toggle[role="switch"]')) {
+    e.preventDefault(); e.target.click();
+  }
+});
+
+function setRule(name, on) {
+  const row = document.querySelector(`.rule[data-rule="${name}"]`);
+  if (!row) return;
+  row.classList.toggle('off', !on);
+  const t = row.querySelector('.toggle');
+  t.classList.toggle('on', !!on);
+  t.setAttribute('aria-checked', String(!!on));
+}
+function ruleOn(name) {
+  const row = document.querySelector(`.rule[data-rule="${name}"]`);
+  return !!row && !row.classList.contains('off');
+}
+function toggleRule(t) {
+  const row = t.closest('.rule');
+  setRule(row.dataset.rule, row.classList.contains('off'));
+}
+function toggleBlock(t, bodyId) {
+  t.classList.toggle('on');
+  t.setAttribute('aria-checked', String(t.classList.contains('on')));
+  document.getElementById(bodyId).classList.toggle('off', !t.classList.contains('on'));
+}
 
 function renderTrusted() {
   const name = id => (_roles.find(r => String(r.id) === String(id)) || {}).name || id;
   document.getElementById('pnTrusted').innerHTML = _trusted.map(id => `<span class="chip-x">@${escapeHtml(name(id))}
       <button type="button" aria-label="Убрать @${escapeHtml(name(id))}" onclick="removeTrusted('${id}')">×</button></span>`).join('');
-  document.getElementById('pnTrustAdd').innerHTML = '<option value="">+ добавить роль</option>' +
+  document.getElementById('pnTrustAdd').innerHTML = '<option value="">+ доверенная роль</option>' +
     _roles.filter(r => !_trusted.includes(String(r.id)))
       .map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`).join('');
   csSync();
@@ -2688,28 +2767,52 @@ function removeTrusted(id) {
 
 function renderProtection() {
   const p = _prot;
-  setToggle('pn-enabled', p.antinuke_enabled);
-  setVal('pn-action', p.antinuke_action);
-  setVal('pn-botadd', p.bot_add);
-  setVal('pn-escalation', p.escalation);
-  document.getElementById('pnLimits').innerHTML = NUKE_LIMITS.map(([k, label]) => `
-    <tr><td>${label}</td>
-      <td><input type="number" class="input input-num" id="pnl-${k}-n" min="2" max="100" value="${p.limits[k][0]}" aria-label="${label}: не больше"></td>
-      <td><input type="number" class="input input-num" id="pnl-${k}-s" min="5" max="600" value="${p.limits[k][1]}" aria-label="${label}: за секунд"></td></tr>`).join('');
+  const nuke = document.getElementById('pn-enabled');
+  nuke.classList.toggle('on', !!p.antinuke_enabled);
+  nuke.setAttribute('aria-checked', String(!!p.antinuke_enabled));
+  document.getElementById('pnBody').classList.toggle('off', !p.antinuke_enabled);
+
+  const box = document.getElementById('pnLimits');
+  box.innerHTML = NUKE_LIMITS.map(([k, label]) => `
+    <div class="rule" data-rule="pnl-${k}">
+      <div class="toggle" role="switch" tabindex="0" aria-label="Лимит: ${label}" onclick="toggleRule(this)"></div>
+      <span class="stepper" data-step="pnl-${k}-n" data-min="2" data-max="100"></span>
+      <span class="rule-noun">${label}</span>
+      <span>за</span>
+      <span class="stepper" data-step="pnl-${k}-s" data-min="5" data-max="600"></span>
+      <span>сек</span>
+    </div>`).join('');
+  initSteppers(box);
+  NUKE_LIMITS.forEach(([k]) => {
+    const [n, s] = p.limits[k];
+    setRule(`pnl-${k}`, n > 0);
+    setStep(`pnl-${k}-n`, n > 0 ? n : 5);
+    setStep(`pnl-${k}-s`, s);
+  });
+  setSegValue('pn-action', p.antinuke_action);
+  setRule('pn-botadd', p.bot_add !== 'off');
+  setSegValue('pn-botadd', p.bot_add === 'off' ? 'alert' : p.bot_add);
+  setRule('pn-escalation', p.escalation !== 'off');
+  setSegValue('pn-escalation', p.escalation === 'off' ? 'alert' : p.escalation);
   _trusted = (p.trusted_roles || []).map(String);
   renderTrusted();
 
-  setToggle('pr-enabled', p.raid_enabled);
-  setVal('pr-joins', p.raid_joins);
-  setVal('pr-window', p.raid_window);
-  setVal('pr-action', p.raid_action);
-  setVal('pr-lock', p.raid_lockdown_minutes);
+  initSteppers(document.getElementById('content-security'));
+  setRule('pr-enabled', p.raid_enabled);
+  setStep('pr-window', p.raid_window);
+  setStep('pr-joins', p.raid_joins);
+  setSegValue('pr-action', p.raid_action);
+  setRule('pr-lock', p.raid_lockdown_minutes > 0);
+  setStep('pr-lock', p.raid_lockdown_minutes || 10);
+  setStep('pr-minage', p.lockdown_min_age || 7);
   document.getElementById('raidLockState').textContent =
     p.lockdown ? 'Локдаун сейчас включён' : 'Локдаун сейчас выключен';
   document.getElementById('raidNotices').innerHTML = p.premium ? '' :
     '<div class="notice">⚠️<div>Анти-рейд работает на тарифе <b>Premium</b>. Настройки сохранятся и включатся вместе с тарифом.</div></div>';
-  setVal('mod-warnexp', p.warn_expiry_days);
-  csSync();
+
+  initSteppers(document.getElementById('content-moderation'));
+  setRule('mod-warnexp', p.warn_expiry_days > 0);
+  setStep('mod-warnexp', p.warn_expiry_days || 30);
 }
 
 async function loadProtection() {
@@ -2738,19 +2841,25 @@ async function postProtection(payload) {
   }
 }
 
+function warnExpiryDays() {
+  return ruleOn('mod-warnexp') ? getStep('mod-warnexp', 30) : 0;
+}
+
 async function saveProtection() {
-  const num = (id, d) => { const v = parseInt(getVal(id)); return Number.isFinite(v) ? v : d; };
-  const limits = Object.fromEntries(NUKE_LIMITS.map(([k]) =>
-    [k, [num(`pnl-${k}-n`, _prot.limits[k][0]), num(`pnl-${k}-s`, _prot.limits[k][1])]]));
+  const limits = Object.fromEntries(NUKE_LIMITS.map(([k]) => [k, [
+    ruleOn(`pnl-${k}`) ? getStep(`pnl-${k}-n`, 5) : 0,
+    getStep(`pnl-${k}-s`, 30)]]));
   const ok = await postProtection({
-    antinuke_enabled: !!getToggle('pn-enabled'),
-    antinuke_action: getVal('pn-action'),
-    bot_add: getVal('pn-botadd'),
-    escalation: getVal('pn-escalation'),
+    antinuke_enabled: document.getElementById('pn-enabled').classList.contains('on'),
+    antinuke_action: getSegValue('pn-action', 'strip'),
+    bot_add: ruleOn('pn-botadd') ? getSegValue('pn-botadd', 'alert') : 'off',
+    escalation: ruleOn('pn-escalation') ? getSegValue('pn-escalation', 'alert') : 'off',
     limits, trusted_roles: _trusted,
-    raid_enabled: !!getToggle('pr-enabled'),
-    raid_joins: num('pr-joins', 8), raid_window: num('pr-window', 10),
-    raid_action: getVal('pr-action'), raid_lockdown_minutes: num('pr-lock', 10),
+    raid_enabled: ruleOn('pr-enabled'),
+    raid_window: getStep('pr-window', 10), raid_joins: getStep('pr-joins', 8),
+    raid_action: getSegValue('pr-action', 'kick'),
+    raid_lockdown_minutes: ruleOn('pr-lock') ? getStep('pr-lock', 10) : 0,
+    lockdown_min_age: getStep('pr-minage', 7),
   });
   if (ok) { showToast('✓ Сохранено', 'success'); renderProtection(); }
   return ok;

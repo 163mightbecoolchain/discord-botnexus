@@ -429,7 +429,7 @@ async def save_threats(gid, data):
 
 # ── Анти-нюк, анти-рейд, сгорание варнов ──────────────────────
 # Всё настраивается из дашборда (вкладка «Безопасность» и «Модерация»).
-# limits: действие → [сколько, за сколько секунд]. Действия:
+# limits: действие → [сколько, за сколько секунд]; сколько = 0 — лимит выключен. Действия:
 #   ban, kick, mute — наказания; channel, role — удаления; webhook — создание вебхуков.
 # antinuke_action: alert — только алерт; strip — снять опасные роли;
 #   strip_timeout — снять роли и выдать таймаут на час.
@@ -489,7 +489,8 @@ def _clean_protection(data, base):
         for act, cur in out["limits"].items():
             v = data["limits"].get(act)
             if isinstance(v, (list, tuple)) and len(v) == 2:
-                out["limits"][act] = [_clamp(v[0], *PROTECTION_RANGES["limit_count"], cur[0]),
+                count = 0 if v[0] in (0, "0") else _clamp(v[0], *PROTECTION_RANGES["limit_count"], cur[0])
+                out["limits"][act] = [count,
                                       _clamp(v[1], *PROTECTION_RANGES["limit_window"], cur[1])]
     if isinstance(data.get("trusted_roles"), list):
         ids = [str(r) for r in data["trusted_roles"] if str(r).isdigit()]

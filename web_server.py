@@ -719,6 +719,7 @@ async def _protection_payload(bg):
         'raid_enabled': bool(sec.get('anti_raid')),
         'premium':      await get_tier(bg.id) >= TIER_PREMIUM,
         'lockdown':     await lockdown_active(bg),
+        'lockdown_min_age': int(sec.get('lockdown_min_age', 7) or 7),
     }
 
 @require_auth
@@ -746,9 +747,17 @@ async def api_protection(request):
             data['trusted_roles'] = [str(r) for r in data['trusted_roles']
                                      if str(r).isdigit() and bg.get_role(int(r))]
         await save_protection(guild_id, data)
-        if 'raid_enabled' in data:
+        # Включение анти-рейда и возраст для локдауна живут в security_settings —
+        # там же их читают /lockdown и переключатели логов
+        if 'raid_enabled' in data or 'lockdown_min_age' in data:
             log_ch, sec = await get_security(guild_id)
-            sec['anti_raid'] = bool(data['raid_enabled'])
+            if 'raid_enabled' in data:
+                sec['anti_raid'] = bool(data['raid_enabled'])
+            if 'lockdown_min_age' in data:
+                try:
+                    sec['lockdown_min_age'] = max(1, min(365, int(data['lockdown_min_age'])))
+                except (TypeError, ValueError):
+                    pass
             await save_security(guild_id, log_ch, sec)
         return web.json_response({'ok': True, **(await _protection_payload(bg))})
     except Exception as e:

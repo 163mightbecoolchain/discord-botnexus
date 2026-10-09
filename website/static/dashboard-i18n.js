@@ -194,6 +194,33 @@
     '0 — варны не сгорают. Сгоревший варн виден в истории, но к наказанию не ведёт':
       '0 — warnings never expire. An expired warning stays in the history but no longer leads to punishment',
 
+    // Конструктор правил
+    'Защита от взломанного или недобросовестного модератора. Собери правила: что считать атакой и что делать':
+      'Protection against a compromised or rogue moderator. Build the rules: what counts as an attack and what to do',
+    'Если модератор сделает больше…': 'If a moderator makes more than…',
+    'банов': 'bans', 'киков': 'kicks', 'мутов': 'mutes', 'удалений каналов': 'channel deletions',
+    'удалений ролей': 'role deletions', 'созданных вебхуков': 'webhooks created', 'за': 'within', 'сек': 's', 'мин': 'min',
+    'Тогда': 'Then', 'Что делать при превышении': 'What to do when exceeded', 'Снять роли + таймаут 1 ч': 'Remove roles + 1 h timeout',
+    'Опасные роли — с правами бана, кика, таймаута, управления сервером, ролями, каналами или вебхуками. Роли выше роли Witness бот снять не может и напишет об этом.':
+      'Dangerous roles have ban, kick, timeout, manage server, roles, channels or webhooks permissions. The bot cannot remove roles above its own and will say so.',
+    'Ещё следить за': 'Also watch for', 'Добавление ботов': 'Bots being added',
+    'Если кто-то добавит на сервер бота': 'If someone adds a bot to the server',
+    'Выдача опасных прав': 'Dangerous permissions being granted',
+    'Если роли или участнику выдадут «Администратор», «Управлять сервером» и т.п.':
+      'If a role or a member is given “Administrator”, “Manage Server” and the like',
+    'Не проверять': 'Don’t check', 'Владелец': 'Owner', 'Добавить доверенную роль': 'Add a trusted role',
+    '+ доверенная роль': '+ trusted role', 'Меньше': 'Less', 'Больше': 'More',
+    'Если за': 'If within', 'сек зайдут': 's', 'человек': 'people join',
+    'Что делать с участниками волны': 'What to do with the wave', 'В карантин': 'Quarantine',
+    'Авто-локдаун': 'Auto-lockdown', 'и включить локдаун на': 'and turn on lockdown for',
+    'Локдаун': 'Lockdown', 'не пускает аккаунты моложе': 'keeps out accounts younger than',
+    'дн. — и при авто-локдауне, и после': 'days — both during auto-lockdown and after',
+    'Карантин использует роль из «Модерация → Карантин». Если она не настроена — участники волны будут кикнуты':
+      'Quarantine uses the role from “Moderation → Quarantine”. If it is not set, the wave is kicked instead',
+    'Сгорание варнов': 'Warning expiry', 'Варн сгорает через': 'A warning expires after',
+    'Сгоревший варн остаётся в истории, но к наказанию больше не ведёт. Выключено — варны не сгорают':
+      'An expired warning stays in the history but no longer leads to punishment. Off — warnings never expire',
+
     // Поиск участника
     'Полное досье: наказания, апелляции, инвайты': 'Full record: punishments, appeals, invites',
     'Найди участника': 'Find a member', 'Ник или ID участника...': 'Member nickname or ID...',
@@ -234,6 +261,7 @@
     [/^🔨 Бан на (\d+) дней выдан$/, (m, n) => `🔨 ${n}-day ban issued`],
     [/^Инициатор: (.*?)(?: · Решил: (.*))?$/, (m, a, b) => `Requested by: ${a}` + (b ? ` · Decided by: ${b}` : '')],
     [/^код (\d+)$/, (m, n) => `code ${n}`],
+    [/^Лимит: (.+)$/, (m, x) => `Limit: ${tr(x)}`],
     [/^Убрать (.+)$/, (m, x) => `Remove ${x}`],
     [/^(.+): режим$/, (m, x) => `${tr(x)}: mode`],
     [/^AutoMod: (блокирует|алерт)(?: \+ (алерт))?$/, (m, a, b) =>
