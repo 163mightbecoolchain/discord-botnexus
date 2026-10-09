@@ -261,27 +261,6 @@ section { max-width: 1280px; margin: 0 auto; padding: 5rem 1.5rem; }
 .dim { color: var(--muted); }
 .muted-text { color: var(--text-2); }
 
-.tech {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem; margin-top: 3rem;
-}
-
-.tech-item {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 10px; padding: 1.25rem;
-  display: flex; align-items: center; gap: .85rem;
-}
-
-.tech-item-icon {
-  width: 36px; height: 36px; border-radius: 8px;
-  background: rgba(0,217,163,0.1);
-  display: grid; place-items: center; font-size: 1.1rem;
-}
-
-.tech-item-text strong { display: block; color: var(--text); font-size: .9rem; }
-.tech-item-text small { color: var(--muted); font-size: .75rem; }
-
 .cta {
   background:
     radial-gradient(circle at 20% 50%, rgba(0,217,163,0.15) 0%, transparent 50%),
@@ -330,7 +309,6 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
     </a>
     <div class="nav-links">
       <a href="#features">Возможности</a>
-      <a href="#tech">Под капотом</a>
       <a href="__SUPPORT_URL__" target="_blank">Support</a>
       <a href="/dashboard" class="btn btn-ghost">Dashboard</a>
       <a href="__INVITE_URL__" class="btn btn-primary">+ Добавить</a>
@@ -461,73 +439,6 @@ footer { border-top: 1px solid var(--border); padding: 3rem 1.5rem 2rem; margin-
       </div>
     </div>
   </div>
-
-  <section id="tech">
-    <div class="section-head">
-      <div class="section-tag">// UNDER THE HOOD</div>
-      <h2 class="section-title">Под капотом</h2>
-      <p class="section-desc">Современный стек, акцент на надёжности и скорости.</p>
-    </div>
-
-    <div class="tech">
-      <div class="tech-item">
-        <div class="tech-item-icon">🐍</div>
-        <div class="tech-item-text">
-          <strong>Python + discord.py</strong>
-          <small>v2.x, slash commands</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">⚡</div>
-        <div class="tech-item-text">
-          <strong>aiohttp + aiosqlite</strong>
-          <small>Полностью асинхронно</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">🔐</div>
-        <div class="tech-item-text">
-          <strong>HMAC-подписи</strong>
-          <small>Действия модераторов нельзя подделать</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">🧠</div>
-        <div class="tech-item-text">
-          <strong>Groq + Gemini + Claude</strong>
-          <small>Fallback цепочка AI</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">🛡️</div>
-        <div class="tech-item-text">
-          <strong>Discord AutoMod</strong>
-          <small>Правила создаются и обновляются сами</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">🧩</div>
-        <div class="tech-item-text">
-          <strong>Без привилегированных интентов</strong>
-          <small>Журнал аудита и API вместо кэша участников</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">🔑</div>
-        <div class="tech-item-text">
-          <strong>OAuth2 + HMAC</strong>
-          <small>30-дневная сессия с refresh</small>
-        </div>
-      </div>
-      <div class="tech-item">
-        <div class="tech-item-icon">🚀</div>
-        <div class="tech-item-text">
-          <strong>Railway hosting</strong>
-          <small>Auto-deploy, 99.9% uptime</small>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <div class="cta">
     <h2>Готов улучшить модерацию?</h2>
