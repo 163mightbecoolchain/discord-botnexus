@@ -49,5 +49,6 @@ SUPPORT_URL  = os.getenv("SUPPORT_URL", "https://discord.gg/witness")  # ссы�
 def get_invite_url() -> str:
     if not BOT_ID:
         return "Добавь BOT_ID в Railway Variables"
-    perms = 8  # Administrator — всё в одном
+    # Только нужные права, без Administrator; тот же набор — в web_server.py и website/app.py
+    perms = 1374658358518
     return f"https://discord.com/api/oauth2/authorize?client_id={BOT_ID}&permissions={perms}&scope=bot%20applications.commands"

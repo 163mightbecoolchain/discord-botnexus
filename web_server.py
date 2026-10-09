@@ -42,8 +42,13 @@ def _norm_url(v: str) -> str:
 SITE_URL      = _norm_url(os.getenv("SITE_URL", f"http://localhost:{PORT}"))
 # WEBSITE_URL — адрес отдельного сервиса с сайтом (лендинг + дашборд)
 WEBSITE_URL   = _norm_url(os.getenv("WEBSITE_URL", ""))
+# Права при приглашении: только то, чем бот пользуется (без Administrator).
+# Кик, бан, таймаут, роли (карантин, реакции), каналы (тикеты, slowmode),
+# сервер (AutoMod, инвайты), журнал аудита, сообщения, вложения (бэкапы).
+# Тот же набор — в witness/config.py и website/app.py.
+INVITE_PERMISSIONS = 1374658358518
 INVITE_URL    = (f"https://discord.com/api/oauth2/authorize?client_id={BOT_ID}"
-                 f"&permissions=8&scope=bot%20applications.commands") if BOT_ID else "#"
+                 f"&permissions={INVITE_PERMISSIONS}&scope=bot%20applications.commands") if BOT_ID else "#"
 SUPPORT_URL   = os.getenv("SUPPORT_URL", "https://discord.gg/witness")
 DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 TEMPLATES_DIR = Path(__file__).parent / "witness_web" / "templates"
