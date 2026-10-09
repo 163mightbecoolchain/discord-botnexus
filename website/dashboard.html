@@ -269,6 +269,18 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .threat-meta { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
 .notice { display: flex; gap: .6rem; padding: .75rem .9rem; border-radius: 8px; font-size: .8rem; line-height: 1.45; margin-bottom: 1rem; background: rgba(255,170,0,.08); border: 1px solid rgba(255,170,0,.25); color: var(--text-2); }
 .notice b { color: var(--text); }
+.notice.error { background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.3); }
+.notice ul { margin: .35rem 0 0 1rem; }
+.textarea { resize: vertical; font-family: var(--mono); font-size: .84rem; line-height: 1.5; }
+.chip-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .5rem; min-height: 0; }
+.chip-x { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; padding: .25rem .3rem .25rem .65rem; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border-2); }
+.chip-x button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: .95rem; line-height: 1; padding: .1rem .3rem; border-radius: 50%; }
+.chip-x button:hover { color: var(--danger); background: rgba(255,84,112,.1); }
+.filter-bar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; padding: .85rem 1.4rem; border-bottom: 1px solid var(--border); }
+.filter-bar .cs-wrap { width: 210px; }
+.check { display: inline-flex; align-items: center; gap: .45rem; margin: 0; font-weight: 500; color: var(--text-2); cursor: pointer; }
+.check input { accent-color: var(--accent); width: 16px; height: 16px; }
+tr.resolved td { opacity: .55; }
 
 /* Поиск */
 .search-bar { display: flex; gap: .75rem; margin-bottom: 1rem; }
@@ -1071,7 +1083,7 @@ html.theme-anim *::before, html.theme-anim *::after {
           <div class="stat-value" id="secRulesCount">—</div>
         </div>
         <div class="stat-card danger">
-          <div class="stat-label">Угроз за 7 дней</div>
+          <div class="stat-label">Нерешённых угроз за 7 дней</div>
           <div class="stat-value" id="secAlerts7d">—</div>
         </div>
       </div>
@@ -1089,6 +1101,46 @@ html.theme-anim *::before, html.theme-anim *::after {
           <div id="secThreats">
             <div class="empty" style="padding:1.5rem;"><div class="empty-sub">Загрузка...</div></div>
           </div>
+          <div class="form-group" style="margin: 1rem 0 0;">
+            <label for="customWords">Свои слова и домены — по одному на строку</label>
+            <textarea class="textarea" id="customWords" rows="5" spellcheck="false"
+              placeholder="casino-bonus.xyz&#10;free-robux*&#10;*scamword*"></textarea>
+            <div class="input-help">
+              <span class="text-mono">слово</span> — целиком, <span class="text-mono">слово*</span> — начало,
+              <span class="text-mono">*слово</span> — конец, <span class="text-mono">*слово*</span> — где угодно.
+              Слова, которые задели бы обычные ссылки (discord.com, youtube.com, github.com…), не сохранятся,
+              а сами эти домены AutoMod всегда пропускает.
+            </div>
+            <div id="customWordsErr"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Исключения</div>
+            <div class="card-desc">Роли и каналы, на которые правила защиты не действуют: например, модераторы или канал для ссылок</div>
+          </div>
+          <button class="btn btn-ghost" onclick="btnBusy(this, saveThreats)">Сохранить</button>
+        </div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="exRoleAdd">Роли</label>
+              <div class="chip-list" id="exRoles"></div>
+              <select class="select" id="exRoleAdd" onchange="addExempt('roles', this)">
+                <option value="">+ добавить роль</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="exChanAdd">Каналы</label>
+              <div class="chip-list" id="exChans"></div>
+              <select class="select" id="exChanAdd" onchange="addExempt('channels', this)">
+                <option value="">+ добавить канал</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1096,16 +1148,30 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Последние угрозы</div>
-            <div class="card-desc">Срабатывания AutoMod и проверок бота, 30 последних</div>
+            <div class="card-desc">Срабатывания AutoMod и проверок бота, до 100 последних</div>
           </div>
+        </div>
+        <div class="filter-bar">
+          <select class="select" id="alFilterSev" onchange="renderAlerts()" aria-label="Уровень">
+            <option value="">Любой уровень</option>
+            <option value="high">Высокий и критический</option>
+            <option value="MEDIUM">Средний</option>
+            <option value="LOW">Низкий</option>
+          </select>
+          <select class="select" id="alFilterSrc" onchange="renderAlerts()" aria-label="Источник">
+            <option value="">Любой источник</option>
+            <option value="automod">AutoMod</option>
+            <option value="bot">Бот</option>
+          </select>
+          <label class="check"><input type="checkbox" id="alShowResolved" onchange="renderAlerts()"> Показывать решённые</label>
         </div>
         <div class="table-wrap" style="border: 0; border-radius: 0;">
           <table class="table">
             <thead>
-              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th></tr>
+              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th><th></th></tr>
             </thead>
             <tbody id="secAlertsTable">
-              <tr><td colspan="5"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
+              <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -2355,9 +2421,75 @@ const THREATS = [
   ['phishing',   'фишинг-ссылки',            'Фишинг-ссылки', 'Поддельные домены Discord и Steam: discord-nitro.gift, steamcommunlty.com и похожие'],
   ['suspicious', 'подозрительные сообщения', 'Скам',          'Фейковые раздачи Nitro и Steam, крипто-схемы «удвою», ссылки с подменой букв'],
   ['spam',       'спам',                     'Спам',          'Встроенный детектор спама Discord и повтор одного и того же текста'],
+  ['custom',     'свои слова',               'Свои слова',    'Слова и домены, которые запрещены именно на этом сервере — список ниже'],
 ];
 const MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['block', 'Блок']];
-let _threats = {}, _secData = null;
+let _threats = {}, _secData = null, _exempt = { roles: [], channels: [] };
+
+function renderExempt() {
+  const name = (list, id) => (list.find(x => String(x.id) === String(id)) || {}).name;
+  const chip = (kind, id, label) => `<span class="chip-x">${escapeHtml(label)}
+      <button type="button" aria-label="Убрать ${escapeHtml(label)}" onclick="removeExempt('${kind}', '${id}')">×</button></span>`;
+  document.getElementById('exRoles').innerHTML = _exempt.roles
+    .map(id => chip('roles', id, '@' + (name(_roles, id) || id))).join('');
+  document.getElementById('exChans').innerHTML = _exempt.channels
+    .map(id => chip('channels', id, '#' + (name(_channels, id) || id))).join('');
+  document.getElementById('exRoleAdd').innerHTML = '<option value="">+ добавить роль</option>' +
+    _roles.filter(r => !_exempt.roles.includes(String(r.id)))
+      .map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`).join('');
+  document.getElementById('exChanAdd').innerHTML = '<option value="">+ добавить канал</option>' +
+    _channels.filter(c => c.type === 'text' && !_exempt.channels.includes(String(c.id)))
+      .map(c => `<option value="${c.id}">#${escapeHtml(c.name)}</option>`).join('');
+  csSync();
+}
+
+function addExempt(kind, sel) {
+  if (sel.value && !_exempt[kind].includes(sel.value)) _exempt[kind].push(sel.value);
+  sel.value = '';
+  renderExempt();
+}
+
+function removeExempt(kind, id) {
+  _exempt[kind] = _exempt[kind].filter(x => x !== String(id));
+  renderExempt();
+}
+
+function renderAlerts() {
+  const tbody = document.getElementById('secAlertsTable');
+  const sev = document.getElementById('alFilterSev').value;
+  const src = document.getElementById('alFilterSrc').value;
+  const showResolved = document.getElementById('alShowResolved').checked;
+  const alerts = ((_secData && _secData.alerts) || []).filter(a =>
+    (showResolved || !a.resolved) &&
+    (!src || a.source === src) &&
+    (!sev || (sev === 'high' ? ['HIGH', 'CRITICAL'].includes(a.severity) : a.severity === sev)));
+  if (!alerts.length) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = alerts.map((a, i) => `
+    <tr class="stagger-in ${a.resolved ? 'resolved' : ''}" style="animation-delay:${Math.min(i,15)*35}ms">
+      <td><span class="chip ${SEV_CHIP[a.severity] ?? ''}">${escapeHtml(a.severity)}</span></td>
+      <td>${escapeHtml(a.description || a.type)}${a.matched ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
+      <td>${escapeHtml(a.user_name || a.user_id || '—')}</td>
+      <td class="text-mono text-muted">${a.source === 'automod' ? 'AutoMod' : 'бот'}</td>
+      <td class="text-mono text-muted">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id}, ${!a.resolved})">${a.resolved ? 'Вернуть' : 'Решено'}</button></td>
+    </tr>`).join('');
+}
+
+async function resolveAlert(id, resolved) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/alert/${id}/resolve`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ resolved })
+    });
+    if (!r.ok) return showToast('Не удалось обновить', 'error');
+    const a = _secData.alerts.find(x => x.id === id);
+    if (a) a.resolved = resolved;
+    renderAlerts();
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+}
 
 function setThreat(key, mode) {
   _threats[key] = mode;
@@ -2380,8 +2512,9 @@ function renderThreats() {
     let status;
     if (r) status = `<span class="chip ok">AutoMod: ${[r.blocks ? 'блокирует' : '', r.alerts ? 'алерт' : ''].filter(Boolean).join(' + ')}</span>`;
     else if (key === 'spam' && d.automod.foreign_spam) status = '<span class="chip">на сервере уже есть своё правило спама</span>';
-    else if (_threats[key] === 'alert' && key !== 'phishing' && d.message_content) status = '<span class="chip">проверяет сам бот</span>';
+    else if (_threats[key] === 'alert' && ['suspicious', 'spam'].includes(key) && d.message_content) status = '<span class="chip">проверяет сам бот</span>';
     else if (_threats[key] === 'off') status = '<span class="chip">выключено</span>';
+    else if (key === 'custom' && !(d.threats.custom_words || []).length) status = '<span class="chip">добавьте слова в поле ниже</span>';
     else status = '<span class="chip warn">правило не создано</span>';
     return `
       <div class="threat-row">
@@ -2401,10 +2534,25 @@ function renderThreats() {
 async function saveThreats() {
   if (!currentGuild) return false;
   try {
+    const words = document.getElementById('customWords').value
+      .split('\n').map(w => w.trim()).filter(Boolean);
     const r = await apiFetch(`/api/guild/${currentGuild.id}/threats`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(_threats)
+      body: JSON.stringify({ ..._threats, exempt_roles: _exempt.roles,
+                             exempt_channels: _exempt.channels, custom_words: words })
     });
+    const errBox = document.getElementById('customWordsErr');
+    errBox.innerHTML = '';
+    if (r.status === 400) {
+      const d = await r.json().catch(() => ({}));
+      if (d.bad_words) {
+        errBox.innerHTML = `<div class="notice error" style="margin-top:.75rem;">⚠️<div><b>Эти слова не сохранены:</b><ul>${
+          d.bad_words.map(b => `<li><span class="text-mono">${escapeHtml(b.word)}</span> — ${escapeHtml(b.reason)}</li>`).join('')
+        }</ul></div></div>`;
+        showToast('Исправьте список слов', 'error');
+        return false;
+      }
+    }
     if (!r.ok) { showToast('Не удалось сохранить', 'error'); return false; }
     showToast('✓ Режимы сохранены и применены', 'success');
     await loadSecurity();
@@ -2419,35 +2567,27 @@ async function loadSecurity() {
   if (!currentGuild) return;
   const box   = document.getElementById('secThreats');
   const tbody = document.getElementById('secAlertsTable');
-  tbody.innerHTML = skeletonRows(5, 4);
+  tbody.innerHTML = skeletonRows(6, 4);
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/security/overview`);
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     _secData = d;
-    _threats = { ...(d.threats || {}) };
+    const t = d.threats || {};
+    _threats = Object.fromEntries(THREATS.map(([k]) => [k, t[k]]));
+    _exempt = { roles: (t.exempt_roles || []).map(String), channels: (t.exempt_channels || []).map(String) };
+    document.getElementById('customWords').value = (t.custom_words || []).join('\n');
+    document.getElementById('customWordsErr').innerHTML = '';
 
     const rules = d.automod.rules || [];
     document.getElementById('secRulesCount').textContent = rules.filter(x => x.enabled).length;
-    document.getElementById('secAlerts7d').textContent   = d.alerts_7d ?? 0;
+    document.getElementById('secAlerts7d').textContent   = d.alerts_open_7d ?? d.alerts_7d ?? 0;
     renderThreats();
-
-    const alerts = d.alerts || [];
-    if (!alerts.length) {
-      tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
-      return;
-    }
-    tbody.innerHTML = alerts.map((a, i) => `
-      <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
-        <td><span class="chip ${SEV_CHIP[a.severity] ?? ''}">${escapeHtml(a.severity)}</span></td>
-        <td>${escapeHtml(a.description || a.type)}${a.matched ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
-        <td>${escapeHtml(a.user_name || a.user_id || '—')}</td>
-        <td class="text-mono text-muted">${a.source === 'automod' ? 'AutoMod' : 'бот'}</td>
-        <td class="text-mono text-muted">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
-      </tr>`).join('');
+    renderExempt();
+    renderAlerts();
   } catch(e) {
     box.innerHTML = '<div class="empty" style="padding:1.5rem;"><div class="empty-sub">Не удалось загрузить</div></div>';
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
   }
 }
 

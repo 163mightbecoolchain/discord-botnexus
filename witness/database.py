@@ -381,31 +381,49 @@ async def save_security(gid, log_channel, settings):
 # block — блокировать сообщение и прислать алерт. Применяются в automod.py
 # (правила AutoMod) и в security_module.py (проверка текста самим ботом).
 THREAT_MODES   = ("off", "alert", "block")
-DEFAULT_THREATS = {"phishing": "block", "suspicious": "alert", "spam": "alert"}
+# custom — свой список слов и доменов сервера (правило «свои слова»)
+DEFAULT_THREATS = {"phishing": "block", "suspicious": "alert", "spam": "alert", "custom": "off"}
+# Исключения и список слов хранятся рядом с режимами в том же JSON.
+# Лимиты — как у Discord AutoMod: 20 ролей, 50 каналов, 1000 слов до 60 символов.
+THREAT_LISTS = {"exempt_roles": 20, "exempt_channels": 50, "custom_words": 1000}
 _threat_cache: dict = {}
 
-async def get_threats(gid):
-    if gid in _threat_cache:
-        return dict(_threat_cache[gid])
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT settings FROM threat_settings WHERE guild_id=?", (gid,)) as c:
-            row = await c.fetchone()
-    saved = json.loads(row[0] or "{}") if row else {}
-    modes = {k: saved[k] if saved.get(k) in THREAT_MODES else v for k, v in DEFAULT_THREATS.items()}
-    _threat_cache[gid] = modes
-    return dict(modes)
+async def get_threat_config(gid):
+    """Режимы + исключения + свои слова: {"phishing": "block", …, "exempt_roles": [ids], …}."""
+    if gid not in _threat_cache:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT settings FROM threat_settings WHERE guild_id=?", (gid,)) as c:
+                row = await c.fetchone()
+        saved = json.loads(row[0] or "{}") if row else {}
+        cfg = {k: saved[k] if saved.get(k) in THREAT_MODES else v for k, v in DEFAULT_THREATS.items()}
+        for k in THREAT_LISTS:
+            cfg[k] = list(saved.get(k) or [])
+        _threat_cache[gid] = cfg
+    cfg = _threat_cache[gid]
+    return {k: (list(v) if isinstance(v, list) else v) for k, v in cfg.items()}
 
-async def save_threats(gid, modes):
-    """Сохраняет режимы; неизвестные ключи и значения отбрасываются."""
-    clean = await get_threats(gid)
-    clean.update({k: v for k, v in modes.items() if k in DEFAULT_THREATS and v in THREAT_MODES})
+async def get_threats(gid):
+    """Только режимы правил."""
+    cfg = await get_threat_config(gid)
+    return {k: cfg[k] for k in DEFAULT_THREATS}
+
+async def save_threats(gid, data):
+    """Сохраняет режимы и списки. Неизвестные ключи и значения отбрасываются,
+    списки обрезаются до лимитов. Проверку слов на безобидные ссылки и
+    принадлежность ролей/каналов серверу делает вызывающий код."""
+    clean = await get_threat_config(gid)
+    clean.update({k: v for k, v in data.items() if k in DEFAULT_THREATS and v in THREAT_MODES})
+    for k, limit in THREAT_LISTS.items():
+        if isinstance(data.get(k), list):
+            items = [str(x) for x in data[k] if isinstance(x, (str, int)) and str(x).strip()]
+            clean[k] = list(dict.fromkeys(items))[:limit]
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT INTO threat_settings (guild_id,settings) VALUES(?,?) "
                          "ON CONFLICT(guild_id) DO UPDATE SET settings=excluded.settings",
-                         (gid, json.dumps(clean)))
+                         (gid, json.dumps(clean, ensure_ascii=False)))
         await db.commit()
     _threat_cache[gid] = clean
-    return dict(clean)
+    return await get_threat_config(gid)
 
 async def is_enabled(gid, key):
     _, s = await get_security(gid); return s.get(key, False)
