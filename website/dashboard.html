@@ -280,6 +280,23 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .notice.error { background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.3); }
 .notice ul { margin: .35rem 0 0 1rem; }
 .textarea { resize: vertical; font-family: var(--mono); font-size: .84rem; line-height: 1.5; }
+.uchip { cursor: pointer; border-bottom: 1px dashed var(--border-2); transition: color .15s, border-color .15s; }
+.uchip:hover, .uchip:focus-visible { color: var(--accent); border-bottom-color: var(--accent); outline: none; }
+.user-pop { position: fixed; z-index: 700; width: 375px; max-width: calc(100vw - 32px); background: var(--panel);
+  border: 1px solid var(--border-2); border-radius: 12px; box-shadow: 0 14px 36px rgba(0,0,0,.5);
+  padding: .9rem; font-size: .84rem; animation: modalIn .16s cubic-bezier(.34,1.4,.64,1); }
+.user-pop[hidden] { display: none; }
+.user-pop .up-head { display: flex; gap: .7rem; align-items: center; }
+.user-pop .up-av { width: 44px; height: 44px; border-radius: 50%; background: var(--bg-3); flex-shrink: 0; overflow: hidden;
+  display: grid; place-items: center; font-weight: 700; }
+.user-pop .up-av img { width: 100%; height: 100%; object-fit: cover; }
+.user-pop .up-name { font-weight: 700; font-size: .98rem; overflow-wrap: anywhere; }
+.user-pop .up-sub { color: var(--muted); font-family: var(--mono); font-size: .74rem; overflow-wrap: anywhere; }
+.user-pop .up-grid { display: grid; grid-template-columns: auto 1fr; gap: .3rem .8rem; margin: .8rem 0 .2rem; }
+.user-pop .up-grid dt { color: var(--muted); }
+.user-pop .up-grid dd { margin: 0; font-family: var(--mono); font-size: .78rem; }
+.user-pop .member-chips { margin-top: .6rem; }
+.user-pop .up-foot { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .8rem; }
 .chip-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .5rem; min-height: 0; }
 .chip-x { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; padding: .25rem .3rem .25rem .65rem; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border-2); }
 .chip-x button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: .95rem; line-height: 1; padding: .1rem .3rem; border-radius: 50%; }
@@ -321,6 +338,11 @@ tr.resolved td { opacity: .55; }
 .member-av { width: 64px; height: 64px; border-radius: 50%; background: var(--bg-3); overflow: hidden; flex-shrink: 0; }
 .member-av img { width: 100%; height: 100%; object-fit: cover; }
 .member-chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+.chip.role { display: inline-flex; align-items: center; gap: .35rem; max-width: 100%; min-width: 0; }
+.chip.role .rn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chip.role .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.chip.role-admin { background: rgba(255,84,112,.12); color: var(--danger); border-color: rgba(255,84,112,.4); }
+.chip.role-mod { background: rgba(var(--accent-rgb),.12); color: var(--accent); border-color: rgba(var(--accent-rgb),.4); }
 
 /* Пустые состояния и загрузка */
 .empty { padding: 3rem 1rem; text-align: center; color: var(--muted); }
@@ -1186,39 +1208,6 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="card">
         <div class="card-head">
           <div>
-            <div class="card-title">Последние угрозы</div>
-            <div class="card-desc">Срабатывания AutoMod и проверок бота, до 100 последних</div>
-          </div>
-        </div>
-        <div class="filter-bar">
-          <select class="select" id="alFilterSev" onchange="renderAlerts()" aria-label="Уровень">
-            <option value="">Любой уровень</option>
-            <option value="high">Высокий и критический</option>
-            <option value="MEDIUM">Средний</option>
-            <option value="LOW">Низкий</option>
-          </select>
-          <select class="select" id="alFilterSrc" onchange="renderAlerts()" aria-label="Источник">
-            <option value="">Любой источник</option>
-            <option value="automod">AutoMod</option>
-            <option value="bot">Бот</option>
-          </select>
-          <label class="check"><input type="checkbox" id="alShowResolved" onchange="renderAlerts()"> Показывать решённые</label>
-        </div>
-        <div class="table-wrap" style="border: 0; border-radius: 0;">
-          <table class="table">
-            <thead>
-              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th><th></th></tr>
-            </thead>
-            <tbody id="secAlertsTable">
-              <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
             <div class="card-title">Анти-нюк</div>
             <div class="card-desc">Защита от взломанного или недобросовестного модератора. Собери правила: что считать атакой и что делать</div>
           </div>
@@ -1316,6 +1305,41 @@ html.theme-anim *::before, html.theme-anim *::after {
         </div>
         <div class="card-foot">
           <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Последние угрозы <span class="text-muted" id="secAlertsCount"></span></div>
+            <div class="card-desc">Срабатывания AutoMod и проверок бота, до 100 последних</div>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <select class="select" id="alFilterSev" onchange="resetAlertsPage()" aria-label="Уровень">
+            <option value="">Любой уровень</option>
+            <option value="high">Высокий и критический</option>
+            <option value="MEDIUM">Средний</option>
+            <option value="LOW">Низкий</option>
+          </select>
+          <select class="select" id="alFilterSrc" onchange="resetAlertsPage()" aria-label="Источник">
+            <option value="">Любой источник</option>
+            <option value="automod">AutoMod</option>
+            <option value="bot">Бот</option>
+          </select>
+          <label class="check"><input type="checkbox" id="alShowResolved" onchange="resetAlertsPage()"> Показывать решённые</label>
+        </div>
+        <div class="table-wrap" style="border: 0; border-radius: 0;">
+          <table class="table">
+            <thead>
+              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th><th></th></tr>
+            </thead>
+            <tbody id="secAlertsTable">
+              <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-foot" id="secAlertsMore" hidden>
+          <button class="btn btn-ghost btn-sm" onclick="showMoreAlerts()">Показать ещё</button>
         </div>
       </div>
     </div></div>
@@ -1478,6 +1502,8 @@ html.theme-anim *::before, html.theme-anim *::after {
     </div>
   </div>
 </div>
+
+<div class="user-pop" id="userPop" role="dialog" aria-label="Профиль участника" hidden></div>
 
 <!-- APPEAL DETAILS MODAL -->
 <div class="modal-bg" id="appealModal" onclick="if(event.target===this)closeAppealModal()">
@@ -2511,8 +2537,8 @@ async function loadOverview() {
       tbody.innerHTML = modlog.slice(0, 5).map((row, i) => `
         <tr class="stagger-in" style="animation-delay:${i*45}ms">
           <td><span class="code">${row.action || '?'}</span></td>
-          <td>${escapeHtml(row.user_name || row.user_id || '—')}</td>
-          <td>${escapeHtml(row.mod_name || row.mod_id || '—')}</td>
+          <td>${userChip(row.user_id, row.user_name)}</td>
+          <td>${userChip(row.mod_id, row.mod_name)}</td>
           <td>${escapeHtml(row.reason || '—').slice(0, 80)}</td>
           <td class="text-mono text-muted">${(row.created_at || '').slice(0, 10)}</td>
         </tr>
@@ -2538,8 +2564,8 @@ async function loadModlog() {
     tbody.innerHTML = rows.map((row, i) => `
       <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
         <td><span class="code">${row.action || '?'}</span></td>
-        <td>${escapeHtml(row.user_name || row.user_id || '—')}</td>
-        <td>${escapeHtml(row.mod_name || '—')}</td>
+        <td>${userChip(row.user_id, row.user_name)}</td>
+        <td>${userChip(row.mod_id, row.mod_name)}</td>
         <td>${escapeHtml(row.reason || '—').slice(0, 100)}</td>
         <td>${escapeHtml(row.duration || '—')}</td>
         <td class="text-mono text-muted">${(row.created_at || '').slice(0, 16).replace('T', ' ')}</td>
@@ -2591,8 +2617,24 @@ function removeExempt(kind, id) {
   renderExempt();
 }
 
+// Сначала 10 последних: при сотне алертов список растягивал страницу
+// на 7–8 экранов, и до анти-нюка было не доскроллить
+const ALERTS_PAGE = 10;
+let _alertsShown = ALERTS_PAGE;
+
+function resetAlertsPage() {
+  _alertsShown = ALERTS_PAGE;
+  renderAlerts();
+}
+
+function showMoreAlerts() {
+  _alertsShown += 20;
+  renderAlerts();
+}
+
 function renderAlerts() {
   const tbody = document.getElementById('secAlertsTable');
+  const more  = document.getElementById('secAlertsMore');
   const sev = document.getElementById('alFilterSev').value;
   const src = document.getElementById('alFilterSrc').value;
   const showResolved = document.getElementById('alShowResolved').checked;
@@ -2600,15 +2642,21 @@ function renderAlerts() {
     (showResolved || !a.resolved) &&
     (!src || (src === 'automod' ? a.source === 'automod' : a.source !== 'automod')) &&
     (!sev || (sev === 'high' ? ['HIGH', 'CRITICAL'].includes(a.severity) : a.severity === sev)));
+  document.getElementById('secAlertsCount').textContent = alerts.length ? `· ${alerts.length}` : '';
+  more.hidden = alerts.length <= _alertsShown;
+  if (!more.hidden) {
+    more.querySelector('button').textContent =
+      `Показать ещё ${Math.min(20, alerts.length - _alertsShown)} из ${alerts.length - _alertsShown}`;
+  }
   if (!alerts.length) {
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
     return;
   }
-  tbody.innerHTML = alerts.map((a, i) => `
+  tbody.innerHTML = alerts.slice(0, _alertsShown).map((a, i) => `
     <tr class="stagger-in ${a.resolved ? 'resolved' : ''}" style="animation-delay:${Math.min(i,15)*35}ms">
       <td><span class="chip ${SEV_CHIP[a.severity] ?? ''}">${escapeHtml(a.severity)}</span></td>
       <td>${escapeHtml(a.description || a.type)}${a.matched ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
-      <td>${escapeHtml(a.user_name || a.user_id || '—')}</td>
+      <td>${userChip(a.user_id, a.user_name)}</td>
       <td class="text-mono text-muted">${a.source === 'automod' ? 'AutoMod' : 'бот'}</td>
       <td class="text-mono text-muted">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id}, ${!a.resolved})">${a.resolved ? 'Вернуть' : 'Решено'}</button></td>
@@ -2917,7 +2965,7 @@ async function loadSecurity() {
     document.getElementById('secAlerts7d').textContent   = d.alerts_open_7d ?? d.alerts_7d ?? 0;
     renderThreats();
     renderExempt();
-    renderAlerts();
+    resetAlertsPage();
   } catch(e) {
     box.innerHTML = '<div class="empty" style="padding:1.5rem;"><div class="empty-sub">Не удалось загрузить</div></div>';
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
@@ -2978,7 +3026,7 @@ async function loadAppeals() {
         <div class="card-body" style="display: flex; align-items: center; gap: 1rem;">
           <span class="status-pill ${a.status}">${a.status}</span>
           <div style="flex: 1; min-width: 0;">
-            <div style="font-weight: 600;">#${a.id} · ${escapeHtml(a.username || a.user_id)}</div>
+            <div style="font-weight: 600;">#${a.id} · ${userChip(a.user_id, a.username)}</div>
             <div style="font-size: .8rem; color: var(--muted); margin-top: .2rem; overflow-wrap: anywhere;">
               ${a.action_type} · ${escapeHtml(shortText(a.appeal_text, 100))}
             </div>
@@ -2991,6 +3039,144 @@ async function loadAppeals() {
     `).join('');
   } catch(e) {}
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  УЧАСТНИК: клик — скопировать ID, Shift+клик — мини-профиль
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function userChip(id, name) {
+  const uid = String(id ?? '');
+  const label = name || uid || '—';
+  if (!/^\d{15,21}$/.test(uid)) return escapeHtml(label);   // 'Auto', пусто
+  return `<span class="uchip" data-uid="${uid}" tabindex="0" role="button"
+    title="Клик — скопировать ID ${uid} · Shift+клик — профиль">${escapeHtml(label)}</span>`;
+}
+
+// Роли участника: опасные права подсвечены, длинные названия обрезаны
+// (полное — во всплывающей подсказке). kind приходит из API: admin / mod
+function roleChips(m, limit = Infinity) {
+  let roles = m.roles_info || (m.roles || []).map(name => ({ name }));
+  if (limit !== Infinity) {   // в мини-профиле важные роли — первыми
+    const rank = r => r.kind === 'admin' ? 0 : r.kind === 'mod' ? 1 : 2;
+    roles = [...roles].sort((a, b) => rank(a) - rank(b));
+  }
+  const kindTitle = { admin: 'администрирование', mod: 'модерация' };
+  const html = roles.slice(0, limit).map(r => {
+    const dot = /^#[0-9a-f]{6}$/i.test(r.color || '') ? `<i class="dot" style="background:${r.color}"></i>` : '';
+    const title = r.name + (r.kind ? ` · ${kindTitle[r.kind]}` : '');
+    return `<span class="chip role${r.kind ? ' role-' + r.kind : ''}" title="${escapeHtml(title)}">${dot}<span class="rn">${escapeHtml(r.name)}</span></span>`;
+  });
+  if (roles.length > limit) html.push(`<span class="chip">+${roles.length - limit}</span>`);
+  return html.join('');
+}
+
+async function copyUid(uid) {
+  try {
+    await navigator.clipboard.writeText(uid);
+  } catch (e) {
+    const t = document.createElement('textarea');
+    t.value = uid; document.body.appendChild(t); t.select();
+    document.execCommand('copy'); t.remove();
+  }
+  showToast(`ID скопирован: ${uid}`, 'success');
+}
+
+const _popCache = new Map();   // uid → { at, data }
+let _popUid = null;
+
+async function openUserPop(uid, anchor) {
+  const pop = document.getElementById('userPop');
+  _popUid = uid;
+  pop.innerHTML = '<div class="up-sub">Загрузка…</div>';
+  pop.hidden = false;
+  placeUserPop(pop, anchor);
+  let m;
+  const hit = _popCache.get(uid);
+  if (hit && Date.now() - hit.at < 60000) m = hit.data;
+  else {
+    try {
+      const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}`);
+      if (!r.ok) throw new Error(r.status);
+      m = await r.json();
+      _popCache.set(uid, { at: Date.now(), data: m });
+    } catch (e) {
+      if (_popUid === uid) pop.innerHTML = '<div class="up-sub">Не удалось загрузить профиль</div>';
+      return;
+    }
+  }
+  if (_popUid !== uid) return;   // успели открыть другого
+  const d = s => (s || '').slice(0, 10) || '—';
+  const chips = [];
+  if (!m.on_server) chips.push('<span class="chip danger">не на сервере</span>');
+  if (m.timed_out)  chips.push('<span class="chip warn">в муте</span>');
+  if (m.warns)      chips.push(`<span class="chip ${m.warns >= 3 ? 'danger' : 'warn'}">варнов: ${m.warns}/3</span>`);
+  const last = (m.history || [])[0];
+  const memberNav = document.querySelector('.nav-item[data-page="member"]');
+  const canDossier = !memberNav || hasPerm(memberNav.dataset.perm);
+  pop.innerHTML = `
+    <div class="up-head">
+      <div class="up-av">${m.avatar ? `<img src="${escapeHtml(m.avatar)}" alt="">` : escapeHtml((m.name || '?').charAt(0))}</div>
+      <div style="min-width:0;">
+        <div class="up-name">${escapeHtml(m.name || uid)}</div>
+        <div class="up-sub">${escapeHtml(m.tag || '')}</div>
+        <div class="up-sub">${userChip(uid, uid)}</div>
+      </div>
+    </div>
+    ${chips.length ? `<div class="member-chips">${chips.join('')}</div>` : ''}
+    <dl class="up-grid">
+      <dt>Аккаунт создан</dt><dd>${d(m.created)}</dd>
+      <dt>На сервере с</dt><dd>${m.on_server ? d(m.joined) : '—'}</dd>
+      ${m.active_mute ? `<dt>Мут до</dt><dd>${escapeHtml(m.active_mute.until.slice(0, 16).replace('T', ' '))}</dd>` : ''}
+      ${last ? `<dt>Последнее</dt><dd>${escapeHtml(last.action)} · ${d(last.created_at)}</dd>` : ''}
+    </dl>
+    ${(m.roles || []).length ? `<div class="member-chips">${roleChips(m, 8)}</div>` : ''}
+    <div class="up-foot">
+      <button class="btn btn-ghost btn-sm" onclick="copyUid('${uid}')">Копировать ID</button>
+      ${canDossier ? `<button class="btn btn-primary btn-sm" onclick="closeUserPop(); showPage('member'); openMember('${uid}')">Досье</button>` : ''}
+    </div>`;
+  placeUserPop(pop, anchor);
+}
+
+function placeUserPop(pop, anchor) {
+  const r = anchor.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const x = Math.min(r.left, innerWidth - w - 16);
+  let y = r.bottom + 6;
+  if (y + h > innerHeight - 16) y = Math.max(16, r.top - h - 6);   // не влезает снизу — над ником
+  pop.style.left = Math.max(16, x) + 'px';
+  pop.style.top = y + 'px';
+}
+
+function closeUserPop() {
+  const pop = document.getElementById('userPop');
+  if (pop) pop.hidden = true;
+  _popUid = null;
+}
+
+// Перехват на фазе захвата: клик по нику не должен открывать карточку
+// апелляции или строку, в которой он стоит
+document.addEventListener('mousedown', e => {
+  if (e.shiftKey && e.target.closest('.uchip')) e.preventDefault();   // без выделения текста
+}, true);
+document.addEventListener('click', e => {
+  const el = e.target.closest('.uchip');
+  if (el) {
+    e.preventDefault(); e.stopPropagation();
+    if (e.shiftKey) openUserPop(el.dataset.uid, el); else copyUid(el.dataset.uid);
+    return;
+  }
+  if (!e.target.closest('#userPop')) closeUserPop();
+}, true);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') return closeUserPop();
+  const el = e.target.closest && e.target.closest('.uchip');
+  if (el && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    if (e.shiftKey) openUserPop(el.dataset.uid, el); else copyUid(el.dataset.uid);
+  }
+});
+window.addEventListener('scroll', e => {
+  if (!e.target.closest || !e.target.closest('#userPop')) closeUserPop();
+}, true);
 
 let _currentAppealId = null;
 
@@ -3019,7 +3205,7 @@ function openAppealDetails(id) {
 
     <div class="form-group">
       <label>Участник</label>
-      <div style="font-weight: 600;">${escapeHtml(a.username || a.user_id)}</div>
+      <div style="font-weight: 600;">${userChip(a.user_id, a.username)}</div>
     </div>
     <div class="form-group">
       <label>Наказание</label>
@@ -3249,7 +3435,7 @@ async function openMember(uid) {
             <div style="flex:1; min-width:200px;">
               <div style="font-size:1.15rem; font-weight:700;">${escapeHtml(m.name || m.user_id)}</div>
               <div class="text-mono" style="font-size:.78rem; color:var(--muted);">
-                ${escapeHtml(m.tag || '')} · ID ${m.user_id}
+                ${escapeHtml(m.tag || '')} · ID ${userChip(m.user_id, m.user_id)}
               </div>
               <div class="member-chips">${chips.join('')}</div>
             </div>
@@ -3264,7 +3450,7 @@ async function openMember(uid) {
             <div class="text-mono">${m.active_mute.until.slice(0,16).replace('T',' ')}</div>
             <div class="input-help">${escapeHtml(m.active_mute.reason || '')}</div></div>` : ''}
           ${m.roles && m.roles.length ? `<div class="form-group" style="margin:0;"><label>Роли</label>
-            <div class="member-chips">${m.roles.map(r=>`<span class="chip">${escapeHtml(r)}</span>`).join('')}</div></div>` : ''}
+            <div class="member-chips">${roleChips(m)}</div></div>` : ''}
         </div>
       </div>
 
@@ -3547,13 +3733,13 @@ async function loadBanRequests() {
           <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
             <span class="status-pill ${pill[b.status]}">${b.status}</span>
             <div style="flex:1; min-width:200px;">
-              <div style="font-weight:600;">#${b.id} · ${escapeHtml(b.username || b.user_id)}</div>
+              <div style="font-weight:600;">#${b.id} · ${userChip(b.user_id, b.username)}</div>
               <div style="font-size:.8rem; color:var(--muted); margin-top:.2rem;">
                 Варнов: <b>${b.warn_count}/3</b> · ${escapeHtml(b.reason || '—')}
               </div>
               <div style="font-size:.76rem; color:var(--muted); margin-top:.2rem;">
-                Инициатор: ${escapeHtml(b.mod_name || '—')}
-                ${b.reviewer_name ? ' · Решил: ' + escapeHtml(b.reviewer_name) : ''}
+                Инициатор: ${userChip(b.mod_id, b.mod_name)}
+                ${b.reviewer_name ? ' · Решил: ' + userChip(b.reviewer_id, b.reviewer_name) : ''}
               </div>
             </div>
             <div class="text-mono text-muted" style="font-size:.75rem;">
@@ -3624,7 +3810,7 @@ async function loadInvites(q='') {
     tbody.innerHTML = rows.map((row, i) => `
       <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
         <td><span class="code">${escapeHtml(row.invite_code)}</span></td>
-        <td>${escapeHtml(row.inviter_name || '—')}</td>
+        <td>${userChip(row.inviter_id, row.inviter_name)}</td>
         <td>${row.uses || 0}</td>
         <td class="text-mono text-muted">${(row.last_used || '').slice(0, 10) || '—'}</td>
         <td>${escapeHtml(row.note || '—')}</td>
