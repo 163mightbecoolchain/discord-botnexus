@@ -368,6 +368,25 @@ async def _get_member(guild, user_id):
     return await resolve_member(guild, user_id)
 
 _name_cache: dict = {}   # user_id → (имя или None, время)
+_name_jobs: dict = {}    # user_id → задача запроса к Discord (одна на ID)
+_name_sem = None         # общий лимит одновременных запросов к Discord
+
+
+async def _fetch_name(bot, uid: int):
+    global _name_sem
+    if _name_sem is None:
+        _name_sem = asyncio.Semaphore(5)
+    try:
+        async with _name_sem:
+            try:
+                u = await bot.fetch_user(uid)
+                name = u.global_name or u.name
+            except Exception:
+                name = None
+        _name_cache[uid] = (name, time.time())
+    finally:
+        _name_jobs.pop(uid, None)
+
 
 async def _user_names(bot, bg, ids) -> dict:
     """
@@ -375,6 +394,10 @@ async def _user_names(bot, bg, ids) -> dict:
     почти никого нет, и вместо модераторов в Mod Log стояли ID/прочерки.
     Кого нет в кэше — спрашиваем у Discord и помним час (неудачу тоже,
     чтобы удалённые аккаунты не запрашивались на каждом открытии).
+
+    Ждём Discord не дольше 2 секунд: раньше первая загрузка Mod Log
+    с сотней незнакомых ID шла 15–20 с. Кто не успел — догружается
+    в фоне и появится при следующем открытии.
     """
     out, missing, now = {}, [], time.time()
     for uid in {int(i) for i in ids if i and str(i).isdigit() and int(i)}:
@@ -393,18 +416,16 @@ async def _user_names(bot, bg, ids) -> dict:
             continue
         missing.append(uid)
 
-    sem = asyncio.Semaphore(5)
-    async def fetch(uid):
-        async with sem:
-            try:
-                u = await bot.fetch_user(uid)
-                name = u.global_name or u.name
-            except Exception:
-                name = None
-        _name_cache[uid] = (name, now)
-        out[uid] = name
-    # Остальных догрузит следующее открытие — не держим запрос долго
-    await asyncio.gather(*(fetch(u) for u in missing[:50]))
+    jobs = []
+    for uid in missing:
+        if uid not in _name_jobs:
+            _name_jobs[uid] = asyncio.create_task(_fetch_name(bot, uid))
+        jobs.append(_name_jobs[uid])
+    if jobs:
+        await asyncio.wait(jobs, timeout=2)
+    for uid in missing:
+        hit = _name_cache.get(uid)
+        out[uid] = hit[0] if hit else None
     return out
 
 # ── API: guild settings GET ───────────────────────────────────
