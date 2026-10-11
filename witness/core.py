@@ -268,6 +268,11 @@ async def resolve_member(guild, user_id):
     _member_fetch_cache[key] = (time.time(), m)
     return m
 
+def forget_member(guild_id: int, user_id: int):
+    """Сбросить участника из кэша resolve_member — после мута/снятия мута
+    копия в кэше устаревает (is_timed_out показывал бы старое)"""
+    _member_fetch_cache.pop((guild_id, int(user_id)), None)
+
 def upsell_embed(req):
     e = make_embed(
         title="🔒 Требуется апгрейд",
