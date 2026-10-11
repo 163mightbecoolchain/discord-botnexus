@@ -367,37 +367,52 @@ async def _get_member(guild, user_id):
     from witness.core import resolve_member
     return await resolve_member(guild, user_id)
 
-_name_cache: dict = {}   # user_id → (имя или None, время)
-_name_jobs: dict = {}    # user_id → задача запроса к Discord (одна на ID)
+_name_cache: dict = {}   # (guild_id, user_id) → (имя или None, время)
+_name_jobs: dict = {}    # (guild_id, user_id) → задача запроса к Discord
 _name_sem = None         # общий лимит одновременных запросов к Discord
+NAME_FRESH = 600         # 10 мин: старше — показываем, но обновляем в фоне
 
 
-async def _fetch_name(bot, uid: int):
+async def _fetch_name(bot, bg, uid: int):
+    """Ник на этом сервере; ушедшим (и забаненным) — глобальное имя Discord"""
     global _name_sem
     if _name_sem is None:
         _name_sem = asyncio.Semaphore(5)
+    key = (bg.id, uid)
     try:
         async with _name_sem:
             try:
-                u = await bot.fetch_user(uid)
-                name = u.global_name or u.name
+                name = (await bg.fetch_member(uid)).display_name
             except Exception:
-                name = None
-        _name_cache[uid] = (name, time.time())
+                try:
+                    u = await bot.fetch_user(uid)
+                    name = u.global_name or u.name
+                except Exception:
+                    name = None
+        _name_cache[key] = (name, time.time())
     finally:
-        _name_jobs.pop(uid, None)
+        _name_jobs.pop(key, None)
+
+
+def _name_job(bot, bg, uid: int):
+    key = (bg.id, uid)
+    if key not in _name_jobs:
+        _name_jobs[key] = asyncio.create_task(_fetch_name(bot, bg, uid))
+    return _name_jobs[key]
 
 
 async def _user_names(bot, bg, ids) -> dict:
     """
     ID → имя для показа в панели. Без Server Members Intent в кэше бота
     почти никого нет, и вместо модераторов в Mod Log стояли ID/прочерки.
-    Кого нет в кэше — спрашиваем у Discord и помним час (неудачу тоже,
-    чтобы удалённые аккаунты не запрашивались на каждом открытии).
 
-    Ждём Discord не дольше 2 секунд: раньше первая загрузка Mod Log
-    с сотней незнакомых ID шла 15–20 с. Кто не успел — догружается
-    в фоне и появится при следующем открытии.
+    - есть в кэше сервера — текущий ник, без запросов;
+    - запомнено меньше 10 минут назад — берём из памяти;
+    - запомнено давно — показываем сразу и обновляем в фоне,
+      так смена ника доходит до панели за ~10 минут без ожидания;
+    - не встречали — спрашиваем Discord, но ждём не дольше 2 секунд
+      (иначе первое открытие с сотней ID шло 15–20 с); кто не успел,
+      догружается в фоне и появится при следующем открытии.
     """
     out, missing, now = {}, [], time.time()
     for uid in {int(i) for i in ids if i and str(i).isdigit() and int(i)}:
@@ -405,26 +420,19 @@ async def _user_names(bot, bg, ids) -> dict:
         if m:
             out[uid] = m.display_name
             continue
-        hit = _name_cache.get(uid)
-        if hit and now - hit[1] < 3600:
+        hit = _name_cache.get((bg.id, uid))
+        if hit:
             out[uid] = hit[0]
-            continue
-        u = bot.get_user(uid)
-        if u:
-            out[uid] = u.global_name or u.name
-            _name_cache[uid] = (out[uid], now)
+            if now - hit[1] >= NAME_FRESH:
+                _name_job(bot, bg, uid)          # обновим в фоне, не ждём
             continue
         missing.append(uid)
 
-    jobs = []
-    for uid in missing:
-        if uid not in _name_jobs:
-            _name_jobs[uid] = asyncio.create_task(_fetch_name(bot, uid))
-        jobs.append(_name_jobs[uid])
+    jobs = [_name_job(bot, bg, uid) for uid in missing]
     if jobs:
         await asyncio.wait(jobs, timeout=2)
     for uid in missing:
-        hit = _name_cache.get(uid)
+        hit = _name_cache.get((bg.id, uid))
         out[uid] = hit[0] if hit else None
     return out
 
