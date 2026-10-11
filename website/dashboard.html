@@ -240,6 +240,12 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .appeals-stats { display: flex; gap: 1rem; margin-bottom: 1.25rem; font-size: .82rem; }
 .appeals-stats span { background: var(--panel); border: 1px solid var(--border); padding: .4rem .85rem; border-radius: 8px; color: var(--text-2); }
 .appeals-stats b { color: var(--text); }
+.appeal-text {
+  padding: .75rem; background: var(--bg-3); border-radius: 6px;
+  font-size: .9rem; line-height: 1.6;
+  max-height: 260px; overflow-y: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 .card-exit-accept, .card-exit-reject { animation: cardExit .45s ease forwards; pointer-events: none; }
 .card-exit-accept { border-left-color: var(--accent) !important; background: rgba(var(--accent-rgb), .08); }
@@ -615,7 +621,7 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-item" data-perm="manage_messages" data-page="modlog" onclick="showPage('modlog')">
         <span class="icon">📋</span> Mod Log
       </div>
-      <div class="nav-item" data-perm="manage_messages" data-page="appeals" onclick="showPage('appeals')">
+      <div class="nav-item" data-perm="manage_messages|moderate_members|ban_members" data-page="appeals" onclick="showPage('appeals')">
         <span class="icon">⚖️</span> Апелляции
         <span class="badge hidden" id="appealsBadge">0</span>
       </div>
@@ -2093,8 +2099,12 @@ let userPerms = { raw: 0n };
 function hasPerm(name) {
   // Админ и Manage Server видят всё
   if (userPerms.administrator || userPerms.manage_guild) return true;
-  return !!userPerms[name];
+  // 'a|b' — достаточно любого из прав
+  return name.split('|').some(n => !!userPerms[n]);
 }
+
+// Апелляции видит любой, кто может решить хоть одну (как в api_appeals)
+const APPEALS_PERM = 'manage_messages|moderate_members|ban_members';
 
 function computePerms(g) {
   let raw = 0n;
@@ -2946,10 +2956,10 @@ async function loadAppeals() {
            style="cursor: pointer; animation-delay:${Math.min(i,12)*45}ms" onclick="openAppealDetails(${a.id})">
         <div class="card-body" style="display: flex; align-items: center; gap: 1rem;">
           <span class="status-pill ${a.status}">${a.status}</span>
-          <div style="flex: 1;">
+          <div style="flex: 1; min-width: 0;">
             <div style="font-weight: 600;">#${a.id} · ${escapeHtml(a.username || a.user_id)}</div>
-            <div style="font-size: .8rem; color: var(--muted); margin-top: .2rem;">
-              ${a.action_type} · ${escapeHtml((a.appeal_text || '').slice(0, 100))}...
+            <div style="font-size: .8rem; color: var(--muted); margin-top: .2rem; overflow-wrap: anywhere;">
+              ${a.action_type} · ${escapeHtml(shortText(a.appeal_text, 100))}
             </div>
           </div>
           <div style="font-family: var(--mono); font-size: .75rem; color: var(--muted);">
@@ -2963,6 +2973,12 @@ async function loadAppeals() {
 
 let _currentAppealId = null;
 
+// Превью для карточки: многоточие только если текст правда обрезан
+function shortText(t, n) {
+  t = (t || '').replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n).trimEnd() + '…' : t;
+}
+
 function openAppealDetails(id) {
   _currentAppealId = id;
   const a = _appealsCache.find(x => x.id === id);
@@ -2973,7 +2989,7 @@ function openAppealDetails(id) {
   const canDecide =
     (a.action_type === 'BAN' || a.action_type === 'TEMPBAN') ? hasPerm('ban_members') :
     (a.action_type === 'MUTE') ? (hasPerm('moderate_members') || hasPerm('ban_members')) :
-    hasPerm('manage_messages');
+    (hasPerm('manage_messages') || hasPerm('moderate_members') || hasPerm('ban_members'));
   document.getElementById('appealModalContent').innerHTML = `
     <div class="modal-title">Апелляция #${a.id}</div>
     <div style="margin-bottom: 1rem;">
@@ -2988,19 +3004,26 @@ function openAppealDetails(id) {
       <label>Наказание</label>
       <div><span class="code">${a.action_type}</span></div>
     </div>
+    ${a.original_reason ? `
+      <div class="form-group">
+        <label>Причина наказания</label>
+        <div class="appeal-text">${escapeHtml(a.original_reason)}</div>
+      </div>
+    ` : ''}
     <div class="form-group">
       <label>Объяснение</label>
-      <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px;
-                  font-size: .9rem; line-height: 1.6;">
-        ${escapeHtml(a.appeal_text || '—')}
-      </div>
+      <div class="appeal-text">${escapeHtml(a.appeal_text || '—')}</div>
     </div>
+    ${a.why_change ? `
+      <div class="form-group">
+        <label>Что изменит, чтобы не повторилось</label>
+        <div class="appeal-text">${escapeHtml(a.why_change)}</div>
+      </div>
+    ` : ''}
     ${a.reviewer_note ? `
       <div class="form-group">
         <label>Комментарий модератора</label>
-        <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px; font-size: .9rem;">
-          ${escapeHtml(a.reviewer_note)}
-        </div>
+        <div class="appeal-text">${escapeHtml(a.reviewer_note)}</div>
       </div>
     ` : ''}
 
@@ -3369,7 +3392,7 @@ async function livePoll() {
   if (!currentGuild || document.hidden) return;
 
   // ── Апелляции ──
-  if (hasPerm('manage_messages')) {
+  if (hasPerm(APPEALS_PERM)) {
     try {
       const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals`);
       if (r.ok) {
