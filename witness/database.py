@@ -288,6 +288,10 @@ async def db_init():
             "ALTER TABLE guild_settings ADD COLUMN birthday_channel INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN lockdown INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN price_watch INTEGER DEFAULT 0",
+            # Сообщение заявки на бан в лог-канале — чтобы обновить его,
+            # когда заявку решили на сайте
+            "ALTER TABLE ban_requests ADD COLUMN channel_id INTEGER DEFAULT 0",
+            "ALTER TABLE ban_requests ADD COLUMN message_id INTEGER DEFAULT 0",
             # Индексы на таблицах с частыми выборками. Без них SQLite
             # сканирует таблицу целиком, и время растёт вместе с историей.
             "CREATE INDEX IF NOT EXISTS idx_invite_member ON invite_log(guild_id, member_id)",

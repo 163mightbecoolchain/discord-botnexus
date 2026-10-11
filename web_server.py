@@ -913,18 +913,32 @@ async def api_modlog(request):
     if not member or not member.guild_permissions.manage_messages:
         return web.json_response({'error': 'Forbidden'}, status=403)
 
+    # ?action=WARN,MUTE  ?uid=<ID участника или модератора>  ?before=<id записи>
+    q = request.rel_url.query
+    where, args = ["guild_id=?"], [guild_id]
+    actions = [a for a in q.get('action', '').upper().split(',') if a.replace('_', '').isalpha()][:20]
+    if actions:
+        where.append(f"action IN ({','.join('?' * len(actions))})")
+        args += actions
+    if q.get('uid', '').isdigit():
+        where.append("(user_id=? OR mod_id=?)")
+        args += [int(q['uid'])] * 2
+    if q.get('before', '').isdigit():
+        where.append("id<?")
+        args.append(int(q['before']))
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("""
-                SELECT action, user_id, mod_id, reason, duration, created_at
-                FROM modlog WHERE guild_id=?
+            async with db.execute(f"""
+                SELECT id, action, user_id, mod_id, reason, duration, created_at
+                FROM modlog WHERE {' AND '.join(where)}
                 ORDER BY id DESC LIMIT 100
-            """, (guild_id,)) as c:
+            """, args) as c:
                 rows = await c.fetchall()
-        names = await _user_names(bot, bg, [r[1] for r in rows] + [r[2] for r in rows])
+        names = await _user_names(bot, bg, [r[2] for r in rows] + [r[3] for r in rows])
         result = []
-        for action, uid, mid, reason, dur, ts in rows:
+        for rid, action, uid, mid, reason, dur, ts in rows:
             result.append({
+                'id':        rid,
                 'action':    action,
                 'user_id':   str(uid),     # строкой: ID > 2^53, JS округлял бы
                 'user_name': names.get(uid),
@@ -1251,6 +1265,17 @@ async def api_member_lookup(request):
                         'kind': _role_kind(r)}
                        for r in reversed(member.roles[1:])] if member else [],
     }
+    # Быстрые действия в мини-профиле: показываем только разрешённые
+    from witness.moderation import panel_target_error, MUTE_DURATIONS
+    blocked = panel_target_error(me, member)
+    out['can'] = {
+        'warn':   bool(member) and p.moderate_members and not blocked,
+        'mute':   bool(member) and p.moderate_members and not blocked,
+        'unmute': p.moderate_members,
+        'unban':  p.ban_members,
+    }
+    out['blocked'] = blocked
+    out['mute_durations'] = list(MUTE_DURATIONS)
     # Каждый блок изолирован: сбой одной выборки не должен ронять всё досье
     out.update({'warns': 0, 'history': [], 'appeals': [],
                 'active_mute': None})
@@ -1490,6 +1515,13 @@ async def api_ban_request_action(request):
             await add_modlog(guild_id, uid, int(s['user_id']),
                              "AUTO_TEMPBAN", reason, f"{ban_days}d")
 
+        try:
+            from witness.moderation import ban_request_result_embed, update_ban_request_message
+            await update_ban_request_message(bg, rid, ban_request_result_embed(
+                rid, action == 'approve', member.mention, ban_days, ban_ok))
+        except Exception as ex:
+            print(f"[BANREQ] message: {ex}")
+
         return web.json_response({'ok': True, 'status': new_status,
                                   'banned': ban_ok, 'ban_days': ban_days})
     except Exception as e:
@@ -1648,7 +1680,7 @@ async def api_appeals(request):
                 async with db.execute("""
                     SELECT id, user_id, username, action_type, status,
                            original_reason, appeal_text, why_change,
-                           reviewer_note, submitted_at, reviewed_at
+                           reviewer_id, reviewer_note, submitted_at, reviewed_at
                     FROM appeals WHERE guild_id=? AND status=?
                     ORDER BY id DESC LIMIT 50
                 """, (guild_id, status_filter)) as c:
@@ -1657,15 +1689,16 @@ async def api_appeals(request):
                 async with db.execute("""
                     SELECT id, user_id, username, action_type, status,
                            original_reason, appeal_text, why_change,
-                           reviewer_note, submitted_at, reviewed_at
+                           reviewer_id, reviewer_note, submitted_at, reviewed_at
                     FROM appeals WHERE guild_id=?
                     ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, id DESC
                     LIMIT 50
                 """, (guild_id,)) as c:
                     rows = await c.fetchall()
         result = []
+        names = await _user_names(bot, bg, [r[8] for r in rows])
         for (aid, uid, uname, atype, astatus, oreason, atext, wchange,
-             rnote, sub_at, rev_at) in rows:
+             rev_id, rnote, sub_at, rev_at) in rows:
             m = bg.get_member(uid)
             result.append({
                 'id':            aid,
@@ -1678,6 +1711,8 @@ async def api_appeals(request):
                 'original_reason': oreason or '',
                 'appeal_text':   atext or '',
                 'why_change':    wchange or '',
+                'reviewer_id':   str(rev_id or ''),
+                'reviewer_name': names.get(rev_id) if rev_id else None,
                 'reviewer_note': rnote,
                 'submitted_at':  sub_at,
                 'reviewed_at':   rev_at,
@@ -1685,6 +1720,130 @@ async def api_appeals(request):
         return web.json_response(result)
     except Exception:
         return web.json_response([])
+
+# ── API: активные наказания и действия из панели ──────────────
+
+@require_auth
+async def api_punishments(request):
+    """GET /api/guild/:id/punishments — кто сейчас в муте и во временном бане"""
+    guild_id = int(request.match_info['guild_id'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    me = await _get_member(bg, s['user_id'])
+    p  = me.guild_permissions if me else None
+    if not p or not (p.manage_messages or p.moderate_members or
+                     p.ban_members or p.manage_guild):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT user_id, until, reason, created_at FROM active_mutes
+            WHERE guild_id=? AND notified=0 AND until>? ORDER BY until
+        """, (guild_id, now)) as c:
+            mutes = await c.fetchall()
+        async with db.execute("""
+            SELECT user_id, mod_id, reason, unban_at FROM temp_bans
+            WHERE guild_id=? AND unbanned=0 ORDER BY unban_at
+        """, (guild_id,)) as c:
+            bans = await c.fetchall()
+    names = await _user_names(bot, bg, [r[0] for r in mutes] + [r[0] for r in bans] +
+                                       [r[1] for r in bans])
+    return web.json_response({
+        'mutes': [{'user_id': str(u), 'user_name': names.get(u), 'until': until,
+                   'reason': reason, 'since': since} for u, until, reason, since in mutes],
+        'tempbans': [{'user_id': str(u), 'user_name': names.get(u), 'mod_id': str(m),
+                      'mod_name': 'Auto' if not m else names.get(m),
+                      'reason': reason, 'until': until} for u, m, reason, until in bans],
+        'can': {'unmute': p.moderate_members, 'unban': p.ban_members},
+    })
+
+
+@require_auth
+async def api_member_action(request):
+    """POST /api/guild/:id/member/:uid/action
+    {"action": "warn"|"mute"|"unmute"|"unban", "reason": "...", "duration": "2 часа"}"""
+    guild_id = int(request.match_info['guild_id'])
+    uid      = int(request.match_info['uid'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    me = await _get_member(bg, s['user_id'])
+    if not me:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({'error': 'bad_json'}, status=400)
+    action = data.get('action')
+    reason = str(data.get('reason') or '').strip()[:500]
+
+    p = me.guild_permissions
+    need = {'warn': p.moderate_members, 'mute': p.moderate_members,
+            'unmute': p.moderate_members, 'unban': p.ban_members}
+    if action not in need:
+        return web.json_response({'error': 'invalid_action'}, status=400)
+    if not need[action]:
+        return web.json_response({'error': 'missing_permission'}, status=403)
+    if action in ('warn', 'mute') and not reason:
+        return web.json_response({'error': 'reason_required'}, status=400)
+
+    from witness import moderation as mod
+    target = await _get_member(bg, uid)
+    if action in ('warn', 'mute'):
+        if not target:
+            return web.json_response({'error': 'not_on_server'}, status=400)
+        blocked = mod.panel_target_error(me, target)
+        if blocked:
+            return web.json_response({'error': blocked}, status=403)
+
+    mod_id = int(s['user_id'])
+    if action == 'warn':
+        res = await mod.panel_warn(bg, target, mod_id, reason)
+    elif action == 'mute':
+        res = await mod.panel_mute(bg, target, mod_id, str(data.get('duration') or ''), reason)
+    elif action == 'unmute':
+        res = await mod.panel_unmute(bg, target, uid, mod_id, reason or 'Снят с панели')
+    else:
+        res = await mod.panel_unban(bg, uid, mod_id, reason or 'Снят с панели')
+    if res.get('error'):
+        return web.json_response(res, status=400)
+    return web.json_response({'ok': True, **res})
+
+
+@require_auth
+async def api_alerts_resolve(request):
+    """POST /api/guild/:id/alerts/resolve  {"ids": [..], "resolved": true}"""
+    guild_id = int(request.match_info['guild_id'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+    ids = [int(i) for i in (data or {}).get('ids', []) if str(i).isdigit()][:500]
+    if not ids:
+        return web.json_response({'ok': True, 'updated': 0})
+    resolved = 1 if data.get('resolved', True) else 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            f"UPDATE security_alerts SET resolved=? WHERE guild_id=? AND id IN ({','.join('?' * len(ids))})",
+            (resolved, guild_id, *ids))
+        await db.commit()
+    return web.json_response({'ok': True, 'updated': cur.rowcount})
 
 # ── App factory ───────────────────────────────────────────────
 
@@ -1734,6 +1893,9 @@ def create_app(bot) -> web.Application:
         ('POST', '/guild/{guild_id}/automation',            api_automation_post),
         ('GET',  '/guild/{guild_id}/members/search',        api_member_search),
         ('GET',  '/guild/{guild_id}/member/{uid}',          api_member_lookup),
+        ('POST', '/guild/{guild_id}/member/{uid}/action',   api_member_action),
+        ('GET',  '/guild/{guild_id}/punishments',           api_punishments),
+        ('POST', '/guild/{guild_id}/alerts/resolve',        api_alerts_resolve),
         ('GET',  '/guild/{guild_id}/banrequests',           api_ban_requests),
         ('POST', '/guild/{guild_id}/banrequest/{rid}/{action}', api_ban_request_action),
     ]

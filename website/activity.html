@@ -93,6 +93,8 @@ input.search:focus{border-color:var(--border-2)}
 .res img{width:26px;height:26px;border-radius:50%;flex-shrink:0}
 
 .chips{display:flex;flex-wrap:wrap;margin-top:var(--s2)}
+.uchip{cursor:pointer;border-bottom:1px dashed var(--border-2);-webkit-user-select:none;user-select:none}
+.uchip:hover,.uchip:focus-visible{color:var(--accent);border-bottom-color:var(--accent);outline:none}
 .chip{font-size:12.5px;color:var(--text-2);
    padding-right:var(--s3);margin-right:var(--s2);
    border-right:1px solid var(--border)}
@@ -241,6 +243,35 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;")
                 .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const d10 = s => (s || "").slice(0, 10);
+
+// Ник или ID участника: клик — скопировать ID,
+// Shift+клик или долгое нажатие (телефон) — открыть досье
+function uchip(id, name) {
+ const uid = String(id ?? "");
+ const label = name || uid || "—";
+ if (!/^\d{15,21}$/.test(uid)) return esc(label);
+ return `<span class="uchip" data-uid="${uid}" tabindex="0" role="button"
+  title="Клик — скопировать ID · Shift+клик или долгое нажатие — досье">${esc(label)}</span>`;
+}
+
+async function copyUid(uid) {
+ let ok = false;
+ try { await navigator.clipboard.writeText(uid); ok = true; } catch (e) {}
+ if (!ok) {
+  // В iframe Discord Clipboard API бывает недоступен
+  const t = document.createElement("textarea");
+  t.value = uid; t.style.position = "fixed"; t.style.opacity = "0";
+  document.body.appendChild(t); t.select();
+  try { ok = document.execCommand("copy"); } catch (e) {}
+  t.remove();
+ }
+ toast(ok ? `ID скопирован: ${uid}` : `ID: ${uid}`, !ok);
+}
+
+function openUid(uid) {
+ show("member");
+ openM(uid);
+}
 
 function toast(msg, err = false) {
  const t = $("toast");
@@ -411,7 +442,7 @@ async function loadAppeals() {
     <div class="row">
      <span class="pill ${a.status}">${a.action_type}</span>
      <div style="flex:1;min-width:0;">
-      <div class="title">${esc(a.username || a.user_id)}</div>
+      <div class="title">${uchip(a.user_id, a.username)}</div>
       <div class="sub">#${a.id}</div>
      </div>
      <div class="when">${d10(a.submitted_at)}</div>
@@ -515,7 +546,7 @@ async function loadBanreq() {
     <div class="row">
      <span class="pill pending">${b.warn_count}/3</span>
      <div style="flex:1;min-width:0;">
-      <div class="title">${esc(b.username || b.user_id)}</div>
+      <div class="title">${uchip(b.user_id, b.username)}</div>
       <div class="sub">#${b.id} · ${esc(b.mod_name || "—")}</div>
      </div>
      <div class="when">${d10(b.created_at)}</div>
@@ -598,7 +629,7 @@ async function openM(uid) {
      <img src="${m.avatar}" style="width:40px;height:40px;border-radius:50%;">
      <div style="min-width:0;">
       <div class="title">${esc(m.name || m.user_id)}</div>
-      <div class="sub">${esc(m.tag || "")}</div>
+      <div class="sub">${esc(m.tag || "")} · ID ${uchip(m.user_id, m.user_id)}</div>
      </div>
     </div>
     <div class="chips">${chips.join("")}</div>
@@ -636,8 +667,9 @@ async function loadLog() {
     <div class="row">
      <span class="code">${x.action || "?"}</span>
      <div style="flex:1;min-width:0;">
-      <div class="title">${esc(x.user_name || x.user_id)}</div>
+      <div class="title">${uchip(x.user_id, x.user_name)}</div>
       <div class="sub">${esc(x.reason || "—")}</div>
+      <div class="sub">модератор: ${uchip(x.mod_id, x.mod_name)}</div>
      </div>
      <div class="when">${d10(x.created_at)}</div>
     </div>
@@ -648,7 +680,24 @@ async function loadLog() {
 // ━━━ Делегирование событий ━━━
 // Атрибуты onclick внутри iframe Discord могут блокироваться его политикой
 // безопасности, поэтому все клики ловим одним слушателем на документе.
+let _pressTimer = null, _pressFired = false;
+document.addEventListener("touchstart", e => {
+ const el = e.target.closest && e.target.closest(".uchip");
+ if (!el) return;
+ _pressFired = false;
+ _pressTimer = setTimeout(() => { _pressFired = true; openUid(el.dataset.uid); }, 500);
+}, { passive: true });
+["touchend", "touchmove", "touchcancel"].forEach(t =>
+ document.addEventListener(t, () => clearTimeout(_pressTimer), { passive: true }));
+
 document.addEventListener("click", e => {
+ const uc = e.target.closest(".uchip");
+ if (uc) {
+  e.preventDefault(); e.stopPropagation();
+  if (_pressFired) { _pressFired = false; return; }   // уже открыли долгим нажатием
+  if (e.shiftKey) openUid(uc.dataset.uid); else copyUid(uc.dataset.uid);
+  return;
+ }
  const tab = e.target.closest(".tab");
  if (tab && tab.dataset.v) { show(tab.dataset.v); return; }
 
@@ -667,6 +716,12 @@ document.addEventListener("click", e => {
  if (e.target && e.target.id === "sheetBg") closeSheet();
 });
 document.addEventListener("keydown", e => {
+ const uc = e.target.closest && e.target.closest(".uchip");
+ if (uc && (e.key === "Enter" || e.key === " ")) {
+  e.preventDefault();
+  if (e.shiftKey) openUid(uc.dataset.uid); else copyUid(uc.dataset.uid);
+  return;
+ }
  if (e.key === "Escape") closeSheet();
  // Ctrl+Enter — быстрое подтверждение
  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && sheetCtx) confirmSheet();
