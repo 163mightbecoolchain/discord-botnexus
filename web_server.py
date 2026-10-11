@@ -367,6 +367,46 @@ async def _get_member(guild, user_id):
     from witness.core import resolve_member
     return await resolve_member(guild, user_id)
 
+_name_cache: dict = {}   # user_id → (имя или None, время)
+
+async def _user_names(bot, bg, ids) -> dict:
+    """
+    ID → имя для показа в панели. Без Server Members Intent в кэше бота
+    почти никого нет, и вместо модераторов в Mod Log стояли ID/прочерки.
+    Кого нет в кэше — спрашиваем у Discord и помним час (неудачу тоже,
+    чтобы удалённые аккаунты не запрашивались на каждом открытии).
+    """
+    out, missing, now = {}, [], time.time()
+    for uid in {int(i) for i in ids if i and str(i).isdigit() and int(i)}:
+        m = bg.get_member(uid)
+        if m:
+            out[uid] = m.display_name
+            continue
+        hit = _name_cache.get(uid)
+        if hit and now - hit[1] < 3600:
+            out[uid] = hit[0]
+            continue
+        u = bot.get_user(uid)
+        if u:
+            out[uid] = u.global_name or u.name
+            _name_cache[uid] = (out[uid], now)
+            continue
+        missing.append(uid)
+
+    sem = asyncio.Semaphore(5)
+    async def fetch(uid):
+        async with sem:
+            try:
+                u = await bot.fetch_user(uid)
+                name = u.global_name or u.name
+            except Exception:
+                name = None
+        _name_cache[uid] = (name, now)
+        out[uid] = name
+    # Остальных догрузит следующее открытие — не держим запрос долго
+    await asyncio.gather(*(fetch(u) for u in missing[:50]))
+    return out
+
 # ── API: guild settings GET ───────────────────────────────────
 
 @require_auth
@@ -650,19 +690,19 @@ async def api_security_overview(request):
                 ORDER BY id DESC LIMIT 100
             """, (guild_id,)) as c:
                 rows = await c.fetchall()
+        names = await _user_names(bot, bg, [r[3] for r in rows])
         for aid, atype, sev, uid, desc, meta, resolved, ts in rows:
             try:
                 meta = json.loads(meta or '{}')
             except ValueError:
                 meta = {}
-            u = bg.get_member(uid) if uid else None
             alerts.append({
                 'id':          aid,
                 'resolved':    bool(resolved),
                 'type':        atype,
                 'severity':    sev,
                 'user_id':     str(uid or ''),
-                'user_name':   u.display_name if u else None,
+                'user_name':   names.get(uid) if uid else None,
                 'description': desc,
                 'source':      meta.get('source', 'bot'),
                 'matched':     meta.get('matched'),
@@ -852,16 +892,15 @@ async def api_modlog(request):
                 ORDER BY id DESC LIMIT 100
             """, (guild_id,)) as c:
                 rows = await c.fetchall()
+        names = await _user_names(bot, bg, [r[1] for r in rows] + [r[2] for r in rows])
         result = []
         for action, uid, mid, reason, dur, ts in rows:
-            u = bg.get_member(uid)
-            m = bg.get_member(mid)
             result.append({
                 'action':    action,
                 'user_id':   str(uid),     # строкой: ID > 2^53, JS округлял бы
-                'user_name': u.display_name if u else None,
+                'user_name': names.get(uid),
                 'mod_id':    str(mid),
-                'mod_name':  m.display_name if m else ('Auto' if mid == 0 else None),
+                'mod_name':  'Auto' if mid == 0 else names.get(mid),
                 'reason':    reason,
                 'duration':  dur,
                 'created_at':ts,
@@ -1131,6 +1170,17 @@ async def api_automation_post(request):
 
 # ── API: поиск по участнику ───────────────────────────────────
 
+def _role_kind(role) -> str:
+    """'admin' — управляет сервером, 'mod' — может наказывать или менять сервер"""
+    p = role.permissions
+    if p.administrator or p.manage_guild:
+        return 'admin'
+    if (p.ban_members or p.kick_members or p.moderate_members or
+            p.manage_messages or p.manage_roles or p.manage_channels):
+        return 'mod'
+    return ''
+
+
 @require_auth
 async def api_member_lookup(request):
     """GET /api/guild/:id/member/:uid — досье на участника"""
@@ -1148,16 +1198,29 @@ async def api_member_lookup(request):
         return web.json_response({'error': 'Forbidden'}, status=403)
 
     member = await _get_member(bg, uid)
+    # Ушёл с сервера (например, забанен) — имя и аватар берём из профиля Discord
+    user = member
+    if not member:
+        try:
+            user = bot.get_user(uid) or await bot.fetch_user(uid)
+        except Exception:
+            user = None
     out = {
         'user_id': str(uid),
-        'name':    member.display_name if member else '',
-        'tag':     str(member) if member else '',
-        'avatar':  member.display_avatar.url if member else '',
+        'name':    (member.display_name if member else
+                    (user.global_name or user.name) if user else ''),
+        'tag':     str(user) if user else '',
+        'avatar':  user.display_avatar.url if user else '',
         'joined':  member.joined_at.isoformat() if member and member.joined_at else '',
-        'created': member.created_at.isoformat() if member else '',
+        'created': user.created_at.isoformat() if user else '',
         'on_server': bool(member),
         'timed_out': bool(member and member.is_timed_out()),
         'roles': [r.name for r in member.roles[1:]] if member else [],
+        # Сверху вниз, как в Discord; kind — чем роль опасна (подсветка в панели)
+        'roles_info': [{'name': r.name,
+                        'color': f'#{r.color.value:06x}' if r.color.value else '',
+                        'kind': _role_kind(r)}
+                       for r in reversed(member.roles[1:])] if member else [],
     }
     # Каждый блок изолирован: сбой одной выборки не должен ронять всё досье
     out.update({'warns': 0, 'history': [], 'appeals': [],
@@ -1303,15 +1366,15 @@ async def api_ban_requests(request):
     except Exception as e:
         return _server_error(request, e)
 
+    names = await _user_names(bot, bg, [r[3] for r in rows] + [r[7] for r in rows])
     out = []
     for rid, uid, uname, mid, reason, wc, st, rev, created, reviewed in rows:
-        mod = bg.get_member(mid)
-        reviewer = bg.get_member(rev) if rev else None
         out.append({
             'id': rid, 'user_id': str(uid), 'username': uname,
-            'mod_id': str(mid), 'mod_name': mod.display_name if mod else str(mid),
+            'mod_id': str(mid), 'mod_name': 'Auto' if not mid else (names.get(mid) or str(mid)),
             'reason': reason, 'warn_count': wc, 'status': st,
-            'reviewer_name': reviewer.display_name if reviewer else '',
+            'reviewer_id': str(rev or ''),
+            'reviewer_name': names.get(rev) or (str(rev) if rev else ''),
             'created_at': created, 'reviewed_at': reviewed,
         })
     return web.json_response(out)
