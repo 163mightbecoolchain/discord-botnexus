@@ -240,6 +240,12 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .appeals-stats { display: flex; gap: 1rem; margin-bottom: 1.25rem; font-size: .82rem; }
 .appeals-stats span { background: var(--panel); border: 1px solid var(--border); padding: .4rem .85rem; border-radius: 8px; color: var(--text-2); }
 .appeals-stats b { color: var(--text); }
+.appeal-text {
+  padding: .75rem; background: var(--bg-3); border-radius: 6px;
+  font-size: .9rem; line-height: 1.6;
+  max-height: 260px; overflow-y: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 
 .card-exit-accept, .card-exit-reject { animation: cardExit .45s ease forwards; pointer-events: none; }
 .card-exit-accept { border-left-color: var(--accent) !important; background: rgba(var(--accent-rgb), .08); }
@@ -2990,17 +2996,12 @@ function openAppealDetails(id) {
     </div>
     <div class="form-group">
       <label>Объяснение</label>
-      <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px;
-                  font-size: .9rem; line-height: 1.6;">
-        ${escapeHtml(a.appeal_text || '—')}
-      </div>
+      <div class="appeal-text">${escapeHtml(a.appeal_text || '—')}</div>
     </div>
     ${a.reviewer_note ? `
       <div class="form-group">
         <label>Комментарий модератора</label>
-        <div style="padding: .75rem; background: var(--bg-3); border-radius: 6px; font-size: .9rem;">
-          ${escapeHtml(a.reviewer_note)}
-        </div>
+        <div class="appeal-text">${escapeHtml(a.reviewer_note)}</div>
       </div>
     ` : ''}
 
