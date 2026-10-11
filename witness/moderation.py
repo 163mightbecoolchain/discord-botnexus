@@ -31,6 +31,7 @@ from .ui import (
 from .core import (
     antinuke_check,
     bot,
+    forget_member,
     notify_mute_over,
     get_tier,
     resolve_member,
@@ -613,6 +614,7 @@ async def mute_cmd(interaction: discord.Interaction, member: discord.Member,
         # Подавляем on_member_update DM — сами отправим с нужным текстом
         _suppress_next_timeout_dm.add((interaction.guild_id, member.id))
         await member.timeout(delta, reason=reason)
+        forget_member(interaction.guild_id, member.id)
         await add_modlog(interaction.guild_id, member.id, interaction.user.id,
                          "MUTE", reason, duration)
         # DM участнику
@@ -642,6 +644,7 @@ async def unmute(interaction: discord.Interaction,
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
     try:
         await member.timeout(None, reason=reason)
+        forget_member(interaction.guild_id, member.id)
         await add_modlog(interaction.guild_id, member.id,
                          interaction.user.id, "UNMUTE", reason)
         e = discord.Embed(color=0x57F287, timestamp=datetime.datetime.utcnow())
@@ -1423,6 +1426,7 @@ async def panel_warn(guild: discord.Guild, member: discord.Member, mod_id: int, 
     warn_count = len(await get_active_warnings(guild.id, member.id))
     await add_modlog(guild.id, member.id, mod_id, "WARN", reason)
     label = await apply_progressive_punishment(member, warn_count, mod_id, silent_dm=True)
+    forget_member(guild.id, member.id)
     await send_warn_dm(member, guild, reason, warn_count, label)
     return {'warns': warn_count, 'punishment': label}
 
@@ -1440,6 +1444,7 @@ async def panel_mute(guild: discord.Guild, member: discord.Member, mod_id: int,
     except discord.Forbidden:
         _suppress_next_timeout_dm.discard((guild.id, member.id))
         return {'error': 'bot_forbidden'}
+    forget_member(guild.id, member.id)
     now = datetime.datetime.utcnow()
     until = (now + delta).isoformat()
     # Обычно запись создаёт on_member_update, но без Server Members Intent
@@ -1474,12 +1479,22 @@ async def close_mute_record(guild_id: int, user_id: int) -> bool:
 
 async def panel_unmute(guild: discord.Guild, member, user_id: int, mod_id: int, reason: str) -> dict:
     from .tasks import expire_appeals
+    # Не из кэша: копия могла быть сделана до мута, и тогда первое
+    # «Снять мут» закрывало запись, но тайм-аут в Discord оставался
+    forget_member(guild.id, user_id)
+    try:
+        member = await guild.fetch_member(user_id)
+    except discord.NotFound:
+        member = None
+    except discord.HTTPException:
+        pass                                     # Discord недоступен — берём переданного
     timed_out = bool(member and member.is_timed_out())
     if timed_out:
         try:
             await member.timeout(None, reason=reason)
         except discord.Forbidden:
             return {'error': 'bot_forbidden'}
+        forget_member(guild.id, user_id)
     had_record = await close_mute_record(guild.id, user_id)
     if not (timed_out or had_record):
         return {'error': 'not_muted'}           # нечего снимать — в modlog не пишем
@@ -1503,6 +1518,7 @@ async def panel_unban(guild: discord.Guild, user_id: int, mod_id: int, reason: s
             "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=? AND unbanned=0",
             (guild.id, user_id))
         await db.commit()
+    forget_member(guild.id, user_id)
     await expire_appeals(guild.id, user_id, ("BAN", "TEMPBAN"), "бан снят досрочно")
     await add_modlog(guild.id, user_id, mod_id, "UNBAN", reason)
     return {}
