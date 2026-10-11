@@ -1186,39 +1186,6 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="card">
         <div class="card-head">
           <div>
-            <div class="card-title">Последние угрозы</div>
-            <div class="card-desc">Срабатывания AutoMod и проверок бота, до 100 последних</div>
-          </div>
-        </div>
-        <div class="filter-bar">
-          <select class="select" id="alFilterSev" onchange="renderAlerts()" aria-label="Уровень">
-            <option value="">Любой уровень</option>
-            <option value="high">Высокий и критический</option>
-            <option value="MEDIUM">Средний</option>
-            <option value="LOW">Низкий</option>
-          </select>
-          <select class="select" id="alFilterSrc" onchange="renderAlerts()" aria-label="Источник">
-            <option value="">Любой источник</option>
-            <option value="automod">AutoMod</option>
-            <option value="bot">Бот</option>
-          </select>
-          <label class="check"><input type="checkbox" id="alShowResolved" onchange="renderAlerts()"> Показывать решённые</label>
-        </div>
-        <div class="table-wrap" style="border: 0; border-radius: 0;">
-          <table class="table">
-            <thead>
-              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th><th></th></tr>
-            </thead>
-            <tbody id="secAlertsTable">
-              <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
             <div class="card-title">Анти-нюк</div>
             <div class="card-desc">Защита от взломанного или недобросовестного модератора. Собери правила: что считать атакой и что делать</div>
           </div>
@@ -1316,6 +1283,41 @@ html.theme-anim *::before, html.theme-anim *::after {
         </div>
         <div class="card-foot">
           <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Последние угрозы <span class="text-muted" id="secAlertsCount"></span></div>
+            <div class="card-desc">Срабатывания AutoMod и проверок бота, до 100 последних</div>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <select class="select" id="alFilterSev" onchange="resetAlertsPage()" aria-label="Уровень">
+            <option value="">Любой уровень</option>
+            <option value="high">Высокий и критический</option>
+            <option value="MEDIUM">Средний</option>
+            <option value="LOW">Низкий</option>
+          </select>
+          <select class="select" id="alFilterSrc" onchange="resetAlertsPage()" aria-label="Источник">
+            <option value="">Любой источник</option>
+            <option value="automod">AutoMod</option>
+            <option value="bot">Бот</option>
+          </select>
+          <label class="check"><input type="checkbox" id="alShowResolved" onchange="resetAlertsPage()"> Показывать решённые</label>
+        </div>
+        <div class="table-wrap" style="border: 0; border-radius: 0;">
+          <table class="table">
+            <thead>
+              <tr><th>Уровень</th><th>Событие</th><th>Участник</th><th>Источник</th><th>Когда</th><th></th></tr>
+            </thead>
+            <tbody id="secAlertsTable">
+              <tr><td colspan="6"><div class="empty"><div class="empty-title">Загрузка...</div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-foot" id="secAlertsMore" hidden>
+          <button class="btn btn-ghost btn-sm" onclick="showMoreAlerts()">Показать ещё</button>
         </div>
       </div>
     </div></div>
@@ -2591,8 +2593,24 @@ function removeExempt(kind, id) {
   renderExempt();
 }
 
+// Сначала 10 последних: при сотне алертов список растягивал страницу
+// на 7–8 экранов, и до анти-нюка было не доскроллить
+const ALERTS_PAGE = 10;
+let _alertsShown = ALERTS_PAGE;
+
+function resetAlertsPage() {
+  _alertsShown = ALERTS_PAGE;
+  renderAlerts();
+}
+
+function showMoreAlerts() {
+  _alertsShown += 20;
+  renderAlerts();
+}
+
 function renderAlerts() {
   const tbody = document.getElementById('secAlertsTable');
+  const more  = document.getElementById('secAlertsMore');
   const sev = document.getElementById('alFilterSev').value;
   const src = document.getElementById('alFilterSrc').value;
   const showResolved = document.getElementById('alShowResolved').checked;
@@ -2600,11 +2618,17 @@ function renderAlerts() {
     (showResolved || !a.resolved) &&
     (!src || (src === 'automod' ? a.source === 'automod' : a.source !== 'automod')) &&
     (!sev || (sev === 'high' ? ['HIGH', 'CRITICAL'].includes(a.severity) : a.severity === sev)));
+  document.getElementById('secAlertsCount').textContent = alerts.length ? `· ${alerts.length}` : '';
+  more.hidden = alerts.length <= _alertsShown;
+  if (!more.hidden) {
+    more.querySelector('button').textContent =
+      `Показать ещё ${Math.min(20, alerts.length - _alertsShown)} из ${alerts.length - _alertsShown}`;
+  }
   if (!alerts.length) {
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
     return;
   }
-  tbody.innerHTML = alerts.map((a, i) => `
+  tbody.innerHTML = alerts.slice(0, _alertsShown).map((a, i) => `
     <tr class="stagger-in ${a.resolved ? 'resolved' : ''}" style="animation-delay:${Math.min(i,15)*35}ms">
       <td><span class="chip ${SEV_CHIP[a.severity] ?? ''}">${escapeHtml(a.severity)}</span></td>
       <td>${escapeHtml(a.description || a.type)}${a.matched ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
@@ -2917,7 +2941,7 @@ async function loadSecurity() {
     document.getElementById('secAlerts7d').textContent   = d.alerts_open_7d ?? d.alerts_7d ?? 0;
     renderThreats();
     renderExempt();
-    renderAlerts();
+    resetAlertsPage();
   } catch(e) {
     box.innerHTML = '<div class="empty" style="padding:1.5rem;"><div class="empty-sub">Не удалось загрузить</div></div>';
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
