@@ -403,7 +403,11 @@ async def api_guild_settings_get(request):
             ) as c:
                 qs_row = await c.fetchone()
 
-        sec_settings = json.loads(sec_row[1] or '{}') if sec_row else {}
+        # С умолчаниями, как их видит бот (get_security) — иначе включённые
+        # по умолчанию логи показывались в панели выключенными
+        from witness.database import DEFAULT_SEC
+        sec_settings = {**DEFAULT_SEC,
+                        **(json.loads(sec_row[1] or '{}') if sec_row else {})}
 
         return web.json_response({
             # guild_settings
@@ -452,8 +456,9 @@ async def api_guild_settings_post(request):
         async with aiosqlite.connect(DB_PATH) as db:
 
             # ── guild_settings ─────────────────────────────────
+            lang = data.get('lang')
             gs_fields = {
-                'lang': data.get('lang'),
+                'lang': lang if lang in ('ru', 'en', 'de') else None,
                 'tickets_enabled': data.get('tickets_enabled'),
                 'lockdown': data.get('lockdown'),
                 'starboard_threshold': data.get('starboard_threshold'),
@@ -568,16 +573,19 @@ async def api_security_save(request):
     if not member or not member.guild_permissions.manage_guild:
         return web.json_response({'error': 'Forbidden'}, status=403)
     try:
-        data     = await request.json()
-        settings = json.dumps(data)
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("""
-                INSERT INTO security_settings (guild_id, settings)
-                VALUES (?, ?)
-                ON CONFLICT(guild_id) DO UPDATE SET settings=excluded.settings
-            """, (guild_id, settings))
-            await db.commit()
-        return web.json_response({'ok': True})
+        data = await request.json()
+        if not isinstance(data, dict):
+            return web.json_response({'error': 'Bad request'}, status=400)
+        # Дописываем пришедшие переключатели к текущим настройкам, а не
+        # заменяем JSON целиком: раньше устаревшая копия со страницы логов
+        # затирала anti_raid / lockdown_min_age, сохранённые в «Защите»
+        from witness.database import get_security, save_security, DEFAULT_SEC
+        log_ch, sec = await get_security(guild_id)
+        for k, v in data.items():
+            if k in DEFAULT_SEC:
+                sec[k] = bool(v)
+        await save_security(guild_id, log_ch, sec)
+        return web.json_response({'ok': True, 'security': sec})
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
 
@@ -842,9 +850,9 @@ async def api_modlog(request):
             m = bg.get_member(mid)
             result.append({
                 'action':    action,
-                'user_id':   uid,
+                'user_id':   str(uid),     # строкой: ID > 2^53, JS округлял бы
                 'user_name': u.display_name if u else None,
-                'mod_id':    mid,
+                'mod_id':    str(mid),
                 'mod_name':  m.display_name if m else ('Auto' if mid == 0 else None),
                 'reason':    reason,
                 'duration':  dur,
@@ -897,7 +905,7 @@ async def api_invites(request):
         for code, iid, iname, uses, last, note in rows:
             result.append({
                 'invite_code':  code,
-                'inviter_id':   iid,
+                'inviter_id':   str(iid) if iid else '',
                 'inviter_name': iname,
                 'uses':         uses,
                 'last_used':    last,
@@ -1336,19 +1344,38 @@ async def api_ban_request_action(request):
         now = datetime.datetime.utcnow().isoformat()
         ban_ok = False
         ban_days = 30
+        new_status = 'approved' if action == 'approve' else 'rejected'
+
+        # Сначала фиксируем решение: условие status='pending' не даёт
+        # двум модераторам одновременно одобрить одну заявку (двойной бан)
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute("""
+                UPDATE ban_requests SET status=?, reviewer_id=?, reviewed_at=?
+                WHERE id=? AND guild_id=? AND status='pending'
+            """, (new_status, int(s['user_id']), now, rid, guild_id))
+            await db.commit()
+            if cur.rowcount == 0:
+                return web.json_response({'error': 'already_reviewed'}, status=400)
 
         if action == 'approve':
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute(
-                    "SELECT ban3_days FROM punishment_settings WHERE guild_id=?", (guild_id,)
-                ) as c:
-                    pr = await c.fetchone()
-            ban_days = (pr[0] if pr and pr[0] else 30)
+            # Как кнопка «Одобрить» в Discord (_BanRequestActions.approve):
+            # DM с кнопкой апелляции до бана, temp_bans и запись в modlog
+            from witness.database import get_punishment_settings, add_modlog
+            from witness.moderation import send_appeal_dm
+            ps = await get_punishment_settings(guild_id)
+            ban_days = ps.get('ban3_days', 30) or 30
             unban_at = (datetime.datetime.utcnow() +
                         datetime.timedelta(days=ban_days)).isoformat()
+            target = await _get_member(bg, uid)
+            if target:
+                try:
+                    await send_appeal_dm(target, bg, "TEMPBAN",
+                                         f"Бан на {ban_days} дней · {reason}")
+                except Exception:
+                    pass
             try:
-                target = bg.get_member(uid) or await bot.fetch_user(uid)
-                await bg.ban(target, reason=f"[Заявка #{rid}] {reason}")
+                await bg.ban(target or await bot.fetch_user(uid),
+                             reason=f"[Заявка #{rid}] {reason}")
                 ban_ok = True
                 async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute("""
@@ -1360,14 +1387,8 @@ async def api_ban_request_action(request):
                     await db.commit()
             except Exception as ex:
                 print(f"[BANREQ] Бан не выдан #{rid}: {ex}")
-
-        new_status = 'approved' if action == 'approve' else 'rejected'
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("""
-                UPDATE ban_requests SET status=?, reviewer_id=?, reviewed_at=?
-                WHERE id=? AND guild_id=?
-            """, (new_status, int(s['user_id']), now, rid, guild_id))
-            await db.commit()
+            await add_modlog(guild_id, uid, int(s['user_id']),
+                             "AUTO_TEMPBAN", reason, f"{ban_days}d")
 
         return web.json_response({'ok': True, 'status': new_status,
                                   'banned': ban_ok, 'ban_days': ban_days})
@@ -1548,7 +1569,7 @@ async def api_appeals(request):
             m = bg.get_member(uid)
             result.append({
                 'id':            aid,
-                'user_id':       uid,
+                'user_id':       str(uid),
                 'username':      m.display_name if m else uname,
                 'action_type':   atype,
                 'status':        astatus,
