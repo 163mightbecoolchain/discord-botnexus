@@ -326,8 +326,9 @@ async def api_guilds(request):
         perms = int(ug.get('permissions', 0))
         if gid not in bot_guild_ids: continue
         # 0x8 Admin · 0x20 Manage Guild · 0x2000 Manage Messages · 0x10000000000 Moderate Members
+        # 0x4 Ban Members — им нужны апелляции и заявки на бан
         is_admin = bool(perms & 0x8 or perms & 0x20)
-        is_mod   = bool(perms & 0x2000 or perms & 0x10000000000)
+        is_mod   = bool(perms & 0x2000 or perms & 0x10000000000 or perms & 0x4)
         if not (is_admin or is_mod): continue
         tier = 0
         try:
@@ -1512,9 +1513,11 @@ async def api_appeals(request):
     if not bg:
         return web.json_response([])
     member = await _get_member(bg, s['user_id'])
-    # Как hasPerm() на фронте: Manage Server видит раздел — значит и данные
+    # Любой, кто может решить хоть одну апелляцию (см. api_appeal_action),
+    # плюс Manage Server — как APPEALS_PERM / hasPerm() на фронте
     p = member.guild_permissions if member else None
-    if not p or not (p.manage_messages or p.manage_guild):
+    if not p or not (p.manage_messages or p.moderate_members or
+                     p.ban_members or p.manage_guild):
         return web.json_response({'error': 'Forbidden'}, status=403)
 
     status_filter = request.rel_url.query.get('status', '')

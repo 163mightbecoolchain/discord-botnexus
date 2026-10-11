@@ -621,7 +621,7 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-item" data-perm="manage_messages" data-page="modlog" onclick="showPage('modlog')">
         <span class="icon">📋</span> Mod Log
       </div>
-      <div class="nav-item" data-perm="manage_messages" data-page="appeals" onclick="showPage('appeals')">
+      <div class="nav-item" data-perm="manage_messages|moderate_members|ban_members" data-page="appeals" onclick="showPage('appeals')">
         <span class="icon">⚖️</span> Апелляции
         <span class="badge hidden" id="appealsBadge">0</span>
       </div>
@@ -2099,8 +2099,12 @@ let userPerms = { raw: 0n };
 function hasPerm(name) {
   // Админ и Manage Server видят всё
   if (userPerms.administrator || userPerms.manage_guild) return true;
-  return !!userPerms[name];
+  // 'a|b' — достаточно любого из прав
+  return name.split('|').some(n => !!userPerms[n]);
 }
+
+// Апелляции видит любой, кто может решить хоть одну (как в api_appeals)
+const APPEALS_PERM = 'manage_messages|moderate_members|ban_members';
 
 function computePerms(g) {
   let raw = 0n;
@@ -3388,7 +3392,7 @@ async function livePoll() {
   if (!currentGuild || document.hidden) return;
 
   // ── Апелляции ──
-  if (hasPerm('manage_messages')) {
+  if (hasPerm(APPEALS_PERM)) {
     try {
       const r = await apiFetch(`/api/guild/${currentGuild.id}/appeals`);
       if (r.ok) {
