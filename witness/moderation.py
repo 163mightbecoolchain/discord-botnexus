@@ -31,6 +31,7 @@ from .ui import (
 from .core import (
     antinuke_check,
     bot,
+    notify_mute_over,
     get_tier,
     resolve_member,
     _suppress_next_timeout_dm,
@@ -141,7 +142,11 @@ async def create_ban_request(guild: discord.Guild, member: discord.Member,
 
     view = BanRequestView(request_id, member.id, guild.id)
     try:
-        await ch.send(embed=e, view=view)
+        msg = await ch.send(embed=e, view=view)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE ban_requests SET channel_id=?, message_id=? WHERE id=?",
+                             (ch.id, msg.id, request_id))
+            await db.commit()
     except Exception:
         pass
 
@@ -205,10 +210,7 @@ class _BanRequestActions:
         await add_modlog(guild_id, user_id, interaction.user.id,
                          "AUTO_TEMPBAN", reason, f"{ban_days}d")
 
-        new_e = build_embed(C.SUCCESS)
-        new_e.set_author(name=f"✅ Бан одобрен · #{request_id}")
-        new_e.add_field(name="Одобрил", value=interaction.user.mention, inline=True)
-        new_e.add_field(name="Бан",     value=f"{ban_days} дней {'✅' if ban_ok else '⚠️ нет прав'}", inline=True)
+        new_e = ban_request_result_embed(request_id, True, interaction.user.mention, ban_days, ban_ok)
         try:
             await interaction.message.edit(embed=new_e, view=None)
         except Exception:
@@ -239,9 +241,7 @@ class _BanRequestActions:
             """, (interaction.user.id, now, request_id))
             await db.commit()
 
-        new_e = build_embed(C.MUTED)
-        new_e.set_author(name=f"❌ Бан отклонён · #{request_id}")
-        new_e.add_field(name="Отклонил", value=interaction.user.mention, inline=True)
+        new_e = ban_request_result_embed(request_id, False, interaction.user.mention)
         try:
             await interaction.message.edit(embed=new_e, view=None)
         except Exception:
@@ -547,19 +547,7 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
     )
 
     # Единое DM участнику: варн (+ наказание если применилось)
-    try:
-        dm_e = build_embed(color)
-        dm_e.set_author(name=f"Предупреждение на {interaction.guild.name}",
-                        icon_url=interaction.guild.icon.url if interaction.guild.icon else None)
-        dm_e.add_field(name="Причина",      value=reason,                inline=False)
-        dm_e.add_field(name="Варнов всего", value=f"**{warn_count}/3**", inline=True)
-        if punishment_label:
-            dm_e.add_field(name="Наказание", value=punishment_label, inline=True)
-        dm_e.set_footer(text="Не согласен? Нажми кнопку ниже чтобы подать апелляцию")
-        appeal_view = AppealButtonView(interaction.guild_id, "WARN", reason)
-        await member.send(embed=dm_e, view=appeal_view)
-    except (discord.Forbidden, discord.HTTPException):
-        pass  # DM закрыты
+    await send_warn_dm(member, interaction.guild, reason, warn_count, punishment_label)
 
 @bot.tree.command(name="warnings", description="Список варнов [Premium]")
 @app_commands.describe(member="Пользователь")
@@ -1352,3 +1340,169 @@ async def punishments_cmd(interaction: discord.Interaction,
                     inline=False)
     e.set_footer(text="/punishments action:set warn3_type:request — сменить режим")
     await interaction.response.send_message(embed=e)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ДЕЙСТВИЯ ИЗ ВЕБ-ПАНЕЛИ
+#  Та же логика, что у слэш-команд: modlog, DM с апелляцией,
+#  прогрессивные наказания. Права проверяет web_server.py.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def ban_request_result_embed(request_id: int, approved: bool, reviewer: str,
+                             ban_days: int = 0, ban_ok: bool = True) -> discord.Embed:
+    """Как выглядит сообщение заявки после решения (кнопки убираются)"""
+    if approved:
+        e = build_embed(C.SUCCESS)
+        e.set_author(name=f"✅ Бан одобрен · #{request_id}")
+        e.add_field(name="Одобрил", value=reviewer, inline=True)
+        e.add_field(name="Бан", value=f"{ban_days} дней {'✅' if ban_ok else '⚠️ нет прав'}", inline=True)
+    else:
+        e = build_embed(C.MUTED)
+        e.set_author(name=f"❌ Бан отклонён · #{request_id}")
+        e.add_field(name="Отклонил", value=reviewer, inline=True)
+    return e
+
+
+async def update_ban_request_message(guild: discord.Guild, request_id: int, embed: discord.Embed):
+    """Заявку решили на сайте — обновляем её сообщение в Discord, чтобы
+    там не висели кнопки «ожидает». Старые заявки (до сохранения ID) пропускаем."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT channel_id, message_id FROM ban_requests WHERE id=? AND guild_id=?",
+                (request_id, guild.id)) as c:
+                row = await c.fetchone()
+        if not row or not row[1]:
+            return False
+        ch = guild.get_channel(row[0])
+        if not ch:
+            return False
+        await ch.get_partial_message(row[1]).edit(embed=embed, view=None)
+        return True
+    except Exception as ex:
+        print(f"[BANREQ] Не удалось обновить сообщение #{request_id}: {ex}")
+        return False
+
+
+def panel_target_error(actor: discord.Member, target) -> str:
+    """'' — можно наказывать; иначе код отказа. Discord проверяет только роль
+    бота, поэтому без этой проверки модератор через панель мог бы замутить
+    того, кто выше него"""
+    if target is None:
+        return ''
+    if target.id == actor.id:
+        return 'self'
+    if target.id == target.guild.owner_id:
+        return 'owner'
+    if target.bot:
+        return 'bot'
+    if actor.id != actor.guild.owner_id and target.top_role >= actor.top_role:
+        return 'hierarchy'
+    return ''
+
+
+async def send_warn_dm(member: discord.Member, guild: discord.Guild, reason: str,
+                       warn_count: int, punishment_label: str = ""):
+    """Одно сообщение участнику: варн (+ наказание, если сработало) и кнопка апелляции"""
+    try:
+        dm_e = build_embed(C.WARNING if warn_count < 3 else C.DANGER)
+        dm_e.set_author(name=f"Предупреждение на {guild.name}",
+                        icon_url=guild.icon.url if guild.icon else None)
+        dm_e.add_field(name="Причина",      value=reason,                inline=False)
+        dm_e.add_field(name="Варнов всего", value=f"**{warn_count}/3**", inline=True)
+        if punishment_label:
+            dm_e.add_field(name="Наказание", value=punishment_label, inline=True)
+        dm_e.set_footer(text="Не согласен? Нажми кнопку ниже чтобы подать апелляцию")
+        await member.send(embed=dm_e, view=AppealButtonView(guild.id, "WARN", reason))
+    except (discord.Forbidden, discord.HTTPException):
+        pass  # DM закрыты
+
+
+async def panel_warn(guild: discord.Guild, member: discord.Member, mod_id: int, reason: str) -> dict:
+    await add_warning(guild.id, member.id, mod_id, reason)
+    warn_count = len(await get_active_warnings(guild.id, member.id))
+    await add_modlog(guild.id, member.id, mod_id, "WARN", reason)
+    label = await apply_progressive_punishment(member, warn_count, mod_id, silent_dm=True)
+    await send_warn_dm(member, guild, reason, warn_count, label)
+    return {'warns': warn_count, 'punishment': label}
+
+
+async def panel_mute(guild: discord.Guild, member: discord.Member, mod_id: int,
+                     duration: str, reason: str) -> dict:
+    delta = MUTE_DURATIONS.get(duration)
+    if not delta:
+        return {'error': 'bad_duration'}
+    if await antinuke_check(guild, mod_id, "mute"):
+        return {'error': 'antinuke'}
+    _suppress_next_timeout_dm.add((guild.id, member.id))
+    try:
+        await member.timeout(delta, reason=reason)
+    except discord.Forbidden:
+        _suppress_next_timeout_dm.discard((guild.id, member.id))
+        return {'error': 'bot_forbidden'}
+    now = datetime.datetime.utcnow()
+    until = (now + delta).isoformat()
+    # Обычно запись создаёт on_member_update, но без Server Members Intent
+    # события нет — пишем сами (повторная запись из события безвредна)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO active_mutes (guild_id,user_id,until,reason,notified,created_at)
+            VALUES (?,?,?,?,0,?)
+            ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                until=excluded.until, reason=excluded.reason,
+                notified=0, created_at=excluded.created_at
+        """, (guild.id, member.id, until, reason, now.isoformat()))
+        await db.commit()
+    await add_modlog(guild.id, member.id, mod_id, "MUTE", reason, duration)
+    try:
+        await send_appeal_dm(member, guild, "MUTE", f"Тайм-аут на {duration} · {reason}")
+    except Exception:
+        pass
+    return {'until': until}
+
+
+async def close_mute_record(guild_id: int, user_id: int) -> bool:
+    """Закрывает запись активного мута. True — если она была открыта:
+    тогда и только тогда уведомляем участника (без дублей с on_member_update)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=? AND notified=0",
+            (guild_id, user_id))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def panel_unmute(guild: discord.Guild, member, user_id: int, mod_id: int, reason: str) -> dict:
+    from .tasks import expire_appeals
+    timed_out = bool(member and member.is_timed_out())
+    if timed_out:
+        try:
+            await member.timeout(None, reason=reason)
+        except discord.Forbidden:
+            return {'error': 'bot_forbidden'}
+    had_record = await close_mute_record(guild.id, user_id)
+    if not (timed_out or had_record):
+        return {'error': 'not_muted'}           # нечего снимать — в modlog не пишем
+    # Запись закрыли мы — значит on_member_update уведомлять не будет
+    await notify_mute_over(guild.id, user_id, early=True)
+    await expire_appeals(guild.id, user_id, ("MUTE",), "мут снят досрочно")
+    await add_modlog(guild.id, user_id, mod_id, "UNMUTE", reason)
+    return {}
+
+
+async def panel_unban(guild: discord.Guild, user_id: int, mod_id: int, reason: str) -> dict:
+    from .tasks import expire_appeals
+    try:
+        await guild.unban(discord.Object(id=user_id), reason=reason)
+    except discord.NotFound:
+        pass                                   # уже разбанен — просто закрываем запись
+    except discord.Forbidden:
+        return {'error': 'bot_forbidden'}
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE temp_bans SET unbanned=1 WHERE guild_id=? AND user_id=? AND unbanned=0",
+            (guild.id, user_id))
+        await db.commit()
+    await expire_appeals(guild.id, user_id, ("BAN", "TEMPBAN"), "бан снят досрочно")
+    await add_modlog(guild.id, user_id, mod_id, "UNBAN", reason)
+    return {}

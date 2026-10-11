@@ -352,6 +352,16 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_member_ban(guild, user):
+    # Бан перекрывает мут: иначе запись висит активной, а участнику
+    # потом приходит «мут закончился»
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=? AND notified=0",
+                (guild.id, user.id))
+            await db.commit()
+    except Exception as ex:
+        print(f"[BAN_MUTE] {ex}")
     # Бан мог быть выдан вручную через интерфейс Discord — тогда в modlog
     # записи нет, и на сайте действие не видно. Достаём автора из audit log.
     try:
@@ -502,13 +512,15 @@ async def on_member_update(before, after):
                     except Exception as ex:
                         print(f"[MUTE_LOG] audit: {ex}")
             elif before.timed_out_until is not None:
-                # Мут сняли досрочно — уведомляем и закрываем апелляции
+                # Мут сняли досрочно — уведомляем и закрываем апелляции.
+                # Если запись уже закрыта (сняли с сайта) — участник уже уведомлён
                 async with aiosqlite.connect(DB_PATH) as db:
-                    await db.execute(
-                        "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=?",
+                    cur = await db.execute(
+                        "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=? AND notified=0",
                         (after.guild.id, after.id))
                     await db.commit()
-                await notify_mute_over(after.guild.id, after.id, early=True)
+                if cur.rowcount:
+                    await notify_mute_over(after.guild.id, after.id, early=True)
                 await expire_appeals(after.guild.id, after.id, ("MUTE",),
                                      "мут снят досрочно")
         except Exception as ex:

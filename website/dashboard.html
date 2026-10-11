@@ -296,6 +296,13 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .user-pop .up-grid dt { color: var(--muted); }
 .user-pop .up-grid dd { margin: 0; font-family: var(--mono); font-size: .78rem; }
 .user-pop .member-chips { margin-top: .6rem; }
+.user-pop .up-actions, .member-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .8rem; }
+.user-pop .up-actions { border-top: 1px solid var(--border); padding-top: .7rem; }
+.user-pop .up-note { color: var(--muted); font-size: .74rem; margin-top: .6rem; }
+.al-count { cursor: pointer; margin-left: .35rem; font-family: var(--mono); }
+.al-count:hover { color: var(--accent); border-color: var(--accent); }
+tr.al-sub td { padding-top: .35rem; padding-bottom: .35rem; font-size: .8rem; color: var(--text-2); background: var(--bg-3); }
+.filter-bar .ml-who { width: 260px; max-width: 100%; }
 .user-pop .up-foot { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .8rem; }
 .chip-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .5rem; min-height: 0; }
 .chip-x { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; padding: .25rem .3rem .25rem .65rem; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border-2); }
@@ -646,6 +653,10 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-item" data-perm="manage_messages|moderate_members|ban_members" data-page="appeals" onclick="showPage('appeals')">
         <span class="icon">⚖️</span> Апелляции
         <span class="badge hidden" id="appealsBadge">0</span>
+      </div>
+      <div class="nav-item" data-perm="manage_messages|moderate_members|ban_members" data-page="punish" onclick="showPage('punish')">
+        <span class="icon">⏳</span> Наказания
+        <span class="badge hidden" id="punishBadge">0</span>
       </div>
       <div class="nav-item" data-perm="ban_members" data-page="banreq" onclick="showPage('banreq')">
         <span class="icon">🔨</span> Заявки на бан
@@ -1327,6 +1338,7 @@ html.theme-anim *::before, html.theme-anim *::after {
             <option value="bot">Бот</option>
           </select>
           <label class="check"><input type="checkbox" id="alShowResolved" onchange="resetAlertsPage()"> Показывать решённые</label>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto;" onclick="resolveAllAlerts()">Отметить все решёнными</button>
         </div>
         <div class="table-wrap" style="border: 0; border-radius: 0;">
           <table class="table">
@@ -1377,12 +1389,26 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Mod Log</div>
-          <div class="page-subtitle">Последние 100 действий модерации</div>
+          <div class="page-subtitle">Действия модерации, новые сверху</div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="loadModlog()">⟳ Обновить</button>
       </div>
 
       <div class="table-wrap">
+        <div class="filter-bar">
+          <select class="select" id="mlAction" onchange="loadModlog()" aria-label="Действие">
+            <option value="">Все действия</option>
+            <option value="WARN">Варны</option>
+            <option value="MUTE,AUTO_MUTE,UNMUTE">Муты</option>
+            <option value="BAN,TEMPBAN,AUTO_TEMPBAN,UNBAN,AUTO_UNBAN">Баны</option>
+            <option value="KICK">Кики</option>
+            <option value="APPEAL_ACCEPTED,APPEAL_REJECTED">Апелляции</option>
+          </select>
+          <input class="input ml-who" id="mlWho" type="search" autocomplete="off"
+                 placeholder="Участник или модератор: ник или ID" oninput="debounceModlog()"
+                 aria-label="Участник или модератор">
+          <button class="btn btn-ghost btn-sm" id="mlReset" onclick="resetModlogFilters()" hidden>Сбросить</button>
+        </div>
         <table class="table">
           <thead>
             <tr>
@@ -1394,8 +1420,40 @@ html.theme-anim *::before, html.theme-anim *::after {
             <tr><td colspan="6"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
           </tbody>
         </table>
+        <div class="card-foot" id="mlMore" hidden>
+          <button class="btn btn-ghost btn-sm" onclick="loadModlog(true)">Показать ещё</button>
+        </div>
       </div>
     </div>
+
+    <!-- PUNISHMENTS -->
+    <div id="content-punish" class="page"><div class="page-inner-wide">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Активные наказания</div>
+          <div class="page-subtitle">Кто сейчас в муте или во временном бане</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadPunishments()">⟳ Обновить</button>
+      </div>
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Муты <span class="text-muted" id="punMutesCount"></span></div></div></div>
+        <div class="table-wrap" style="border:0; border-radius:0;">
+          <table class="table">
+            <thead><tr><th>Участник</th><th>Причина</th><th>До</th><th>Осталось</th><th></th></tr></thead>
+            <tbody id="punMutes"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Временные баны <span class="text-muted" id="punBansCount"></span></div></div></div>
+        <div class="table-wrap" style="border:0; border-radius:0;">
+          <table class="table">
+            <thead><tr><th>Участник</th><th>Причина</th><th>Выдал</th><th>До</th><th>Осталось</th><th></th></tr></thead>
+            <tbody id="punBans"></tbody>
+          </table>
+        </div>
+      </div>
+    </div></div>
 
     <!-- APPEALS -->
     <div id="content-appeals" class="page"><div class="page-inner-wide">
@@ -1504,6 +1562,9 @@ html.theme-anim *::before, html.theme-anim *::after {
 </div>
 
 <div class="user-pop" id="userPop" role="dialog" aria-label="Профиль участника" hidden></div>
+<div class="modal-bg" id="actModal" onclick="if(event.target===this)closeAction(null)">
+  <div class="modal" id="actModalContent" role="dialog" aria-modal="true"></div>
+</div>
 
 <!-- APPEAL DETAILS MODAL -->
 <div class="modal-bg" id="appealModal" onclick="if(event.target===this)closeAppealModal()">
@@ -2216,6 +2277,7 @@ async function showPage(name) {
 
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
+  if (name === 'punish') await loadPunishments();
   if (name === 'appeals') { await loadAppeals(); }
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation') await loadAutomation();
@@ -2550,15 +2612,62 @@ async function loadOverview() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  MODLOG
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-async function loadModlog() {
+// Mod Log: тип действия и ID фильтрует сервер, ник — страница
+// (имён в базе нет); «Показать ещё» догружает записи старше последней
+let _mlRows = [], _mlDone = true, _mlTimer = null;
+
+function debounceModlog() {
+  clearTimeout(_mlTimer);
+  _mlTimer = setTimeout(() => {
+    // ID меняет выборку на сервере, ник — только фильтр по уже загруженному
+    if (/^\d{15,21}$/.test(document.getElementById('mlWho').value.trim()) || _mlById) loadModlog();
+    else renderModlog();
+  }, 350);
+}
+let _mlById = false;
+
+function resetModlogFilters() {
+  document.getElementById('mlAction').value = '';
+  document.getElementById('mlWho').value = '';
+  csSync();
+  loadModlog();
+}
+
+async function loadModlog(more = false) {
   if (!currentGuild) return;
-  document.getElementById('modlogTable').innerHTML = skeletonRows(6, 6);
+  const tbody = document.getElementById('modlogTable');
+  const who = document.getElementById('mlWho').value.trim();
+  const q = new URLSearchParams();
+  const act = document.getElementById('mlAction').value;
+  if (act) q.set('action', act);
+  _mlById = /^\d{15,21}$/.test(who);
+  if (_mlById) q.set('uid', who);
+  if (more && _mlRows.length) q.set('before', _mlRows[_mlRows.length - 1].id);
+  if (!more) tbody.innerHTML = skeletonRows(6, 6);
   try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/modlog`);
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/modlog?${q}`);
     const rows = r.ok ? await r.json() : [];
-    const tbody = document.getElementById('modlogTable');
+    _mlRows = more ? _mlRows.concat(rows) : rows;
+    _mlDone = rows.length < 100;
+    renderModlog();
+  } catch(e) {}
+}
+
+function renderModlog() {
+  const tbody = document.getElementById('modlogTable');
+  const who = document.getElementById('mlWho').value.trim().toLowerCase();
+  const byName = who && !/^\d{15,21}$/.test(who);
+  const rows = byName ? _mlRows.filter(x =>
+    (x.user_name || '').toLowerCase().includes(who) || (x.mod_name || '').toLowerCase().includes(who)) : _mlRows;
+  document.getElementById('mlReset').hidden = !(who || document.getElementById('mlAction').value);
+  const more = document.getElementById('mlMore');
+  more.hidden = _mlDone;
+  if (!more.hidden) more.querySelector('button').textContent =
+    byName ? 'Искать в более старых записях' : 'Показать ещё 100';
+  {
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Mod log пуст</div></div></td></tr>';
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">${
+        _mlRows.length ? 'Ничего не найдено' : 'Mod log пуст'}</div></div></td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map((row, i) => `
@@ -2571,7 +2680,7 @@ async function loadModlog() {
         <td class="text-mono text-muted">${(row.created_at || '').slice(0, 16).replace('T', ' ')}</td>
       </tr>
     `).join('');
-  } catch(e) {}
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2632,48 +2741,114 @@ function showMoreAlerts() {
   renderAlerts();
 }
 
-function renderAlerts() {
-  const tbody = document.getElementById('secAlertsTable');
-  const more  = document.getElementById('secAlertsMore');
+function filteredAlerts() {
   const sev = document.getElementById('alFilterSev').value;
   const src = document.getElementById('alFilterSrc').value;
   const showResolved = document.getElementById('alShowResolved').checked;
-  const alerts = ((_secData && _secData.alerts) || []).filter(a =>
+  return ((_secData && _secData.alerts) || []).filter(a =>
     (showResolved || !a.resolved) &&
     (!src || (src === 'automod' ? a.source === 'automod' : a.source !== 'automod')) &&
     (!sev || (sev === 'high' ? ['HIGH', 'CRITICAL'].includes(a.severity) : a.severity === sev)));
-  document.getElementById('secAlertsCount').textContent = alerts.length ? `· ${alerts.length}` : '';
-  more.hidden = alerts.length <= _alertsShown;
-  if (!more.hidden) {
-    more.querySelector('button').textContent =
-      `Показать ещё ${Math.min(20, alerts.length - _alertsShown)} из ${alerts.length - _alertsShown}`;
+}
+
+// Повторы одного типа от одного участника — одной строкой «×N»:
+// 90 из 100 алертов бывают «повтором сообщений» одного-двух человек
+const SEV_RANK = { CRITICAL: 3, HIGH: 2, MEDIUM: 1, LOW: 0 };
+let _alertGroups = [];
+const _alertsOpen = new Set();
+
+function groupAlerts(alerts) {
+  const map = new Map(), out = [];
+  for (const a of alerts) {                       // уже от новых к старым
+    const key = `${a.type}|${a.user_id || 'a' + a.id}`;
+    let g = map.get(key);
+    if (!g) { g = { key, items: [] }; map.set(key, g); out.push(g); }
+    g.items.push(a);
   }
+  return out;
+}
+
+function renderAlerts() {
+  const tbody = document.getElementById('secAlertsTable');
+  const more  = document.getElementById('secAlertsMore');
+  const alerts = filteredAlerts();
+  _alertGroups = groupAlerts(alerts);
+  document.getElementById('secAlertsCount').textContent = alerts.length ? `· ${alerts.length}` : '';
+  const left = _alertGroups.length - _alertsShown;
+  more.hidden = left <= 0;
+  if (!more.hidden) more.querySelector('button').textContent = `Показать ещё ${Math.min(20, left)} из ${left}`;
   if (!alerts.length) {
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🛡️</div><div class="empty-title">Угроз не найдено</div></div></td></tr>';
     return;
   }
-  tbody.innerHTML = alerts.slice(0, _alertsShown).map((a, i) => `
-    <tr class="stagger-in ${a.resolved ? 'resolved' : ''}" style="animation-delay:${Math.min(i,15)*35}ms">
-      <td><span class="chip ${SEV_CHIP[a.severity] ?? ''}">${escapeHtml(a.severity)}</span></td>
-      <td>${escapeHtml(a.description || a.type)}${a.matched ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
+  const when = a => escapeHtml((a.created_at || '').slice(0, 16).replace('T', ' '));
+  tbody.innerHTML = _alertGroups.slice(0, _alertsShown).map((g, i) => {
+    const a = g.items[0], n = g.items.length, open = _alertsOpen.has(g.key);
+    const resolved = g.items.every(x => x.resolved);
+    const sev = g.items.reduce((m, x) => (SEV_RANK[x.severity] ?? 0) > (SEV_RANK[m] ?? 0) ? x.severity : m, a.severity);
+    const head = `
+    <tr class="stagger-in ${resolved ? 'resolved' : ''}" style="animation-delay:${Math.min(i,15)*35}ms">
+      <td><span class="chip ${SEV_CHIP[sev] ?? ''}">${escapeHtml(sev)}</span></td>
+      <td>${escapeHtml(a.description || a.type)}${n > 1 ? `<button type="button" class="chip al-count" aria-expanded="${open}"
+          title="${open ? 'Свернуть' : 'Показать все'}" onclick="toggleAlertGroup(${i})">×${n}</button>` : ''}${
+        a.matched && !open ? `<div class="text-mono text-muted">${escapeHtml(String(a.matched).slice(0, 80))}</div>` : ''}</td>
       <td>${userChip(a.user_id, a.user_name)}</td>
       <td class="text-mono text-muted">${a.source === 'automod' ? 'AutoMod' : 'бот'}</td>
-      <td class="text-mono text-muted">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id}, ${!a.resolved})">${a.resolved ? 'Вернуть' : 'Решено'}</button></td>
-    </tr>`).join('');
+      <td class="text-mono text-muted">${when(a)}${n > 1 ? `<div>с ${when(g.items[n - 1])}</div>` : ''}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="resolveAlertGroup(${i}, ${!resolved})">${
+        resolved ? 'Вернуть' : n > 1 ? `Решено ×${n}` : 'Решено'}</button></td>
+    </tr>`;
+    const sub = open ? g.items.map(x => `
+    <tr class="al-sub ${x.resolved ? 'resolved' : ''}">
+      <td></td>
+      <td>${x.matched ? `<span class="text-mono">${escapeHtml(String(x.matched).slice(0, 120))}</span>` : escapeHtml(x.description || x.type)}</td>
+      <td></td><td></td>
+      <td class="text-mono">${when(x)}</td>
+      <td></td>
+    </tr>`).join('') : '';
+    return head + sub;
+  }).join('');
 }
 
-async function resolveAlert(id, resolved) {
+function toggleAlertGroup(i) {
+  const g = _alertGroups[i];
+  if (!g) return;
+  _alertsOpen.has(g.key) ? _alertsOpen.delete(g.key) : _alertsOpen.add(g.key);
+  renderAlerts();
+}
+
+async function resolveAlerts(ids, resolved) {
   try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/alert/${id}/resolve`, {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/alerts/resolve`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ resolved })
+      body: JSON.stringify({ ids, resolved })
     });
-    if (!r.ok) return showToast('Не удалось обновить', 'error');
-    const a = _secData.alerts.find(x => x.id === id);
-    if (a) a.resolved = resolved;
+    if (!r.ok) { showToast('Не удалось обновить', 'error'); return false; }
+    const set = new Set(ids);
+    _secData.alerts.forEach(a => { if (set.has(a.id)) a.resolved = resolved; });
     renderAlerts();
-  } catch(e) { showToast('Ошибка соединения', 'error'); }
+    return true;
+  } catch(e) { showToast('Ошибка соединения', 'error'); return false; }
+}
+
+function resolveAlertGroup(i, resolved) {
+  const g = _alertGroups[i];
+  if (g) return resolveAlerts(g.items.map(x => x.id), resolved);
+}
+
+async function resolveAllAlerts() {
+  const ids = filteredAlerts().filter(a => !a.resolved).map(a => a.id);
+  if (!ids.length) return showToast('Нерешённых угроз нет', 'success');
+  const ok = await askAction({
+    title: `Отметить решёнными ${ids.length} угроз?`,
+    sub: 'С учётом выбранных фильтров. Вернуть можно: «Показывать решённые» → «Вернуть».',
+    okText: 'Отметить', reason: false,
+  });
+  if (!ok) return;
+  if (await resolveAlerts(ids, true)) {
+    showToast(`✓ Отмечено: ${ids.length}`, 'success');
+    loadSecurity();                    // пересчитать «нерешённых за 7 дней»
+  }
 }
 
 function setThreat(key, mode) {
@@ -3104,6 +3279,7 @@ async function openUserPop(uid, anchor) {
     }
   }
   if (_popUid !== uid) return;   // успели открыть другого
+  if (m.name) _nameHints.set(uid, m.name);
   const d = s => (s || '').slice(0, 10) || '—';
   const chips = [];
   if (!m.on_server) chips.push('<span class="chip danger">не на сервере</span>');
@@ -3129,6 +3305,7 @@ async function openUserPop(uid, anchor) {
       ${last ? `<dt>Последнее</dt><dd>${escapeHtml(last.action)} · ${d(last.created_at)}</dd>` : ''}
     </dl>
     ${(m.roles || []).length ? `<div class="member-chips">${roleChips(m, 8)}</div>` : ''}
+    ${memberActionButtons(m, 'up-actions')}
     <div class="up-foot">
       <button class="btn btn-ghost btn-sm" onclick="copyUid('${uid}')">Копировать ID</button>
       ${canDossier ? `<button class="btn btn-primary btn-sm" onclick="closeUserPop(); showPage('member'); openMember('${uid}')">Досье</button>` : ''}
@@ -3167,7 +3344,10 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#userPop')) closeUserPop();
 }, true);
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') return closeUserPop();
+  if (e.key === 'Escape') {
+    if (document.getElementById('actModal').classList.contains('show')) return closeAction(null);
+    return closeUserPop();
+  }
   const el = e.target.closest && e.target.closest('.uchip');
   if (el && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
@@ -3177,6 +3357,182 @@ document.addEventListener('keydown', e => {
 window.addEventListener('scroll', e => {
   if (!e.target.closest || !e.target.closest('#userPop')) closeUserPop();
 }, true);
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ДЕЙСТВИЯ С УЧАСТНИКОМ: варн, мут, снять мут, разбан
+//  Права и иерархию проверяет сервер; кнопки — только разрешённые (m.can)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const _nameHints = new Map();   // uid → ник, чтобы подписать окно подтверждения
+let _actResolve = null;
+
+// Окно подтверждения: причина (и срок для мута). Возвращает {reason, duration} или null
+function askAction({ title, sub = '', okText = 'Подтвердить', danger = false,
+                     reason = 'optional', durations = null, placeholder = '' }) {
+  if (_actResolve) closeAction(null);
+  const box = document.getElementById('actModalContent');
+  box.innerHTML = `
+    <div class="modal-title">${escapeHtml(title)}</div>
+    ${sub ? `<div class="input-help" style="margin:-.5rem 0 1rem; font-size:.82rem;">${escapeHtml(sub)}</div>` : ''}
+    ${durations ? `<div class="form-group"><label for="actDuration">Срок</label>
+      <select class="select" id="actDuration">${durations.map(d =>
+        `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('')}</select></div>` : ''}
+    ${reason ? `<div class="form-group" style="margin-bottom:0;"><label for="actReason">Причина${reason === 'required' ? '' : ' (необязательно)'}</label>
+      <textarea class="textarea" id="actReason" rows="2" maxlength="500" placeholder="${escapeHtml(placeholder)}"></textarea>
+      <div class="input-help" id="actErr" style="color:var(--danger);" hidden>Укажите причину — её увидит участник</div></div>` : ''}
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeAction(null)">Отмена</button>
+      <button class="btn ${danger ? 'btn-danger' : 'btn-primary'} btn-sm" id="actOk">${escapeHtml(okText)}</button>
+    </div>`;
+  document.getElementById('actModal').classList.add('show');
+  if (durations) { csInit(); csSync(); }
+  return new Promise(res => {
+    _actResolve = res;
+    document.getElementById('actOk').onclick = () => {
+      const r = (document.getElementById('actReason')?.value || '').trim();
+      if (reason === 'required' && !r) {
+        document.getElementById('actErr').hidden = false;
+        return document.getElementById('actReason').focus();
+      }
+      closeAction({ reason: r, duration: document.getElementById('actDuration')?.value || '' });
+    };
+    setTimeout(() => (document.getElementById('actReason') || document.getElementById('actOk')).focus(), 60);
+  });
+}
+
+function closeAction(value) {
+  document.getElementById('actModal').classList.remove('show');
+  const res = _actResolve;
+  _actResolve = null;
+  if (res) res(value);
+}
+
+const ACTION_ERRORS = {
+  hierarchy: 'Роль участника не ниже вашей', owner: 'Это владелец сервера',
+  self: 'Нельзя наказать себя', bot: 'Это бот', missing_permission: 'Недостаточно прав',
+  reason_required: 'Укажите причину', not_on_server: 'Участника нет на сервере',
+  bad_duration: 'Неверный срок', antinuke: 'Анти-нюк: слишком много мутов подряд, подождите',
+  bot_forbidden: 'У бота не хватает прав — его роль ниже роли участника?',
+  not_muted: 'Мута уже нет',
+};
+
+function memberActionButtons(m, cls) {
+  const can = m.can || {}, uid = m.user_id;
+  const b = [];
+  if (can.warn) b.push(`<button class="btn btn-ghost btn-sm" onclick="memberAction('${uid}', 'warn')">⚠️ Варн</button>`);
+  if (can.mute && !m.timed_out) b.push(`<button class="btn btn-ghost btn-sm" onclick="memberAction('${uid}', 'mute')">🔇 Мут</button>`);
+  if (can.unmute && (m.timed_out || m.active_mute)) b.push(`<button class="btn btn-ghost btn-sm" onclick="memberAction('${uid}', 'unmute')">Снять мут</button>`);
+  const note = { hierarchy: 'Роль участника не ниже вашей — наказать нельзя',
+                 owner: 'Владелец сервера', self: 'Это вы', bot: 'Это бот' }[m.blocked];
+  if (!b.length && !note) return '';
+  return `<div class="${cls}">${b.join('')}</div>${note && cls === 'up-actions' ? `<div class="up-note">${note}</div>` : ''}`;
+}
+
+async function memberAction(uid, action) {
+  const m = (_popCache.get(uid) || {}).data || {};
+  closeUserPop();
+  const who = _nameHints.get(uid) || m.name || uid;
+  const cfg = {
+    warn:   { title: `Варн · ${who}`, okText: 'Выдать варн', danger: true, reason: 'required',
+              placeholder: 'За что — увидит участник',
+              sub: m.warns != null ? `Сейчас варнов: ${m.warns}/3. Следующий может включить авто-наказание из настроек сервера.` : '' },
+    mute:   { title: `Мут · ${who}`, okText: 'Замутить', danger: true, reason: 'required',
+              placeholder: 'За что — увидит участник', durations: m.mute_durations },
+    unmute: { title: `Снять мут · ${who}`, okText: 'Снять мут' },
+    unban:  { title: `Разбанить · ${who}`, okText: 'Разбанить',
+              sub: 'Участник сможет зайти по приглашению. Апелляции на бан закроются.' },
+  }[action];
+  if (action === 'mute' && !cfg.durations) {
+    // окно открыли не из профиля — берём сроки из досье
+    try { const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}`); cfg.durations = (await r.json()).mute_durations; } catch(e) {}
+    if (!cfg.durations) return showToast('Не удалось загрузить сроки мута', 'error');
+  }
+  const ans = await askAction(cfg);
+  if (!ans) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}/action`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ action, ...ans })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return showToast(ACTION_ERRORS[d.error] || ('Ошибка: ' + (d.error || r.status)), 'error');
+    _popCache.delete(uid);
+    showToast({
+      warn:   `⚠️ Варн выдан · ${d.warns}/3${d.punishment ? ' · ' + d.punishment : ''}`,
+      mute:   `🔇 Мут на ${ans.duration}`,
+      unmute: '✓ Мут снят',
+      unban:  '✓ Разбанен',
+    }[action], 'success');
+    refreshActivePage();
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+}
+
+function refreshActivePage() {
+  const id = document.querySelector('.page.active')?.id;
+  if (id === 'content-punish') loadPunishments();
+  if (id === 'content-modlog') loadModlog();
+  if (id === 'content-member') {
+    const box = document.getElementById('memberCard');
+    if (box && box.dataset.uid) openMember(box.dataset.uid);
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  АКТИВНЫЕ НАКАЗАНИЯ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Время в базе — UTC без пояса
+const utcDate = iso => new Date(/[zZ]$|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + 'Z');
+
+function fmtUntil(iso) {
+  return utcDate(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function timeLeft(iso) {
+  const mins = Math.round((utcDate(iso) - Date.now()) / 60000);
+  if (mins <= 0) return 'истекает';
+  if (mins < 60) return `${mins} мин`;
+  const h = Math.floor(mins / 60);
+  return h < 48 ? `${h} ч ${mins % 60} мин` : `${Math.floor(h / 24)} дн ${h % 24} ч`;
+}
+
+async function loadPunishments() {
+  if (!currentGuild) return;
+  const mt = document.getElementById('punMutes'), bt = document.getElementById('punBans');
+  mt.innerHTML = skeletonRows(3, 5); bt.innerHTML = skeletonRows(2, 6);
+  let d;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/punishments`);
+    if (!r.ok) throw new Error(r.status);
+    d = await r.json();
+  } catch(e) {
+    mt.innerHTML = bt.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
+    return;
+  }
+  [...d.mutes, ...d.tempbans].forEach(x => x.user_name && _nameHints.set(x.user_id, x.user_name));
+  const badge = document.getElementById('punishBadge');
+  const total = d.mutes.length + d.tempbans.length;
+  badge.textContent = total; badge.classList.toggle('hidden', !total);
+  document.getElementById('punMutesCount').textContent = d.mutes.length ? `· ${d.mutes.length}` : '';
+  document.getElementById('punBansCount').textContent = d.tempbans.length ? `· ${d.tempbans.length}` : '';
+  const empty = (n, t) => `<tr><td colspan="${n}"><div class="empty" style="padding:1.5rem;"><div class="empty-sub">${t}</div></div></td></tr>`;
+  mt.innerHTML = d.mutes.length ? d.mutes.map(x => `
+    <tr>
+      <td>${userChip(x.user_id, x.user_name)}</td>
+      <td>${escapeHtml(x.reason || '—')}</td>
+      <td class="text-mono text-muted">${fmtUntil(x.until)}</td>
+      <td class="text-mono">${timeLeft(x.until)}</td>
+      <td>${d.can.unmute ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unmute')">Снять мут</button>` : ''}</td>
+    </tr>`).join('') : empty(5, 'Сейчас никто не в муте');
+  bt.innerHTML = d.tempbans.length ? d.tempbans.map(x => `
+    <tr>
+      <td>${userChip(x.user_id, x.user_name)}</td>
+      <td>${escapeHtml(x.reason || '—')}</td>
+      <td>${userChip(x.mod_id, x.mod_name)}</td>
+      <td class="text-mono text-muted">${fmtUntil(x.until)}</td>
+      <td class="text-mono">${timeLeft(x.until)}</td>
+      <td>${d.can.unban ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unban')">Разбанить</button>` : ''}</td>
+    </tr>`).join('') : empty(6, 'Временных банов нет');
+}
 
 let _currentAppealId = null;
 
@@ -3202,6 +3558,13 @@ function openAppealDetails(id) {
     <div style="margin-bottom: 1rem;">
       <span class="status-pill ${a.status}">${a.status}</span>
     </div>
+    ${!isPending ? `
+      <div class="form-group">
+        <label>Решение</label>
+        <div>${a.reviewer_id && a.reviewer_id !== '0' ? userChip(a.reviewer_id, a.reviewer_name) : 'автоматически'}${
+          a.reviewed_at ? ` · <span class="text-mono text-muted">${escapeHtml(a.reviewed_at.slice(0, 16).replace('T', ' '))}</span>` : ''}</div>
+      </div>
+    ` : ''}
 
     <div class="form-group">
       <label>Участник</label>
@@ -3420,6 +3783,8 @@ async function openMember(uid) {
     }
     const m = await r.json();
     box.dataset.uid = uid;
+    if (m.name) _nameHints.set(uid, m.name);
+    _popCache.set(uid, { at: Date.now(), data: m });
     const d = s => (s || '').slice(0,10);
     const chips = [];
     if (!m.on_server) chips.push('<span class="chip danger">не на сервере</span>');
@@ -3438,6 +3803,7 @@ async function openMember(uid) {
                 ${escapeHtml(m.tag || '')} · ID ${userChip(m.user_id, m.user_id)}
               </div>
               <div class="member-chips">${chips.join('')}</div>
+              ${memberActionButtons(m, 'member-actions')}
             </div>
           </div>
           <div class="form-row" style="margin-top:1.2rem;">
