@@ -21,7 +21,7 @@ Routes:
   GET  /api/guild/:id/appeals    — Appeals list
 """
 
-import os, hmac, json, time, hashlib, asyncio, aiohttp, aiofiles, aiosqlite, datetime
+import os, hmac, json, time, hashlib, asyncio, aiohttp, aiofiles, aiosqlite, datetime, traceback
 from pathlib import Path
 from aiohttp import web
 
@@ -98,6 +98,12 @@ def require_auth(func):
         return await func(request)
     return wrapper
 
+def _server_error(request, e: Exception):
+    """500 без подробностей наружу: текст исключения (пути, SQL) — только в лог"""
+    print(f"[API] {request.method} {request.path} · {type(e).__name__}: {e}")
+    traceback.print_exception(e)
+    return web.json_response({'error': 'internal_error'}, status=500)
+
 # ── CORS ──────────────────────────────────────────────────────
 
 def _add_cors(resp, origin: str):
@@ -131,7 +137,7 @@ async def cors_middleware(request: web.Request, handler):
         _add_cors(e, origin)
         raise
     except Exception as e:
-        resp = web.json_response({'error': str(e)}, status=500)
+        resp = _server_error(request, e)
     _add_cors(resp, origin)
     return resp
 
@@ -237,7 +243,9 @@ async def handle_callback(request):
     if WEBSITE_URL:
         import urllib.parse
         base = WEBSITE_URL if WEBSITE_URL.startswith('http') else f'https://{WEBSITE_URL}'
-        raise web.HTTPFound(f"{base}/dashboard?token={urllib.parse.quote(token)}")
+        # Токен во фрагменте (#): браузер не отправляет его на сервер,
+        # поэтому он не попадает в логи запросов и в Referer
+        raise web.HTTPFound(f"{base}/dashboard#token={urllib.parse.quote(token)}")
     else:
         response = web.HTTPFound("/dashboard")
         response.set_cookie('ws_session', token, max_age=30*86400,
@@ -278,7 +286,7 @@ async def api_refresh(request):
         new_token = sign_session(session_data)
         return web.json_response({'token': new_token, 'ok': True})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 # ── API: stats ────────────────────────────────────────────────
 
@@ -294,7 +302,7 @@ async def api_stats(request):
             'status':  'online' if bot.is_ready() else 'connecting',
         })
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 # ── API: me ───────────────────────────────────────────────────
 
@@ -434,7 +442,7 @@ async def api_guild_settings_get(request):
             'quarantine_min_age':     qs_row[2] if qs_row else 7,
         })
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 # ── API: guild settings POST ──────────────────────────────────
 
@@ -556,7 +564,7 @@ async def api_guild_settings_post(request):
 
         return web.json_response({'ok': True})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 # ── API: security toggles POST ────────────────────────────────
 
@@ -587,7 +595,7 @@ async def api_security_save(request):
         await save_security(guild_id, log_ch, sec)
         return web.json_response({'ok': True, 'security': sec})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 @require_auth
 async def api_security_overview(request):
@@ -714,7 +722,7 @@ async def api_threats_save(request):
         await sync_guild(bg)
         return web.json_response({'ok': True, 'threats': modes})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 async def _protection_payload(bg):
     from witness.core import get_tier
@@ -770,7 +778,7 @@ async def api_protection(request):
             await save_security(guild_id, log_ch, sec)
         return web.json_response({'ok': True, **(await _protection_payload(bg))})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 @require_auth
 async def api_alert_resolve(request):
@@ -981,7 +989,7 @@ async def api_activity_token(request):
             token_data = {}
     except Exception as ex:
         print(f"[ACTIVITY] Сеть недоступна при обмене кода: {ex}")
-        return web.json_response({'error': 'network', 'detail': str(ex)}, status=502)
+        return web.json_response({'error': 'network'}, status=502)
 
     if 'access_token' not in token_data:
         # Пишем всё, что вернул Discord — без этого причину не найти
@@ -1055,7 +1063,7 @@ async def api_automation_get(request):
             out['starboard_threshold']= (g[1] if g and g[1] else 3)
             out['birthday_channel']   = str(g[2]) if g and g[2] else ''
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
     return web.json_response(out)
 
 
@@ -1118,7 +1126,7 @@ async def api_automation_post(request):
             cache.pop(guild_id, None)
         return web.json_response({'ok': True})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 
 # ── API: поиск по участнику ───────────────────────────────────
@@ -1293,7 +1301,7 @@ async def api_ban_requests(request):
             async with db.execute(q, args) as c:
                 rows = await c.fetchall()
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
     out = []
     for rid, uid, uname, mid, reason, wc, st, rev, created, reviewed in rows:
@@ -1393,7 +1401,7 @@ async def api_ban_request_action(request):
         return web.json_response({'ok': True, 'status': new_status,
                                   'banned': ban_ok, 'ban_days': ban_days})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 
 # ── API: appeal accept/reject ─────────────────────────────────
@@ -1519,7 +1527,7 @@ async def api_appeal_action(request):
 
         return web.json_response({'ok': True, 'status': new_status})
     except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
+        return _server_error(request, e)
 
 
 # ── API: appeals ──────────────────────────────────────────────
