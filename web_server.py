@@ -1398,7 +1398,7 @@ async def api_appeal_action(request):
         data = await request.json()
     except Exception:
         data = {}
-    note = data.get('note', '')
+    note = str(data.get('note') or '').strip()[:1000]
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -1428,6 +1428,18 @@ async def api_appeal_action(request):
         now = datetime.datetime.utcnow().isoformat()
         new_status = 'accepted' if action == 'accept' else 'rejected'
 
+        # Сначала фиксируем решение. Условие status='pending' не даёт двум
+        # модераторам одновременно принять/отклонить одну апелляцию.
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute("""
+                UPDATE appeals SET status=?, reviewer_id=?,
+                                    reviewer_note=?, reviewed_at=?
+                WHERE id=? AND guild_id=? AND status='pending'
+            """, (new_status, int(s['user_id']), note, now, appeal_id, guild_id))
+            await db.commit()
+            if cur.rowcount == 0:
+                return web.json_response({'error': 'already_reviewed'}, status=400)
+
         # Если accept — пытаемся снять наказание
         if action == 'accept':
             try:
@@ -1450,6 +1462,12 @@ async def api_appeal_action(request):
                             await m.timeout(None, reason=f"Апелляция #{appeal_id}")
                         except Exception:
                             pass
+                    # Мут снят по апелляции — уведомление «мут закончился» не нужно
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute(
+                            "UPDATE active_mutes SET notified=1 WHERE guild_id=? AND user_id=?",
+                            (guild_id, uid))
+                        await db.commit()
                 elif atype == 'WARN':
                     async with aiosqlite.connect(DB_PATH) as db:
                         await db.execute("""
@@ -1463,28 +1481,19 @@ async def api_appeal_action(request):
             except Exception:
                 pass
 
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("""
-                UPDATE appeals SET status=?, reviewer_id=?,
-                                    reviewer_note=?, reviewed_at=?
-                WHERE id=? AND guild_id=?
-            """, (new_status, int(s['user_id']), note, now, appeal_id, guild_id))
-            await db.commit()
-
-        # Уведомляем участника в DM
+        # Как у /appeal accept|reject: запись в историю и DM тем же эмбедом
         try:
-            user = bot.get_user(uid) or await bot.fetch_user(uid)
-            if user:
-                guild_name = bg.name
-                if action == 'accept':
-                    msg = f"✅ Твоя апелляция #{appeal_id} на сервере **{guild_name}** **принята**. Наказание снято."
-                else:
-                    msg = f"❌ Твоя апелляция #{appeal_id} на сервере **{guild_name}** **отклонена**."
-                if note:
-                    msg += f"\n\n**Комментарий:** {note}"
-                await user.send(msg)
-        except Exception:
-            pass
+            from witness.database import add_modlog
+            await add_modlog(guild_id, uid, int(s['user_id']),
+                             'APPEAL_ACCEPTED' if action == 'accept' else 'APPEAL_REJECTED',
+                             f"#{appeal_id}: {note}")
+        except Exception as ex:
+            print(f"[APPEAL] modlog: {ex}")
+        try:
+            from witness.moderation import notify_appeal_result
+            await notify_appeal_result(uid, guild_id, appeal_id, action == 'accept', note)
+        except Exception as ex:
+            print(f"[APPEAL] notify: {ex}")
 
         return web.json_response({'ok': True, 'status': new_status})
     except Exception as e:
@@ -1503,7 +1512,9 @@ async def api_appeals(request):
     if not bg:
         return web.json_response([])
     member = await _get_member(bg, s['user_id'])
-    if not member or not member.guild_permissions.manage_messages:
+    # Как hasPerm() на фронте: Manage Server видит раздел — значит и данные
+    p = member.guild_permissions if member else None
+    if not p or not (p.manage_messages or p.manage_guild):
         return web.json_response({'error': 'Forbidden'}, status=403)
 
     status_filter = request.rel_url.query.get('status', '')
@@ -1512,7 +1523,8 @@ async def api_appeals(request):
             if status_filter:
                 async with db.execute("""
                     SELECT id, user_id, username, action_type, status,
-                           appeal_text, reviewer_note, submitted_at, reviewed_at
+                           original_reason, appeal_text, why_change,
+                           reviewer_note, submitted_at, reviewed_at
                     FROM appeals WHERE guild_id=? AND status=?
                     ORDER BY id DESC LIMIT 50
                 """, (guild_id, status_filter)) as c:
@@ -1520,14 +1532,16 @@ async def api_appeals(request):
             else:
                 async with db.execute("""
                     SELECT id, user_id, username, action_type, status,
-                           appeal_text, reviewer_note, submitted_at, reviewed_at
+                           original_reason, appeal_text, why_change,
+                           reviewer_note, submitted_at, reviewed_at
                     FROM appeals WHERE guild_id=?
                     ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, id DESC
                     LIMIT 50
                 """, (guild_id,)) as c:
                     rows = await c.fetchall()
         result = []
-        for aid, uid, uname, atype, astatus, atext, rnote, sub_at, rev_at in rows:
+        for (aid, uid, uname, atype, astatus, oreason, atext, wchange,
+             rnote, sub_at, rev_at) in rows:
             m = bg.get_member(uid)
             result.append({
                 'id':            aid,
@@ -1535,7 +1549,11 @@ async def api_appeals(request):
                 'username':      m.display_name if m else uname,
                 'action_type':   atype,
                 'status':        astatus,
-                'appeal_text':   atext[:300] if atext else '',
+                # Текст целиком: раньше резался до 300 символов,
+                # и модератор не видел конец объяснения
+                'original_reason': oreason or '',
+                'appeal_text':   atext or '',
+                'why_change':    wchange or '',
                 'reviewer_note': rnote,
                 'submitted_at':  sub_at,
                 'reviewed_at':   rev_at,
