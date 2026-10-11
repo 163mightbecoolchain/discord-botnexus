@@ -1431,7 +1431,7 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Активные наказания</div>
-          <div class="page-subtitle">Кто сейчас в муте или во временном бане</div>
+          <div class="page-subtitle">Кто сейчас в муте или в бане, выданном ботом</div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="loadPunishments()">⟳ Обновить</button>
       </div>
@@ -1445,7 +1445,7 @@ html.theme-anim *::before, html.theme-anim *::after {
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><div><div class="card-title">Временные баны <span class="text-muted" id="punBansCount"></span></div></div></div>
+        <div class="card-head"><div><div class="card-title">Баны <span class="text-muted" id="punBansCount"></span></div></div></div>
         <div class="table-wrap" style="border:0; border-radius:0;">
           <table class="table">
             <thead><tr><th>Участник</th><th>Причина</th><th>Выдал</th><th>До</th><th>Осталось</th><th></th></tr></thead>
@@ -3483,11 +3483,19 @@ function refreshActivePage() {
 // Время в базе — UTC без пояса
 const utcDate = iso => new Date(/[zZ]$|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + 'Z');
 
+// Бан за 3 варна часто ставят на ~10 000 дней — фактически бессрочно
+const FOREVER_MS = 5 * 365 * 864e5;
+const isForever = iso => utcDate(iso) - Date.now() > FOREVER_MS;
+
 function fmtUntil(iso) {
-  return utcDate(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (isForever(iso)) return 'бессрочно';
+  const d = utcDate(iso);
+  return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+    ...(d.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }) });
 }
 
 function timeLeft(iso) {
+  if (isForever(iso)) return '—';
   const mins = Math.round((utcDate(iso) - Date.now()) / 60000);
   if (mins <= 0) return 'истекает';
   if (mins < 60) return `${mins} мин`;
@@ -3531,7 +3539,7 @@ async function loadPunishments() {
       <td class="text-mono text-muted">${fmtUntil(x.until)}</td>
       <td class="text-mono">${timeLeft(x.until)}</td>
       <td>${d.can.unban ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unban')">Разбанить</button>` : ''}</td>
-    </tr>`).join('') : empty(6, 'Временных банов нет');
+    </tr>`).join('') : empty(6, 'Банов нет');
 }
 
 let _currentAppealId = null;
