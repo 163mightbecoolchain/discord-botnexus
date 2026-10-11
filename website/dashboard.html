@@ -2001,7 +2001,9 @@ function showApp() {
 //  INIT
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function init() {
-  const urlToken = new URLSearchParams(window.location.search).get('token');
+  // Токен приходит во фрагменте (#token=), ?token= — от старых версий бота
+  const urlToken = new URLSearchParams(window.location.hash.slice(1)).get('token')
+                || new URLSearchParams(window.location.search).get('token');
   if (urlToken) {
     setToken(urlToken);
     window.history.replaceState({}, '', '/dashboard');
@@ -2064,9 +2066,9 @@ function openGuildPicker() {
       <div class="guild-selector" style="margin: .5rem 0;" onclick="selectGuildById('${g.id}'); closeGuildPicker();">
         <div class="guild-icon">${g.icon
           ? `<img src="https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png" alt="">`
-          : (g.name || '?').charAt(0).toUpperCase()}</div>
+          : escapeHtml((g.name || '?').charAt(0).toUpperCase())}</div>
         <div class="guild-info">
-          <div class="name">${g.name}</div>
+          <div class="name">${escapeHtml(g.name)}</div>
           <div class="members">${g.member_count || 0} участников</div>
         </div>
       </div>
@@ -2226,7 +2228,7 @@ function fillChannelSelects() {
     const current = el.value;
     el.innerHTML = '<option value="">— нет —</option>' +
       _channels.filter(c => c.type === 'text').map(c =>
-        `<option value="${c.id}">#${c.name}</option>`).join('');
+        `<option value="${c.id}">#${escapeHtml(c.name)}</option>`).join('');
     if (current) el.value = current;
   }
 }
@@ -2236,7 +2238,7 @@ function fillRoleSelects() {
   if (!el) return;
   const current = el.value;
   el.innerHTML = '<option value="">— выбери роль —</option>' +
-    _roles.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    _roles.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
   if (current) el.value = current;
 }
 
@@ -2275,6 +2277,9 @@ const LOG_GROUPS = [
 ];
 
 let _secSettings = {};
+// Ключи, изменённые на странице логов. Отправляем только их: _secSettings
+// загружен при выборе сервера и мог устареть (анти-рейд меняется и в «Защите»)
+let _secDirty = new Set();
 
 function renderLogToggles() {
   const box = document.getElementById('logToggles');
@@ -2300,6 +2305,7 @@ function renderLogToggles() {
 
 function toggleLog(key, el) {
   _secSettings[key] = !_secSettings[key];
+  _secDirty.add(key);
   el.classList.toggle('on', !!_secSettings[key]);
 }
 
@@ -2307,7 +2313,7 @@ function toggleLogGroup(gi) {
   const g = LOG_GROUPS[gi];
   // если хоть один выключен — включаем все, иначе выключаем все
   const anyOff = g.items.some(([k]) => !_secSettings[k]);
-  g.items.forEach(([k]) => { _secSettings[k] = anyOff; });
+  g.items.forEach(([k]) => { _secSettings[k] = anyOff; _secDirty.add(k); });
   renderLogToggles();
 }
 
@@ -2340,6 +2346,7 @@ async function loadSettings() {
     setVal('mod-qhours', s.quarantine_hours ?? 24);
 
     _secSettings = s.security || {};
+    _secDirty = new Set();
     renderLogToggles();
 
     csSync();
@@ -2354,7 +2361,7 @@ function renderConfigSummary(s) {
   if (!el) return;
   const chName = id => {
     const c = _channels.find(x => String(x.id) === String(id));
-    return c ? '#' + c.name : '—';
+    return c ? '#' + escapeHtml(c.name) : '—';
   };
   const w3 = {ban: '🔨 Авто-бан ' + (s.ban3_days ?? 30) + ' дн.',
               mute: '🔇 Мут', request: '⚖️ Заявка на бан'}[s.warn3_type ?? 'ban'];
@@ -2364,7 +2371,7 @@ function renderConfigSummary(s) {
     ['3-й варн',         w3],
     ['Карантин',         s.quarantine_enabled ? '✅ вкл · ' + (s.quarantine_min_age ?? 7) + ' дн. мин. возраст' : '⬚ выкл'],
     ['Тикеты',           s.tickets_enabled ? '✅ вкл' : '⬚ выкл'],
-    ['Язык',             {ru:'Русский', en:'English', de:'Deutsch'}[s.lang] || s.lang || 'Русский'],
+    ['Язык',             {ru:'Русский', en:'English', de:'Deutsch'}[s.lang] || escapeHtml(s.lang || 'Русский')],
   ];
   el.innerHTML = '<table class="table">' + rows.map(([k,v]) =>
     `<tr><td style="color:var(--muted); width:40%;">${k}</td><td>${v}</td></tr>`
@@ -2424,14 +2431,22 @@ async function saveLogging() {
     starboard_channel: getVal('log-starboard') || 0,
   }, true);   // тихо — тост покажем один раз в конце
   let okSec = true;
-  try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/security`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(_secSettings)
-    });
-    okSec = r.ok;
-  } catch(e) { okSec = false; }
+  if (_secDirty.size) {
+    const changed = Object.fromEntries([..._secDirty].map(k => [k, !!_secSettings[k]]));
+    try {
+      const r = await apiFetch(`/api/guild/${currentGuild.id}/security`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(changed)
+      });
+      okSec = r.ok;
+      if (r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (d.security) _secSettings = d.security;
+        _secDirty = new Set();
+      }
+    } catch(e) { okSec = false; }
+  }
 
   if (okSettings && okSec) { showToast('✓ Сохранено', 'success'); return true; }
   showToast('Не удалось сохранить часть настроек', 'error');
@@ -2871,7 +2886,13 @@ async function saveProtection() {
     raid_lockdown_minutes: ruleOn('pr-lock') ? getStep('pr-lock', 10) : 0,
     lockdown_min_age: getStep('pr-minage', 7),
   });
-  if (ok) { showToast('✓ Сохранено', 'success'); renderProtection(); }
+  if (ok) {
+    showToast('✓ Сохранено', 'success'); renderProtection();
+    // Анти-рейд есть и среди переключателей логов — держим их в согласии
+    _secSettings.anti_raid = ruleOn('pr-enabled');
+    _secDirty.delete('anti_raid');
+    renderLogToggles();
+  }
   return ok;
 }
 
@@ -3539,7 +3560,7 @@ async function loadBanRequests() {
               ${(b.created_at || '').slice(0,10)}
             </div>
           </div>
-          ${b.status === 'pending' && hasPerm('ban_members') ? `
+          ${b.status === 'pending' && (userPerms.ban_members || userPerms.administrator) ? `
             <div class="flex gap-1" style="margin-top:.9rem; justify-content:flex-end;">
               <button class="btn btn-ghost btn-sm" onclick="reviewBanReq(${b.id}, 'reject')">❌ Отклонить</button>
               <button class="btn btn-danger btn-sm" onclick="reviewBanReq(${b.id}, 'approve')">🔨 Одобрить бан</button>
