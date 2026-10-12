@@ -5,7 +5,7 @@
 import discord
 from discord import app_commands
 import aiosqlite
-import os, asyncio, random, time, json, datetime
+import os, asyncio, random, time, json, datetime, re, difflib
 from datetime import timedelta
 from types import SimpleNamespace
 from .config import (
@@ -678,18 +678,112 @@ async def on_message_delete(message):
 
     queue_log(ch, e)
 
+def _cut_ok(s: str, p: int) -> bool:
+    """Можно ли резать строку в позиции p, не разрывая слово/число (20:00, 1.5к)."""
+    def w(i):
+        return s[i].isalnum() or (s[i] in ":.,/-" and 0 < i < len(s) - 1
+                                  and s[i - 1].isdigit() and s[i + 1].isdigit())
+    return p <= 0 or p >= len(s) or not (w(p - 1) and w(p))
+
+
+def _edit_diff(old: str, new: str, ctx: int = 250, max_len: int = 3500) -> str:
+    """
+    Лог редактирования: каждая изменённая строка сообщения выводится целиком
+    в ansi-блоке, внутри неё удалённое красным, добавленное зелёным.
+    Неизменённые строки пропускаются. Очень длинные строки подрезаются
+    до ctx символов вокруг правок, чтобы не упереться в лимит эмбеда.
+    """
+    if old.split() == new.split():
+        return "*изменены только пробелы/переносы*"
+    RED, GREEN, GREY, RESET = "\x1b[1;31m", "\x1b[1;32m", "\x1b[30m", "\x1b[0m"
+    safe = lambda s: s.replace("```", "ʼʼʼ")
+
+    def plain(s, cut_left=False, cut_right=False):
+        if cut_left and len(s) > ctx:
+            s = "…" + s[-ctx:].split(" ", 1)[-1]
+        if cut_right and len(s) > ctx:
+            s = s[:ctx].rsplit(" ", 1)[0] + "…"
+        if not (cut_left or cut_right) and len(s) > 2 * ctx:
+            s = s[:ctx].rsplit(" ", 1)[0] + " … " + s[-ctx:].split(" ", 1)[-1]
+        return safe(s)
+
+    def mark(s, color):
+        core = s.strip()
+        if not core:
+            return s
+        lead, tail = s[:len(s) - len(s.lstrip())], s[len(s.rstrip()):]
+        return f"{lead}{color}{safe(core)}{RESET}{tail}"
+
+    def merge(a_line, b_line):
+        a = re.findall(r"\S+|\s+", a_line)
+        b = re.findall(r"\S+|\s+", b_line)
+        ops = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+        out = []
+        for k, (op, i1, i2, j1, j2) in enumerate(ops):
+            if op == "equal":
+                out.append(plain("".join(a[i1:i2]), k == 0, k == len(ops) - 1))
+                continue
+            x, y = "".join(a[i1:i2]), "".join(b[j1:j2])
+            # общее начало/конец (до границы слова) не подсвечиваем:
+            # «привет» → «привет, как дела?» красит только «, как дела?»
+            pre = suf = 0
+            while pre < min(len(x), len(y)) and x[pre] == y[pre]:
+                pre += 1
+            while pre and not (_cut_ok(x, pre) and _cut_ok(y, pre)):
+                pre -= 1
+            while suf < min(len(x), len(y)) - pre and x[-1 - suf] == y[-1 - suf]:
+                suf += 1
+            while suf and not (_cut_ok(x, len(x) - suf) and _cut_ok(y, len(y) - suf)):
+                suf -= 1
+            out.append(safe(x[:pre]))
+            x, y, tail = x[pre:len(x) - suf], y[pre:len(y) - suf], x[len(x) - suf:]
+            if x.strip():
+                out.append(mark(x, RED))
+            if y.strip():
+                if x.strip() and not y[:1].isspace():
+                    out.append(" ")
+                out.append(mark(y, GREEN))
+            out.append(safe(tail))
+        return "".join(out).strip()
+
+    a_lines, b_lines = old.split("\n"), new.split("\n")
+    blocks = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False).get_opcodes():
+        if op == "equal":
+            continue
+        olds, news = a_lines[i1:i2], b_lines[j1:j2]
+        n = min(len(olds), len(news))
+        rows = [merge(olds[k], news[k]) for k in range(n)]
+        rows += [f"{RED}{plain(l.strip())}{RESET}" for l in olds[n:] if l.strip()]
+        rows += [f"{GREEN}{plain(l.strip())}{RESET}" for l in news[n:] if l.strip()]
+        rows = [r for r in rows if r]
+        if rows:
+            blocks.append(rows)
+
+    out = []
+    for bi, rows in enumerate(blocks):
+        chunk = ([f"{GREY}⋯{RESET}"] if bi else []) + rows
+        if len("\n".join(out + chunk)) > max_len:
+            out.append(f"{GREY}… и ещё изменённых строк: {sum(len(r) for r in blocks[bi:])}{RESET}")
+            break
+        out += chunk
+    return "```ansi\n" + "\n".join(out) + "\n```"
+
+
 @bot.event
 async def on_message_edit(before, after):
     if before.author.bot or not before.guild or before.content == after.content: return
     ch = await sec_check(before.guild, "msg_edit")
     if not ch: return
     gid9 = before.guild.id
+    delta = len(after.content) - len(before.content)
     e = build_embed(C.WARNING)
-    e.set_author(name=t(gid9, "msg_edited"))
-    e.add_field(name=t(gid9, "member"), value=before.author.mention,        inline=False)
-    e.add_field(name=t(gid9, "was"),    value=before.content[:512] or "—",  inline=False)
-    e.add_field(name=t(gid9, "now"),    value=after.content[:512] or "—",   inline=False)
-    e.add_field(name="Link",            value=f"[Jump]({after.jump_url})",   inline=True)
+    e.set_author(name=t(gid9, "msg_edited"), icon_url=before.author.display_avatar.url)
+    e.description = (
+        f"{before.author.mention} в {getattr(after.channel, 'mention', '#?')} · "
+        f"[перейти]({after.jump_url}) · `{delta:+d} симв.`\n"
+        + _edit_diff(before.content, after.content)
+    )
     queue_log(ch, e)
 
 @bot.event
