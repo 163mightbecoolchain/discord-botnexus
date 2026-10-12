@@ -678,21 +678,26 @@ async def on_message_delete(message):
 
     queue_log(ch, e)
 
-def _edit_diff(old: str, new: str, ctx: int = 6, max_hunks: int = 3, max_len: int = 160) -> str:
+def _edit_diff(old: str, new: str, ctx: int = 6, max_hunks: int = 3, max_len: int = 160):
     """
     Компактный дифф для лога редактирования: только изменённые куски
     с парой слов контекста вокруг, а не всё сообщение целиком.
+    Возвращает (текст, обрезано_ли) — при обрезке полный текст уходит файлом.
     """
     if old.split() == new.split():
-        return "```diff\n# изменены только пробелы/переносы\n```"
+        return "```diff\n# изменены только пробелы/переносы\n```", False
     tok = lambda s: re.findall(r"\S+|\s+", s)     # ctx считается в токенах: 6 ≈ 3 слова
     a, b = tok(old), tok(new)
+    trimmed = False
 
     def clean(parts, cut_left, cut_right):
+        nonlocal trimmed
         s = "".join(parts).replace("```", "ʼʼʼ").replace("\n", " ↵ ")
         s = re.sub(r"\s+", " ", s).strip()
         if len(s) > max_len:
             s = s[:max_len].rstrip() + "…"
+            trimmed = True
+        trimmed |= cut_left or cut_right
         return ("…" if cut_left else "") + s + ("…" if cut_right else "")
 
     groups = list(difflib.SequenceMatcher(None, a, b, autojunk=False).get_grouped_opcodes(ctx))
@@ -705,7 +710,8 @@ def _edit_diff(old: str, new: str, ctx: int = 6, max_hunks: int = 3, max_len: in
             lines.append("+ " + clean(b[j1:j2], j1 > 0, j2 < len(b)))
     if len(groups) > max_hunks:
         lines.append(f"# … и ещё правок: {len(groups) - max_hunks}")
-    return "```diff\n" + "\n".join(lines) + "\n```"
+        trimmed = True
+    return "```diff\n" + "\n".join(lines) + "\n```", trimmed
 
 
 @bot.event
@@ -715,14 +721,27 @@ async def on_message_edit(before, after):
     if not ch: return
     gid9 = before.guild.id
     delta = len(after.content) - len(before.content)
+    diff, trimmed = _edit_diff(before.content, after.content)
+    channel = getattr(after.channel, "mention", "#?")
     e = build_embed(C.WARNING)
     e.set_author(name=t(gid9, "msg_edited"), icon_url=before.author.display_avatar.url)
     e.description = (
-        f"{before.author.mention} в {getattr(after.channel, 'mention', '#?')} · "
-        f"[перейти]({after.jump_url}) · `{delta:+d} симв.`\n"
-        + _edit_diff(before.content, after.content)
+        f"{before.author.mention} в {channel} · "
+        f"[перейти]({after.jump_url}) · `{delta:+d} симв.`\n" + diff
     )
-    queue_log(ch, e)
+    file = None
+    if trimmed:
+        e.description += "\n📎 полный текст — в `edit.txt`"
+        edited_at = (after.edited_at or datetime.datetime.now(datetime.timezone.utc)).strftime("%d.%m.%Y %H:%M:%S UTC")
+        file = ("edit.txt", (
+            f"Автор:  {before.author} ({before.author.id})\n"
+            f"Канал:  #{getattr(after.channel, 'name', '?')}\n"
+            f"Время:  {edited_at}\n"
+            f"Ссылка: {after.jump_url}\n\n"
+            f"===== БЫЛО =====\n{before.content}\n\n"
+            f"===== СТАЛО =====\n{after.content}\n"
+        ).encode("utf-8"))
+    queue_log(ch, e, file)
 
 @bot.event
 async def on_invite_create(invite):

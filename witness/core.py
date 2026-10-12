@@ -6,7 +6,7 @@ import discord
 from discord.ext import commands
 import aiohttp
 import aiosqlite
-import os, asyncio, random, time, json, datetime
+import os, asyncio, random, time, json, datetime, io
 from functools import wraps
 from .config import (
     ANTHROPIC_KEY,
@@ -464,22 +464,24 @@ async def report_error(tag: str, error, context: str = ""):
 #  rate limit Discord (429). Теперь события копятся 3 секунды и
 #  уходят пачками: в одном сообщении помещается до 10 эмбедов.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-_log_queue: dict = {}          # channel_id → [(channel, embed), ...]
+_log_queue: dict = {}          # channel_id → [(channel, embed, file), ...]
 LOG_FLUSH_INTERVAL = 3         # секунд между отправками
 LOG_QUEUE_MAX      = 200       # предохранитель от переполнения памяти
 
 
-def queue_log(channel, embed):
+def queue_log(channel, embed, file=None):
     """
     Ставит эмбед в очередь на отправку. Для частых событий.
     Срочные вещи (анти-нюк, заявки на бан) шлём напрямую через ch.send.
+    file — необязательный (имя, bytes): такой эмбед уходит отдельным
+    сообщением, чтобы вложение не перепуталось с соседними событиями.
     """
     if channel is None:
         return
     q = _log_queue.setdefault(channel.id, [])
     if len(q) >= LOG_QUEUE_MAX:
         return                  # очередь переполнена — молча отбрасываем
-    q.append((channel, embed))
+    q.append((channel, embed, file))
 
 
 async def flush_log_queue():
@@ -490,11 +492,21 @@ async def flush_log_queue():
             _log_queue.pop(ch_id, None)
             continue
         channel = items[0][0]
-        # Discord принимает до 10 эмбедов в одном сообщении
-        batch  = items[:10]
-        _log_queue[ch_id] = items[10:]
+        # Discord принимает до 10 эмбедов в одном сообщении;
+        # эмбед с файлом всегда идёт один, пачка обрывается перед ним
+        n = 1
+        if items[0][2] is None:
+            while n < min(10, len(items)) and items[n][2] is None:
+                n += 1
+        batch  = items[:n]
+        _log_queue[ch_id] = items[n:]
         try:
-            await channel.send(embeds=[e for _, e in batch])
+            file = batch[0][2]
+            if file:
+                await channel.send(embed=batch[0][1],
+                                   file=discord.File(io.BytesIO(file[1]), filename=file[0]))
+            else:
+                await channel.send(embeds=[e for _, e, _ in batch])
         except discord.HTTPException as ex:
             print(f"[LOG_QUEUE] Не отправлено в {ch_id}: {ex}")
         except Exception as ex:
