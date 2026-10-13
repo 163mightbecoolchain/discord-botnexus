@@ -678,96 +678,62 @@ async def on_message_delete(message):
 
     queue_log(ch, e)
 
-def _cut_ok(s: str, p: int) -> bool:
-    """Можно ли резать строку в позиции p, не разрывая слово/число (20:00, 1.5к)."""
-    def w(i):
-        return s[i].isalnum() or (s[i] in ":.,/-" and 0 < i < len(s) - 1
-                                  and s[i - 1].isdigit() and s[i + 1].isdigit())
-    return p <= 0 or p >= len(s) or not (w(p - 1) and w(p))
-
-
 def _edit_diff(old: str, new: str, ctx: int = 250, max_len: int = 3500) -> str:
     """
-    Лог редактирования: каждая изменённая строка сообщения выводится целиком
-    в ansi-блоке, внутри неё удалённое красным, добавленное зелёным.
-    Неизменённые строки пропускаются. Очень длинные строки подрезаются
-    до ctx символов вокруг правок, чтобы не упереться в лимит эмбеда.
+    Лог редактирования: каждая изменённая строка выводится дважды —
+    как была (целиком красная, «-») и как стала (целиком зелёная, «+»).
+    Неизменённые строки пропускаются. В очень длинных строках общее
+    начало/конец сокращается до ctx символов, чтобы влезть в эмбед.
     """
     if old.split() == new.split():
         return "*изменены только пробелы/переносы*"
-    RED, GREEN, GREY, RESET = "\x1b[1;31m", "\x1b[1;32m", "\x1b[30m", "\x1b[0m"
     safe = lambda s: s.replace("```", "ʼʼʼ")
 
-    def plain(s, cut_left=False, cut_right=False):
-        if cut_left and len(s) > ctx:
-            s = "…" + s[-ctx:].split(" ", 1)[-1]
-        if cut_right and len(s) > ctx:
-            s = s[:ctx].rsplit(" ", 1)[0] + "…"
-        if not (cut_left or cut_right) and len(s) > 2 * ctx:
+    def cap(s):
+        if len(s) > 3 * ctx:
             s = s[:ctx].rsplit(" ", 1)[0] + " … " + s[-ctx:].split(" ", 1)[-1]
-        return safe(s)
+        return s
 
-    def mark(s, color):
-        core = s.strip()
-        if not core:
-            return s
-        lead, tail = s[:len(s) - len(s.lstrip())], s[len(s.rstrip()):]
-        return f"{lead}{color}{safe(core)}{RESET}{tail}"
-
-    def merge(a_line, b_line):
-        a = re.findall(r"\S+|\s+", a_line)
-        b = re.findall(r"\S+|\s+", b_line)
-        ops = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
-        out = []
-        for k, (op, i1, i2, j1, j2) in enumerate(ops):
-            if op == "equal":
-                out.append(plain("".join(a[i1:i2]), k == 0, k == len(ops) - 1))
-                continue
-            x, y = "".join(a[i1:i2]), "".join(b[j1:j2])
-            # общее начало/конец (до границы слова) не подсвечиваем:
-            # «привет» → «привет, как дела?» красит только «, как дела?»
-            pre = suf = 0
-            while pre < min(len(x), len(y)) and x[pre] == y[pre]:
-                pre += 1
-            while pre and not (_cut_ok(x, pre) and _cut_ok(y, pre)):
-                pre -= 1
-            while suf < min(len(x), len(y)) - pre and x[-1 - suf] == y[-1 - suf]:
-                suf += 1
-            while suf and not (_cut_ok(x, len(x) - suf) and _cut_ok(y, len(y) - suf)):
-                suf -= 1
-            out.append(safe(x[:pre]))
-            x, y, tail = x[pre:len(x) - suf], y[pre:len(y) - suf], x[len(x) - suf:]
-            if x.strip():
-                out.append(mark(x, RED))
-            if y.strip():
-                if x.strip() and not y[:1].isspace():
-                    out.append(" ")
-                out.append(mark(y, GREEN))
-            out.append(safe(tail))
-        return "".join(out).strip()
+    def shorten(x, y):
+        # одинаковые начало и конец строк режем по одному месту в обеих
+        pre = 0
+        while pre < min(len(x), len(y)) and x[pre] == y[pre]:
+            pre += 1
+        suf = 0
+        while suf < min(len(x), len(y)) - pre and x[-1 - suf] == y[-1 - suf]:
+            suf += 1
+        if suf > ctx:
+            q = x.rfind(" ", len(x) - suf, len(x) - suf + ctx)
+            if q != -1:
+                drop = len(x) - q
+                x, y = x[:q] + " …", y[:len(y) - drop] + " …"
+        if pre > ctx:
+            q = x.find(" ", pre - ctx, pre)
+            if q != -1:
+                x, y = "… " + x[q + 1:], "… " + y[q + 1:]
+        return cap(x), cap(y)
 
     a_lines, b_lines = old.split("\n"), new.split("\n")
     blocks = []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a_lines, b_lines, autojunk=False).get_opcodes():
         if op == "equal":
             continue
-        olds, news = a_lines[i1:i2], b_lines[j1:j2]
-        n = min(len(olds), len(news))
-        rows = [merge(olds[k], news[k]) for k in range(n)]
-        rows += [f"{RED}{plain(l.strip())}{RESET}" for l in olds[n:] if l.strip()]
-        rows += [f"{GREEN}{plain(l.strip())}{RESET}" for l in news[n:] if l.strip()]
-        rows = [r for r in rows if r]
+        olds = [l.strip() for l in a_lines[i1:i2]]
+        news = [l.strip() for l in b_lines[j1:j2]]
+        for k in range(min(len(olds), len(news))):
+            olds[k], news[k] = shorten(olds[k], news[k])
+        rows = ["- " + safe(cap(l)) for l in olds if l] + ["+ " + safe(cap(l)) for l in news if l]
         if rows:
             blocks.append(rows)
 
     out = []
     for bi, rows in enumerate(blocks):
-        chunk = ([f"{GREY}⋯{RESET}"] if bi else []) + rows
+        chunk = (["⋯"] if bi else []) + rows
         if len("\n".join(out + chunk)) > max_len:
-            out.append(f"{GREY}… и ещё изменённых строк: {sum(len(r) for r in blocks[bi:])}{RESET}")
+            out.append(f"# … и ещё изменённых строк: {sum(len(r) for r in blocks[bi:])}")
             break
         out += chunk
-    return "```ansi\n" + "\n".join(out) + "\n```"
+    return "```diff\n" + "\n".join(out) + "\n```"
 
 
 @bot.event
