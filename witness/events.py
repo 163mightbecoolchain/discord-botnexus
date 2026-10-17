@@ -5,7 +5,8 @@
 import discord
 from discord import app_commands
 import aiosqlite
-import os, asyncio, random, time, json, datetime, re, difflib
+import os, io, asyncio, random, time, json, datetime, re, difflib
+from collections import OrderedDict
 from datetime import timedelta
 from types import SimpleNamespace
 from .config import (
@@ -192,6 +193,8 @@ async def on_message(message):
             bot.dispatch("member_join", message.author)
         return
     if message.author.bot or not message.guild: return
+    if message.attachments:
+        asyncio.create_task(_cache_attachments(message))
     gid, uid = message.guild.id, message.author.id
     # Счётчик активности по часам для /serverstats. Раньше жил в отдельном
     # "on_message_for_stats", но такого события в Discord нет — он не вызывался.
@@ -637,18 +640,124 @@ async def on_audit_log_entry_create(entry):
     await on_member_update(before, after)
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  КЭШ ВЛОЖЕНИЙ ДЛЯ ЛОГА УДАЛЕНИЙ
+#  После удаления сообщения Discord почти сразу закрывает доступ
+#  к его файлам на CDN, поэтому скачивать их в on_message_delete
+#  уже поздно. Файлы скачиваются заранее, когда сообщение пришло
+#  (только на серверах с включённым логом удалений), и лежат в
+#  памяти. Общий объём ограничен, старые файлы вытесняются первыми.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_media_cache: "OrderedDict[int, list]" = OrderedDict()   # message_id → {attachment_id: bytes}
+_media_cache_bytes = 0
+MEDIA_CACHE_MAX   = int(os.getenv("DELETED_MEDIA_CACHE_MB", "200")) * 1024 * 1024
+MEDIA_FILE_MAX    = 25 * 1024 * 1024    # больше бот всё равно не загрузит
+
+
+async def _cache_attachments(message):
+    global _media_cache_bytes
+    try:
+        if not await sec_check(message.guild, "msg_delete"):
+            return
+        limit = min(MEDIA_FILE_MAX, message.guild.filesize_limit)
+        files = {}
+        for att in message.attachments:
+            if att.size > limit:
+                continue
+            try:
+                files[att.id] = await att.read()
+            except discord.HTTPException:
+                pass
+        if not files:
+            return
+        _media_cache[message.id] = files
+        _media_cache_bytes += sum(map(len, files.values()))
+        while _media_cache_bytes > MEDIA_CACHE_MAX and _media_cache:
+            _, old = _media_cache.popitem(last=False)
+            _media_cache_bytes -= sum(map(len, old.values()))
+    except Exception as ex:
+        print(f"[MEDIA_CACHE] {ex}")
+
+
+def _pop_cached_media(message_id):
+    global _media_cache_bytes
+    files = _media_cache.pop(message_id, None) or {}
+    _media_cache_bytes -= sum(map(len, files.values()))
+    return files
+
+
+async def _send_deleted_media(ch, message, embed):
+    """
+    Отправляет эмбед удаления вместе с файлами. Чего нет в кэше, пробуем
+    скачать через media-прокси Discord — для картинок он иногда ещё отдаёт.
+    Файлы делятся на сообщения по 10 штук и по лимиту размера сервера.
+    """
+    cached = _pop_cached_media(message.id)
+    limit = min(MEDIA_FILE_MAX, ch.guild.filesize_limit)
+    files, lost, shown = [], [], False
+    for att in message.attachments:
+        data = cached.get(att.id)
+        if data is None:
+            try:
+                data = await att.read(use_cached=True)
+            except discord.HTTPException:
+                pass
+        if data is None or len(data) > limit:
+            lost.append(f"`{att.filename}` ({att.size / 1024 / 1024:.1f} МБ)")
+            continue
+        files.append((att.filename, data, att.is_spoiler()))
+        # Первую картинку показываем прямо в эмбеде. Имя заменяем на
+        # уникальное ASCII: attachment:// не находит файлы с пробелами,
+        # кириллицей и повторяющимися именами. Спойлеры не раскрываем.
+        if (not shown and not att.is_spoiler()
+                and (att.content_type or "").startswith("image/")):
+            name = f"deleted_{att.id}{os.path.splitext(att.filename)[1].lower()}"
+            files[-1] = (name, data, False)
+            files.insert(0, files.pop())        # в первую пачку, к эмбеду
+            embed.set_image(url=f"attachment://{name}")
+            shown = True
+
+    if lost:
+        embed.add_field(name="📎 Не удалось сохранить",
+                        value="\n".join(lost)[:1020], inline=False)
+
+    batches, cur, cur_size = [], [], 0
+    for f in files:
+        if cur and (len(cur) == 10 or cur_size + len(f[1]) > limit):
+            batches.append(cur); cur, cur_size = [], 0
+        cur.append(f); cur_size += len(f[1])
+    if cur:
+        batches.append(cur)
+
+    try:
+        first = batches[0] if batches else []
+        await ch.send(embed=embed, files=[discord.File(io.BytesIO(d), filename=n, spoiler=s) for n, d, s in first])
+        for batch in batches[1:]:
+            await ch.send(files=[discord.File(io.BytesIO(d), filename=n, spoiler=s) for n, d, s in batch])
+    except discord.HTTPException as ex:
+        print(f"[MSG_DELETE] media send failed: {ex}")
+        embed.set_image(url=None)             # без файла картинка не откроется
+        queue_log(ch, embed)
+
+
 @bot.event
 async def on_message_delete(message):
-    if message.author.bot or not message.guild: return
+    if message.author.bot or not message.guild:
+        _pop_cached_media(message.id)
+        return
     ch = await sec_check(message.guild, "msg_delete")
-    if not ch: return
+    if not ch:
+        _pop_cached_media(message.id)
+        return
     gid8 = message.guild.id
     e = build_embed(C.DANGER)
     e.set_author(name=t(gid8, "msg_deleted"))
     e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
     e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
-    no_text = "*(attachment)*" if intents.message_content else "*(текст недоступен без Message Content Intent)*"
-    e.add_field(name=t(gid8, "text"),    value=message.content[:1020] or no_text,                         inline=False)
+    # Без текста, но с вложениями поле не нужно: файлы идут следом
+    if message.content or not message.attachments or not intents.message_content:
+        no_text = "*(attachment)*" if intents.message_content else "*(текст недоступен без Message Content Intent)*"
+        e.add_field(name=t(gid8, "text"), value=message.content[:1020] or no_text, inline=False)
 
     # Если к сообщению была прикреплена ветка — добавляем ссылку
     if message.guild:
@@ -676,7 +785,10 @@ async def on_message_delete(message):
             except Exception:
                 pass
 
-    queue_log(ch, e)
+    if message.attachments:
+        await _send_deleted_media(ch, message, e)
+    else:
+        queue_log(ch, e)
 
 def _edit_diff(old: str, new: str, ctx: int = 250, max_len: int = 3500) -> str:
     """
