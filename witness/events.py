@@ -694,7 +694,7 @@ async def _send_deleted_media(ch, message, embed):
     """
     cached = _pop_cached_media(message.id)
     limit = min(MEDIA_FILE_MAX, ch.guild.filesize_limit)
-    files, lost = [], []
+    files, lost, shown = [], [], False
     for att in message.attachments:
         data = cached.get(att.id)
         if data is None:
@@ -706,6 +706,16 @@ async def _send_deleted_media(ch, message, embed):
             lost.append(f"`{att.filename}` ({att.size / 1024 / 1024:.1f} МБ)")
             continue
         files.append((att.filename, data, att.is_spoiler()))
+        # Первую картинку показываем прямо в эмбеде. Имя заменяем на
+        # уникальное ASCII: attachment:// не находит файлы с пробелами,
+        # кириллицей и повторяющимися именами. Спойлеры не раскрываем.
+        if (not shown and not att.is_spoiler()
+                and (att.content_type or "").startswith("image/")):
+            name = f"deleted_{att.id}{os.path.splitext(att.filename)[1].lower()}"
+            files[-1] = (name, data, False)
+            files.insert(0, files.pop())        # в первую пачку, к эмбеду
+            embed.set_image(url=f"attachment://{name}")
+            shown = True
 
     if lost:
         embed.add_field(name="📎 Не удалось сохранить",
@@ -726,6 +736,7 @@ async def _send_deleted_media(ch, message, embed):
             await ch.send(files=[discord.File(io.BytesIO(d), filename=n, spoiler=s) for n, d, s in batch])
     except discord.HTTPException as ex:
         print(f"[MSG_DELETE] media send failed: {ex}")
+        embed.set_image(url=None)             # без файла картинка не откроется
         queue_log(ch, embed)
 
 
@@ -743,8 +754,10 @@ async def on_message_delete(message):
     e.set_author(name=t(gid8, "msg_deleted"))
     e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
     e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
-    no_text = "*(attachment)*" if intents.message_content else "*(текст недоступен без Message Content Intent)*"
-    e.add_field(name=t(gid8, "text"),    value=message.content[:1020] or no_text,                         inline=False)
+    # Без текста, но с вложениями поле не нужно: файлы идут следом
+    if message.content or not message.attachments or not intents.message_content:
+        no_text = "*(attachment)*" if intents.message_content else "*(текст недоступен без Message Content Intent)*"
+        e.add_field(name=t(gid8, "text"), value=message.content[:1020] or no_text, inline=False)
 
     # Если к сообщению была прикреплена ветка — добавляем ссылку
     if message.guild:
