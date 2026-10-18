@@ -3,9 +3,10 @@
 
 Все пороги и ответные действия — из настроек сервера (database.get_protection),
 их меняют в дашборде. Здесь:
-  • handle_join — локдаун (кик слишком новых аккаунтов) и анти-рейд: при волне
-    входов действие применяется ко всем участникам волны, а не только к последним,
-    и на заданное время включается авто-локдаун;
+  • handle_join — локдаун (кик слишком новых аккаунтов), анти-рейд и фильтр входа
+    (guard.join_filter). При волне входов действие применяется ко всем участникам
+    волны, а не только к последним, на заданное время включается авто-локдаун,
+    а guard.on_raid по желанию приостанавливает инвайты и удаляет инвайт волны;
   • журнал аудита — удаления каналов и ролей, создание вебхуков (лимиты анти-нюка),
     добавление ботов и выдача опасных прав (алерт или откат).
 """
@@ -91,6 +92,19 @@ async def handle_join(member) -> bool:
             except discord.HTTPException:
                 pass
 
+    if await _raid_check(member):
+        return True
+    # Фильтр входа (witness/guard.py) — для тех, кого не тронул анти-рейд
+    if member.id in _raid_handled.get(gid, ()):
+        return False
+    from .guard import join_filter
+    return await join_filter(member)
+
+
+async def _raid_check(member) -> bool:
+    """Анти-рейд. True — участник удалён."""
+    guild = member.guild
+    gid = guild.id
     if not (await get_tier(gid) >= TIER_PREMIUM and await is_enabled(gid, "anti_raid")):
         return False
     cfg = await get_protection(gid)
@@ -154,6 +168,10 @@ async def handle_join(member) -> bool:
         e.add_field(name="Входов", value=f"{len(wave)} за {cfg['raid_window']} сек.", inline=True)
         e.add_field(name="Участники волны", value=f"{done} {action_txt[cfg['raid_action']]}", inline=True)
         e.add_field(name="Авто-локдаун", value=until_txt, inline=False)
+        from .guard import on_raid
+        extra = await on_raid(guild, cfg)
+        if extra:
+            e.add_field(name="Ещё", value="\n".join(extra)[:1024], inline=False)
         await _notify(guild, e, "raid", "CRITICAL", 0,
                       f"Анти-рейд: {len(wave)} входов за {cfg['raid_window']} сек.",
                       {"source": "antiraid", "joined": len(wave), "handled": done}, dm_owner=True)

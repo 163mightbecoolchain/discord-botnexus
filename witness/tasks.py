@@ -109,6 +109,9 @@ async def memory_cleanup_loop(bot_instance):
             stale_sc = [k for k, v in _settings_cache.items()
                         if now - v.get("ts", 0) > _SETTINGS_TTL * 2]
             for k in stale_sc: _settings_cache.pop(k, None)
+            # Счётчики дубликатов и «нагрева» (witness/guard.py)
+            from .guard import cleanup_memory
+            cleanup_memory()
             # ── Очистка старых данных (раз в сутки) ─────────────
             if not hasattr(bot, '_last_db_cleanup') or                time.time() - bot._last_db_cleanup > 86400:
                 bot._last_db_cleanup = time.time()

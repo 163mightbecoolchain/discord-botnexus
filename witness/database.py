@@ -149,6 +149,17 @@ async def db_init():
             CREATE INDEX IF NOT EXISTS idx_modlog
                 ON modlog(guild_id, user_id);
 
+            -- Заметки модераторов об участнике (участник их не видит)
+            CREATE TABLE IF NOT EXISTS mod_notes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                user_id     INTEGER NOT NULL,
+                mod_id      INTEGER NOT NULL,
+                text        TEXT NOT NULL,
+                created_at  TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_mod_notes
+                ON mod_notes(guild_id, user_id);
+
             -- Временные баны
             CREATE TABLE IF NOT EXISTS temp_bans (
                 guild_id    INTEGER NOT NULL,
@@ -454,17 +465,47 @@ PROTECTION_DEFAULTS = {
     "raid_action": "kick",
     "raid_lockdown_minutes": 10,
     "warn_expiry_days": 0,
+    # Дополнительная защита (witness/guard.py). Всё выключено, пока не включат в дашборде.
+    # trap_* — канал-ловушка: кто туда пишет, тот спам-бот или взломан.
+    "trap_enabled": False, "trap_channel": "", "trap_action": "softban",
+    # dup_* — одно и то же сообщение в нескольких каналах подряд (типичный взломанный аккаунт).
+    "dup_enabled": False, "dup_count": 3, "dup_window": 30, "dup_timeout": 10,
+    # phishdb_mode — проверка ссылок по открытым базам фишинговых доменов.
+    "phishdb_mode": "off",
+    # joinfilter_* — проверка при входе всегда, а не только в локдаун.
+    "joinfilter_enabled": False, "joinfilter_age": 3, "joinfilter_noavatar": False,
+    "joinfilter_action": "alert",
+    # Ответ на рейд: удалить инвайт волны, приостановить инвайты/ЛС через Discord.
+    "raid_invite_delete": False,
+    "incident_enabled": False, "incident_minutes": 60, "incident_dms": False,
+    # heat_* — очки подозрительности за сообщения, сгорают со временем.
+    "heat_enabled": False, "heat_level": "medium", "heat_timeout": 5,
+    # Кейсы и заметки, режим наблюдения, кнопка «Отменить», ИИ-разбор жалоб,
+    # проверка модераторов фильтрами (взломанный модератор).
+    "cases_enabled": False, "observe_mode": False, "undo_buttons": False,
+    "ai_reports": False, "mod_guard": False,
 }
 PROTECTION_CHOICES = {
     "antinuke_action": ("alert", "strip", "strip_timeout"),
     "bot_add": ("off", "alert", "kick"),
     "escalation": ("off", "alert", "revert"),
     "raid_action": ("alert", "kick", "quarantine"),
+    "trap_action": ("softban", "timeout", "ban"),
+    "phishdb_mode": ("off", "alert", "block"),
+    "joinfilter_action": ("alert", "quarantine", "kick"),
+    "heat_level": ("low", "medium", "high"),
 }
+PROTECTION_BOOLS = (
+    "antinuke_enabled", "trap_enabled", "dup_enabled", "joinfilter_enabled",
+    "joinfilter_noavatar", "raid_invite_delete", "incident_enabled", "incident_dms",
+    "heat_enabled", "cases_enabled", "observe_mode", "undo_buttons", "ai_reports", "mod_guard",
+)
 # (минимум, максимум) для чисел; лимиты анти-нюка — те же для всех действий
 PROTECTION_RANGES = {
     "raid_joins": (3, 100), "raid_window": (3, 120), "raid_lockdown_minutes": (0, 1440),
     "warn_expiry_days": (0, 3650), "limit_count": (2, 100), "limit_window": (5, 600),
+    "dup_count": (2, 10), "dup_window": (5, 300), "dup_timeout": (1, 10080),
+    "joinfilter_age": (0, 365), "incident_minutes": (10, 1440), "heat_timeout": (1, 1440),
 }
 _protection_cache: dict = {}
 
@@ -481,14 +522,18 @@ def _clean_protection(data, base):
     out = json.loads(json.dumps(base))
     if not isinstance(data, dict):
         return out
-    if "antinuke_enabled" in data:
-        out["antinuke_enabled"] = bool(data["antinuke_enabled"])
+    for k in PROTECTION_BOOLS:
+        if k in data:
+            out[k] = bool(data[k])
     for k, choices in PROTECTION_CHOICES.items():
         if data.get(k) in choices:
             out[k] = data[k]
-    for k in ("raid_joins", "raid_window", "raid_lockdown_minutes", "warn_expiry_days"):
-        if k in data:
+    for k in PROTECTION_RANGES:
+        if k in data and k in out:
             out[k] = _clamp(data[k], *PROTECTION_RANGES[k], out[k])
+    if "trap_channel" in data:
+        v = str(data["trap_channel"] or "")
+        out["trap_channel"] = v if v.isdigit() else ""
     if isinstance(data.get("limits"), dict):
         for act, cur in out["limits"].items():
             v = data["limits"].get(act)
@@ -610,14 +655,15 @@ def invalidate_settings_cache(gid: int):
 
 async def add_modlog(guild_id: int, user_id: int, mod_id: int,
                      action: str, reason: str = "", duration: str = ""):
-    """Записывает действие модератора в историю"""
+    """Записывает действие модератора в историю. Возвращает номер записи (кейса)."""
     now = datetime.datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+        cur = await db.execute(
             "INSERT INTO modlog (guild_id,user_id,mod_id,action,reason,duration,created_at) VALUES (?,?,?,?,?,?,?)",
             (guild_id, user_id, mod_id, action, reason, duration, now)
         )
         await db.commit()
+        return cur.lastrowid
 
 
 async def get_punishment_settings(gid: int) -> dict:

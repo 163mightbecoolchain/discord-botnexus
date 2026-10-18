@@ -248,6 +248,67 @@
     'AutoMod: фишинг-ссылка заблокирована': 'AutoMod: phishing link blocked',
     'AutoMod: подозрение на фишинг/скам': 'AutoMod: suspected phishing/scam',
     'AutoMod: подозрение на спам': 'AutoMod: suspected spam',
+    'Сообщение в канале-ловушке': 'Message in the trap channel',
+
+    // Дополнительная защита: ответ на рейд, фильтр входа, взломанные аккаунты
+    'и удалить инвайт, по которому шла волна': 'and delete the invite the wave came through',
+    'и приостановить вход по инвайтам на': 'and pause joining by invites for',
+    'а заодно и личные сообщения между участниками сервера': 'and also direct messages between server members',
+    'Пауза — штатная функция Discord, как «Приостановить приглашения» в настройках сервера. Не дольше суток, снимается сама':
+      'The pause is a built-in Discord feature, like “Pause invites” in server settings. At most a day, lifts on its own',
+    'Фильтр входа': 'Join filter',
+    'Проверка каждого нового участника — всегда, а не только в локдаун': 'Checks every new member — always, not only during lockdown',
+    'Если аккаунту меньше': 'If the account is younger than', 'или у него нет аватарки': 'or it has no avatar',
+    'Что делать с новым участником': 'What to do with the new member', 'Без аватарки': 'No avatar',
+    '0 дней — возраст не проверяется. Владелец и доверенные роли анти-нюка не проверяются':
+      '0 days — age is not checked. The owner and anti-nuke trusted roles are not checked',
+    'Взломанные аккаунты и спам': 'Compromised accounts and spam',
+    'Ловят типичную рассылку со взломанного аккаунта: скам-ссылки, @everyone, одно и то же во все каналы':
+      'Catch the typical spam from a hijacked account: scam links, @everyone, the same message in every channel',
+    'Если кто-то напишет в канал-ловушку': 'If someone posts in the trap channel', '— выбери канал —': '— choose a channel —',
+    'Канал-ловушка': 'Trap channel', 'Софтбан': 'Softban', 'Таймаут на сутки': 'Time out for a day', 'Бан': 'Ban',
+    'Создай отдельный канал с подписью «Не пишите сюда — бан». Люди туда не пишут, а спам-боты и взломанные аккаунты пишут во все каналы подряд. Софтбан — бан и сразу разбан: сообщения за сутки удаляются, а владелец аккаунта может вернуться, когда восстановит его. Бот пришлёт ему в ЛС, как это сделать':
+      'Create a separate channel labelled “Don’t post here — ban”. People don’t post there, but spam bots and hijacked accounts post in every channel. Softban is a ban followed by an unban: the last day of messages is deleted, and the owner can come back once they recover the account. The bot DMs them how to do that',
+    'Если одно и то же сообщение придёт': 'If the same message arrives', 'раз за': 'times within',
+    'сек в разные каналы': 's in different channels', 'удалить копии и таймаут на': 'delete the copies and time out for',
+    'Одинаковые сообщения в разных каналах': 'Same message in different channels',
+    'Нагрев за частые сообщения, чувствительность': 'Heat for rapid posting, sensitivity',
+    'Каждое сообщение даёт очки — ссылки, упоминания, @everyone и вложения больше, — и со временем они остывают. Перегрелся — таймаут, повторно за сутки — вдвое дольше':
+      'Every message adds points — links, mentions, @everyone and attachments add more — and they cool down over time. Overheat means a timeout, twice as long for each repeat within a day',
+    'Нагрев': 'Heat', 'Чувствительность нагрева': 'Heat sensitivity',
+    'Низкая': 'Low', 'Средняя': 'Medium', 'Высокая': 'High', 'таймаут на': 'time out for',
+    'Если ссылка есть в базах фишинга': 'If a link is in the phishing lists',
+    'Проверка по базам фишинга': 'Phishing list check', 'Что делать со ссылкой из базы': 'What to do with a listed link',
+    'Удалить сообщение': 'Delete the message',
+    'Открытые базы Sinking Yachts и Discord-AntiScam (≈45 тыс. доменов, обновляются раз в 6 ч) скачиваются целиком, ссылки проверяются у бота — никуда не отправляются. Роли и каналы из карточки «Исключения» выше действуют и здесь (кроме ловушки)':
+      'The open Sinking Yachts and Discord-AntiScam lists (≈45k domains, refreshed every 6 h) are downloaded whole and links are checked by the bot — they are not sent anywhere. Roles and channels from the “Exemptions” card above apply here too (except the trap)',
+    'Для всех фильтров на этой карточке': 'For all filters on this card',
+    'Проверять и модераторов': 'Check moderators too',
+    'Их аккаунты тоже взламывают. Модератора бот не банит: только таймаут и сообщение владельцу сервера':
+      'Their accounts get hijacked too. The bot never bans a moderator: only a timeout and a message to the server owner',
+    'Проверять модераторов': 'Check moderators', 'Режим наблюдения': 'Observe mode',
+    'Режим наблюдения — никого не наказывать, только писать в лог': 'Observe mode — punish no one, only log',
+    'В логе видно, что было бы сделано, — удобно, чтобы сначала подобрать пороги. Действует и на «Фильтр входа», и на паузу инвайтов и удаление инвайта при рейде':
+      'The log shows what would have been done — handy for tuning thresholds first. Also covers the “Join filter” and the invite pause and invite deletion during a raid',
+    'Канал-ловушка не выбран — ловушка не сработает': 'No trap channel selected — the trap will not work',
+
+    // Инструменты модераторов, заметки
+    'Инструменты модераторов': 'Moderator tools',
+    'Кейсы, заметки, отмена авто-наказаний и подсказки ИИ по жалобам': 'Cases, notes, undoing auto-punishments and AI hints on reports',
+    'Кейсы и заметки': 'Cases and notes', 'У каждой записи в': 'Every entry in',
+    'и в «Поиске участника» — номер кейса.': 'and in “Member lookup” gets a case number.',
+    'показывает кейс и меняет причину,': 'shows a case and edits its reason,',
+    '— заметки об участнике, которые видят только модераторы': '— notes about a member that only moderators see',
+    'Кнопка «Отменить» в логах': '“Undo” button in logs', 'Кнопка Отменить': 'Undo button',
+    'Под логом автоматического таймаута, бана или карантина (ловушка, нагрев, фильтр входа и т.п.) — кнопка, которая снимает наказание':
+      'Under the log of an automatic timeout, ban or quarantine (trap, heat, join filter, etc.) — a button that lifts the punishment',
+    'ИИ-разбор жалоб': 'AI report triage', 'К жалобе из': 'A report from',
+    'добавляется оценка ИИ: приоритет, токсичность, угрозы, спам. Текст сообщения, на которое пожаловались, отправляется в Groq или Google Gemini. Наказывает всегда модератор':
+      'gets an AI assessment: priority, toxicity, threats, spam. The text of the reported message is sent to Groq or Google Gemini. A moderator always makes the call',
+    'Заметки модераторов': 'Moderator notes', 'Участник их не видит. В Discord —': 'The member cannot see them. In Discord —',
+    'Заметок пока нет': 'No notes yet', 'Новая заметка': 'New note', 'Добавить': 'Add', 'Удалить': 'Delete',
+    'Например: предупреждён устно в войсе': 'For example: warned verbally in voice',
+    'Напиши текст заметки': 'Write the note text',
   };
 
   // Строки с числами и вставками: [шаблон, замена]
