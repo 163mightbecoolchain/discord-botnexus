@@ -341,6 +341,28 @@ tr.resolved td { opacity: .55; }
 .search-result { padding: .6rem .75rem; border-radius: 7px; cursor: pointer; display: flex; align-items: center; gap: .7rem; border: 1px solid transparent; }
 .search-result:hover { background: var(--panel-2); border-color: var(--border-2); }
 .search-result img { width: 30px; height: 30px; border-radius: 50%; }
+.search-result .av-empty { width: 30px; height: 30px; border-radius: 50%; background: var(--bg-3); flex-shrink: 0; }
+/* Правки сообщений */
+.edit-item { padding: .9rem 1.4rem; border-top: 1px solid var(--border); cursor: copy; transition: background .12s; }
+.edit-item:hover { background: rgba(var(--accent-rgb), .04); }
+.edit-item:first-child { border-top: 0; }
+.edit-meta { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; font-size: .75rem; color: var(--muted); margin-bottom: .45rem; }
+.edit-go { margin-left: auto; display: flex; gap: .35rem; align-items: center; cursor: default; }
+.edit-go a, .edit-go button { font: inherit; font-size: .72rem; font-weight: 600; padding: .22rem .6rem; border-radius: 6px;
+  border: 1px solid var(--border-2); background: var(--bg-3); color: var(--text-2); text-decoration: none; cursor: pointer; }
+.edit-go a:hover, .edit-go button:hover { border-color: var(--accent); color: var(--accent); }
+.edit-go .go-app { background: rgba(var(--accent-rgb), .12); border-color: transparent; color: var(--accent); }
+.edit-text, .edit-tag { cursor: text; }
+.edit-line { display: grid; grid-template-columns: 3.4rem 1fr; gap: .6rem; font-size: .86rem; line-height: 1.5; padding: .3rem 0; }
+.edit-line + .edit-line { border-top: 1px dashed var(--border); }
+.edit-tag { font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: .15rem; }
+.edit-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.edit-after .edit-text { color: var(--text); }
+.edit-text del { background: rgba(255,84,112,.18); color: var(--danger); text-decoration: line-through; border-radius: 3px; }
+.edit-text ins { background: rgba(var(--accent-rgb), .16); color: var(--accent); text-decoration: none; border-radius: 3px; }
+.edit-unknown { color: var(--muted); font-style: italic; }
+.edit-divider { padding: .6rem 1.4rem; font-size: .72rem; font-family: var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--bg-3); border-top: 1px solid var(--border); }
+.edit-more { padding: .9rem 1.4rem; border-top: 1px solid var(--border); text-align: center; }
 .member-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .member-av { width: 64px; height: 64px; border-radius: 50%; background: var(--bg-3); overflow: hidden; flex-shrink: 0; }
 .member-av img { width: 100%; height: 100%; object-fit: cover; }
@@ -646,6 +668,9 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="nav-label">Данные</div>
       <div class="nav-item" data-perm="manage_messages" data-page="member" onclick="showPage('member')">
         <span class="icon">🔍</span> Поиск участника
+      </div>
+      <div class="nav-item" data-perm="manage_messages|moderate_members|ban_members" data-page="edits" onclick="showPage('edits')">
+        <span class="icon">✏️</span> Правки сообщений
       </div>
       <div class="nav-item" data-perm="manage_messages" data-page="modlog" onclick="showPage('modlog')">
         <span class="icon">📋</span> Mod Log
@@ -1554,6 +1579,69 @@ html.theme-anim *::before, html.theme-anim *::after {
       </div>
     </div></div>
 
+    <!-- ПРАВКИ СООБЩЕНИЙ -->
+    <div id="content-edits" class="page"><div class="page-inner">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Правки сообщений</div>
+          <div class="page-subtitle">Что участник писал до правки и что после</div>
+        </div>
+      </div>
+
+      <div class="card" data-perm="manage_guild">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Запись правок</div>
+            <div class="card-desc" id="edState">Выключено — бот ничего не записывает</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="rule" data-rule="ed-on">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Записывать правки" onclick="toggleRule(this)"></div>
+            <span>Записывать правки сообщений и хранить</span>
+            <span class="stepper" data-step="ed-days" data-min="7" data-max="730"></span>
+            <span>дн.</span>
+          </div>
+          <div class="input-help">
+            Последние 100 правок каждого участника открываются сразу, более старые уходят в архив — отдельный файл,
+            который не нагружает основную базу и подгружается по кнопке. Правки старше срока удаляются.
+            Текст «до» бот знает, если видел сообщение недавно; для старых сообщений он может быть неизвестен
+          </div>
+          <div class="rule-group-title" style="margin-top:1rem;">Прошлые правки</div>
+          <div style="display:flex; gap:.75rem; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-ghost btn-sm" id="edImportBtn" onclick="btnBusy(this, startEditImport)">Загрузить из лог-канала за 90 дней</button>
+            <span class="input-help" id="edImportState" style="margin:0;"></span>
+          </div>
+          <div class="input-help">
+            Бот прочитает свои логи «Редактирование» в лог-канале и добавит найденные правки. Повторный запуск не создаёт дублей.
+            В логе часто только изменённые строки — такие правки помечены «фрагмент»
+          </div>
+        </div>
+        <div class="card-foot" style="justify-content:space-between;">
+          <button class="btn btn-ghost btn-sm" onclick="clearEdits(null)">Очистить всю историю</button>
+          <button class="btn btn-primary" onclick="btnBusy(this, saveEditSettings)">Сохранить</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="search-bar" style="margin:0;">
+            <input type="text" class="input" id="edSearch" aria-label="Ник или ID участника"
+                   placeholder="Ник или ID участника..." oninput="debounceEditSearch()">
+            <button class="btn btn-ghost btn-sm" onclick="clearEditSearch()">Сбросить</button>
+          </div>
+          <div id="edResults" style="margin-top:.6rem;"></div>
+        </div>
+      </div>
+
+      <div id="edBox">
+        <div class="empty">
+          <div class="empty-title">Найди участника</div>
+          <div class="empty-sub">Введи ник или ID — найдутся и те, кто уже ушёл с сервера</div>
+        </div>
+      </div>
+    </div></div>
+
     <!-- MODLOG -->
     <div id="content-modlog" class="page">
       <div class="page-head">
@@ -2447,6 +2535,7 @@ async function showPage(name) {
 
   if (name === 'overview') await loadOverview();
   if (name === 'modlog') await loadModlog();
+  if (name === 'edits') await loadEditSettings();
   if (name === 'punish') await loadPunishments();
   if (name === 'appeals') { await loadAppeals(); }
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
@@ -4052,6 +4141,10 @@ async function openMember(uid) {
           ${m.active_mute ? `<div class="form-group"><label>Активный мут до</label>
             <div class="text-mono">${m.active_mute.until.slice(0,16).replace('T',' ')}</div>
             <div class="input-help">${escapeHtml(m.active_mute.reason || '')}</div></div>` : ''}
+          ${m.edits ? `<div class="form-group"><label>Правки сообщений</label>
+            <div>${m.edits.recent + m.edits.archive ? `${m.edits.recent + m.edits.archive} ·
+              <a href="#" style="color:var(--accent);" onclick="event.preventDefault(); goEdits('${uid}', ${escapeHtml(JSON.stringify(m.name || String(uid)))})">открыть →</a>`
+              : '<span class="text-muted">нет</span>'}</div></div>` : ''}
           ${m.roles && m.roles.length ? `<div class="form-group" style="margin:0;"><label>Роли</label>
             <div class="member-chips">${roleChips(m)}</div></div>` : ''}
         </div>
@@ -4142,13 +4235,327 @@ async function memberNote(uid, payload) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ПРАВКИ СООБЩЕНИЙ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _ed = null;              // { uid, name, q, recent, archive, more, counts, enabled }
+let _edTimer = null, _edFilterTimer = null;
+
+async function loadEditSettings() {
+  if (!currentGuild || !hasPerm('manage_guild')) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/protection`);
+    if (!r.ok) return;
+    _prot = await r.json();
+    renderEditSettings();
+    pollEditImport();
+  } catch(e) {}
+}
+
+function renderEditSettings() {
+  initSteppers(document.getElementById('content-edits'));
+  setRule('ed-on', _prot.edits_enabled);
+  setStep('ed-days', _prot.edits_keep_days || 180);
+  document.getElementById('edState').textContent = _prot.edits_enabled
+    ? `Включено — правки хранятся ${_prot.edits_keep_days} дн.`
+    : 'Выключено — бот ничего не записывает';
+}
+
+const IMPORT_ERRORS = {
+  no_log_channel: 'Лог-канал не настроен', no_history_access: 'У бота нет доступа к истории лог-канала',
+  edits_disabled: 'Сначала включи и сохрани запись правок', failed: 'Не удалось — попробуй позже',
+};
+let _edImportTimer = null;
+
+function renderImportState(s) {
+  const el = document.getElementById('edImportState');
+  const btn = document.getElementById('edImportBtn');
+  if (!el) return;
+  if (s.running) {
+    el.textContent = `Идёт загрузка… просмотрено сообщений: ${s.scanned}, найдено правок: ${s.found}`;
+  } else if (s.error) {
+    el.textContent = IMPORT_ERRORS[s.error] || ('Ошибка: ' + s.error);
+  } else if (s.finished_at) {
+    el.textContent = `Готово: просмотрено ${s.scanned}, добавлено правок: ${s.imported}`;
+  } else {
+    el.textContent = '';
+  }
+  if (btn) btn.disabled = !!s.running;
+}
+
+async function pollEditImport() {
+  clearTimeout(_edImportTimer);
+  if (!currentGuild || !hasPerm('manage_guild')) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits/import`);
+    if (!r.ok) return;
+    const s = await r.json();
+    renderImportState(s);
+    if (s.running) _edImportTimer = setTimeout(pollEditImport, 2000);
+    else if (s.finished_at && _ed && _edImportWatching) { _edImportWatching = false; openEdits(_ed.uid, _ed.name); }
+  } catch(e) {}
+}
+let _edImportWatching = false;
+
+async function startEditImport() {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits/import`, { method: 'POST' });
+    const s = await r.json().catch(() => ({}));
+    if (!r.ok) { showToast(IMPORT_ERRORS[s.error] || 'Не удалось запустить', 'error'); return false; }
+    _edImportWatching = true;
+    renderImportState(s);
+    _edImportTimer = setTimeout(pollEditImport, 1500);
+    return true;
+  } catch(e) { showToast('Ошибка соединения', 'error'); return false; }
+}
+
+async function saveEditSettings() {
+  const ok = await postProtection({ edits_enabled: ruleOn('ed-on'), edits_keep_days: getStep('ed-days', 180) });
+  if (ok) { showToast('✓ Сохранено', 'success'); renderEditSettings(); }
+  return ok;
+}
+
+async function clearEdits(uid) {
+  const who = uid ? `участника ${_ed?.name || uid}` : 'всего сервера';
+  const ok = await askAction({
+    title: `Удалить историю правок ${who}?`,
+    sub: 'Записи удалятся и из основной базы, и из архива. Вернуть их будет нельзя.',
+    okText: 'Удалить', danger: true, reason: null });
+  if (!ok) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits/clear`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(uid ? {user: uid} : {})
+    });
+    if (!r.ok) { showToast('Не удалось удалить', 'error'); return; }
+    const d = await r.json();
+    showToast(`✓ Удалено записей: ${d.deleted}`, 'success');
+    if (_ed && (!uid || uid === _ed.uid)) openEdits(_ed.uid, _ed.name);
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+}
+
+function debounceEditSearch() {
+  clearTimeout(_edTimer);
+  _edTimer = setTimeout(runEditSearch, 350);
+}
+
+async function runEditSearch() {
+  const q = (document.getElementById('edSearch')?.value || '').trim();
+  const box = document.getElementById('edResults');
+  if (!box || !currentGuild) return;
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits/authors?q=${encodeURIComponent(q)}`);
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) { box.innerHTML = '<div class="input-help">Никого не найдено</div>'; return; }
+    box.innerHTML = rows.map(m => `
+      <div class="search-result" onclick="openEdits('${m.id}', ${escapeHtml(JSON.stringify(m.name))})">
+        ${m.avatar ? `<img src="${m.avatar}" alt="">` : '<span class="av-empty"></span>'}
+        <div style="flex:1;">
+          <div style="font-weight:600; font-size:.88rem;">${escapeHtml(m.name)}</div>
+          <div style="font-size:.75rem; color:var(--muted);" class="text-mono">${escapeHtml(m.tag)}</div>
+        </div>
+        ${m.on_server ? '' : '<span class="chip">не на сервере</span>'}
+        <span class="chip ${m.count ? 'ok' : ''}">${m.count ? `правок: ${m.count}` : 'правок нет'}</span>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+function clearEditSearch() {
+  const inp = document.getElementById('edSearch');
+  if (inp) { inp.value = ''; inp.focus(); }
+  document.getElementById('edResults').innerHTML = '';
+  _ed = null;
+  document.getElementById('edBox').innerHTML = `
+    <div class="empty">
+      <div class="empty-title">Найди участника</div>
+      <div class="empty-sub">Введи ник или ID — найдутся и те, кто уже ушёл с сервера</div>
+    </div>`;
+}
+
+// Из досье участника: сразу открыть его правки
+async function goEdits(uid, name) {
+  await showPage('edits');
+  openEdits(uid, name);
+}
+
+async function openEdits(uid, name, q = '') {
+  const box = document.getElementById('edBox');
+  document.getElementById('edResults').innerHTML = '';
+  if (!q) box.innerHTML = skeletonCards(2);
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits?user=${uid}&q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    _ed = { uid: String(uid), name: name || String(uid), q, recent: d.items, archive: [], more: false,
+            archiveOpen: false, counts: d.counts, enabled: d.enabled };
+    renderEdits();
+  } catch(e) {
+    box.innerHTML = `<div class="empty"><div class="empty-title">Не удалось загрузить</div>
+      <div class="empty-sub">${escapeHtml(String(e.message || e))}</div></div>`;
+  }
+}
+
+async function loadEditArchive() {
+  if (!_ed) return;
+  const last = _ed.archive[_ed.archive.length - 1];
+  const before = last ? `&before_at=${encodeURIComponent(last.edited_at)}&before_id=${last.id}` : '';
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits?user=${_ed.uid}&source=archive` +
+                             `&q=${encodeURIComponent(_ed.q)}${before}`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    _ed.archive.push(...d.items);
+    _ed.more = d.more;
+    _ed.archiveOpen = true;
+    renderEdits();
+  } catch(e) { showToast('Не удалось загрузить архив', 'error'); }
+}
+
+function filterEdits(inp) {
+  clearTimeout(_edFilterTimer);
+  _edFilterTimer = setTimeout(() => _ed && openEdits(_ed.uid, _ed.name, inp.value.trim()), 400);
+}
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
+
+// Пословный diff: удалённое — <del>, добавленное — <ins>
+function wordDiff(oldText, newText) {
+  const A = oldText.split(/(\s+)/).filter(Boolean), B = newText.split(/(\s+)/).filter(Boolean);
+  let p = 0;
+  while (p < A.length && p < B.length && A[p] === B[p]) p++;
+  let s = 0;
+  while (s < A.length - p && s < B.length - p && A[A.length - 1 - s] === B[B.length - 1 - s]) s++;
+  const a = A.slice(p, A.length - s), b = B.slice(p, B.length - s);
+  let mid = [];
+  if (a.length * b.length > 200000) {
+    mid = [...a.map(t => ['-', t]), ...b.map(t => ['+', t])];      // огромный текст — без LCS
+  } else {
+    const n = a.length, m = b.length;
+    const L = Array.from({length: n + 1}, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--)
+      for (let j = m - 1; j >= 0; j--)
+        L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { mid.push(['=', a[i]]); i++; j++; }
+      else if (L[i + 1][j] >= L[i][j + 1]) mid.push(['-', a[i++]]);
+      else mid.push(['+', b[j++]]);
+    }
+    while (i < n) mid.push(['-', a[i++]]);
+    while (j < m) mid.push(['+', b[j++]]);
+  }
+  const ops = [...A.slice(0, p).map(t => ['=', t]), ...mid, ...A.slice(A.length - s).map(t => ['=', t])];
+  const side = (keep, tag) => {
+    let out = '', run = '', cur = null;
+    const flush = () => { if (run) out += cur === '=' ? escapeHtml(run) : `<${tag}>${escapeHtml(run)}</${tag}>`; run = ''; };
+    for (const [op, t] of ops) {
+      if (op !== '=' && op !== keep) continue;
+      // пробелы внутри изменённого куска не разрывают подсветку
+      const kind = op === '=' && /^\s+$/.test(t) && cur === keep ? keep : op;
+      if (kind !== cur) { flush(); cur = kind; }
+      run += t;
+    }
+    flush();
+    return out;
+  };
+  return { before: side('-', 'del'), after: side('+', 'ins') };
+}
+
+async function copyMsgLink(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch (e) {
+    const t = document.createElement('textarea');
+    t.value = url; document.body.appendChild(t); t.select();
+    document.execCommand('copy'); t.remove();
+  }
+  showToast('✓ Ссылка скопирована — вставь её в любой чат Discord и нажми', 'success');
+}
+
+// Клик по правке копирует ссылку — кроме кнопок и случаев, когда выделяют текст
+function editItemClick(ev, el) {
+  if (ev.target.closest('a, button, .edit-go')) return;
+  if (String(window.getSelection() || '').trim()) return;
+  copyMsgLink(el.dataset.url);
+}
+
+function editItemHtml(it) {
+  const when = new Date(it.edited_at + 'Z').toLocaleString('ru-RU',
+    {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'});
+  const diff = it.before == null ? null : wordDiff(it.before, it.after);
+  // discord:// открывает сообщение сразу в приложении (ПК и телефон), https — в браузере
+  const app = it.url.replace('https://discord.com/', 'discord://-/');
+  return `
+    <div class="edit-item" data-url="${it.url}" onclick="editItemClick(event, this)"
+         title="Нажми, чтобы скопировать ссылку на сообщение">
+      <div class="edit-meta">
+        <span>${it.channel ? '#' + escapeHtml(it.channel) : 'канал удалён'}</span>
+        <span class="text-mono">${when}</span>
+        ${it.source === 'log' ? '<span class="chip" title="Восстановлено из лог-канала">из лога</span>' : ''}
+        ${it.partial ? '<span class="chip warn" title="В логе была только часть текста — изменённые строки">фрагмент</span>' : ''}
+        <span class="edit-go">
+          <a class="go-app" href="${app}" title="Открыть сообщение в приложении Discord">Открыть в Discord</a>
+          <a href="${it.url}" target="_blank" rel="noopener" title="Открыть сообщение в браузере">в браузере ↗</a>
+          <button type="button" onclick="copyMsgLink('${it.url}')" title="Скопировать ссылку на сообщение">Копировать ссылку</button>
+        </span>
+      </div>
+      <div class="edit-line edit-before"><span class="edit-tag">было</span>
+        <div class="edit-text">${diff ? (diff.before || '<span class="edit-unknown">пусто</span>')
+          : '<span class="edit-unknown">неизвестно — сообщение старше памяти бота</span>'}</div></div>
+      <div class="edit-line edit-after"><span class="edit-tag">стало</span>
+        <div class="edit-text">${diff ? (diff.after || '<span class="edit-unknown">пусто</span>')
+          : escapeHtml(it.after) || '<span class="edit-unknown">пусто</span>'}</div></div>
+    </div>`;
+}
+
+function renderEdits() {
+  const e = _ed, c = e.counts || {recent: 0, archive: 0};
+  const box = document.getElementById('edBox');
+  const filterVal = document.getElementById('edFilter')?.value ?? e.q;
+  const hadFocus = document.activeElement?.id === 'edFilter';
+  let list = e.recent.map(editItemHtml).join('');
+  if (!e.recent.length) list = `<div class="empty" style="padding:1.5rem;"><div class="empty-sub">${
+    e.q ? 'Среди последних правок такого текста нет' :
+    e.enabled ? 'Правок пока нет' : 'Правок нет — запись выключена'}</div></div>`;
+  if (e.archiveOpen) {
+    list += `<div class="edit-divider">Архив</div>` + (e.archive.length ? e.archive.map(editItemHtml).join('')
+      : `<div class="empty" style="padding:1.5rem;"><div class="empty-sub">В архиве ничего не найдено</div></div>`);
+  }
+  const canMore = e.archiveOpen ? e.more : c.archive > 0;
+  if (canMore) list += `<div class="edit-more"><button class="btn btn-ghost btn-sm"
+      onclick="btnBusy(this, loadEditArchive)">${e.archiveOpen ? 'Загрузить ещё из архива' :
+      `Открыть архив · ${c.archive} ${plural(c.archive, 'правка', 'правки', 'правок')}`}</button></div>`;
+  box.innerHTML = `
+    <div class="card">
+      <div class="card-head" style="flex-wrap:wrap; gap:.75rem;">
+        <div>
+          <div class="card-title">${escapeHtml(e.name)}</div>
+          <div class="card-desc">Последних правок: ${c.recent}${c.archive ? ` · в архиве: ${c.archive}` : ''}</div>
+        </div>
+        <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+          <input type="text" class="input" id="edFilter" style="width:220px;" placeholder="Искать в тексте..."
+                 aria-label="Искать в тексте правок" value="${escapeHtml(filterVal)}" oninput="filterEdits(this)">
+          ${hasPerm('manage_guild') ? `<button class="btn btn-ghost btn-sm" onclick="clearEdits('${e.uid}')">Удалить правки</button>` : ''}
+        </div>
+      </div>
+      <div>${list}</div>
+    </div>`;
+  if (hadFocus) {
+    const f = document.getElementById('edFilter');
+    f.focus(); f.setSelectionRange(f.value.length, f.value.length);
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  КОМАНДНАЯ ПАЛИТРА (Ctrl+K)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const CMDK_PAGES = [
   ['overview','📊','Обзор'], ['general','⚙️','Общие'],
   ['logging','📝','Логирование'], ['moderation','⚖️','Модерация'],
   ['automation','🤖','Автоматизация'], ['security','🛡️','Безопасность'],
-  ['member','🔍','Поиск участника'], ['modlog','📋','Mod Log'],
+  ['member','🔍','Поиск участника'], ['edits','✏️','Правки сообщений'], ['modlog','📋','Mod Log'],
   ['appeals','⚖️','Апелляции'], ['banreq','🔨','Заявки на бан'],
   ['invites','🔗','Инвайты'],
   ['appearance','🎨','Внешний вид'],

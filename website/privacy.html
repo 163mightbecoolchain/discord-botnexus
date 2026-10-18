@@ -131,6 +131,8 @@ footer a:hover { color: var(--accent); }
       <strong>Главное.</strong> Witness не строит профили пользователей и не хранит переписку.
       Текст сообщений бот читает только для модерации: проверки на фишинг и скам,
       логов удалённых и изменённых сообщений и команд, которые участник вызывает сам.
+      Единственное исключение — история правок: если администратор сервера её включил,
+      бот хранит текст отредактированных сообщений до и после правки (см. ниже).
       Данные не продаются и не используются для рекламы или обучения моделей.
     </p>
   </div>
@@ -174,6 +176,16 @@ footer a:hover { color: var(--accent); }
     <li>
       <strong>Логи сервера.</strong> Если администратор включил логирование, текст удалённых
       и изменённых сообщений отправляется в лог-канал этого же сервера. В базу бота он не записывается.
+    </li>
+    <li>
+      <strong>История правок сообщений</strong> (если администратор её включил). Когда участник
+      редактирует сообщение, бот сохраняет: текст до и после правки, ID и ник автора, канал, ID сообщения и время.
+      Последние 100 правок каждого участника лежат в основной базе, более старые — в отдельном файле-архиве
+      на том же томе. Всё удаляется по истечении срока, который выбрал сервер (от 7 до 730 дней, по умолчанию 180),
+      а также по кнопке «Очистить» в панели. Видят правки только модераторы этого сервера. Бот записывает
+      правки, сделанные после включения функции. Кроме того, по запросу администратора он может один раз
+      загрузить прошлые правки за последние 90 дней из собственных логов редактирования в лог-канале этого
+      сервера — только то, что в этих логах уже было. Неотредактированные сообщения не сохраняются.
     </li>
   </ul>
 
@@ -225,6 +237,7 @@ footer a:hover { color: var(--accent); }
     <tr><td>Журнал приглашений</td><td>90 дней</td></tr>
     <tr><td>Автоматические записи модерации</td><td>180 дней</td></tr>
     <tr><td>Заметки модераторов</td><td>Пока их не удалит модератор</td></tr>
+    <tr><td>История правок сообщений</td><td>Срок, выбранный сервером: 7–730 дней (по умолчанию 180)</td></tr>
     <tr><td>Хеши и счётчики фильтров спама (в памяти)</td><td>До 5 минут / до суток</td></tr>
     <tr><td>Закрытые тикеты</td><td>60 дней</td></tr>
     <tr><td>Выполненные напоминания</td><td>7 дней</td></tr>
@@ -312,6 +325,8 @@ footer a:hover { color: var(--accent); }
       <strong>In short.</strong> Witness does not build user profiles and does not store conversations.
       The bot reads message content only for moderation: phishing and scam detection,
       logs of deleted and edited messages, and commands that a member runs themselves.
+      The one exception is edit history: if a server administrator turns it on, the bot keeps
+      the text of edited messages before and after the edit (see below).
       Data is never sold and is not used for advertising or for training any models.
     </p>
   </div>
@@ -355,6 +370,16 @@ footer a:hover { color: var(--accent); }
     <li>
       <strong>Server logs.</strong> If an administrator enables logging, the text of deleted and
       edited messages is posted to that server's log channel. It is not written to the bot's database.
+    </li>
+    <li>
+      <strong>Message edit history</strong> (if an administrator turns it on). When a member edits a message,
+      the bot stores the text before and after the edit, the author's ID and name, the channel, the message ID and the time.
+      The last 100 edits of each member are kept in the main database, older ones in a separate archive file
+      on the same volume. Everything is deleted after the period the server chose (7 to 730 days, 180 by default)
+      or with the “Clear” button in the dashboard. Only that server's moderators can see edits. The bot records
+      edits made after the feature was turned on. In addition, at an administrator's request it can once load
+      past edits from the last 90 days out of its own edit logs in that server's log channel — only what those
+      logs already contained. Unedited messages are never stored.
     </li>
   </ul>
 
@@ -406,6 +431,7 @@ footer a:hover { color: var(--accent); }
     <tr><td>Invite log</td><td>90 days</td></tr>
     <tr><td>Automatic moderation records</td><td>180 days</td></tr>
     <tr><td>Moderator notes</td><td>Until a moderator deletes them</td></tr>
+    <tr><td>Message edit history</td><td>The period chosen by the server: 7–730 days (180 by default)</td></tr>
     <tr><td>Spam filter hashes and counters (in memory)</td><td>Up to 5 minutes / up to a day</td></tr>
     <tr><td>Closed tickets</td><td>60 days</td></tr>
     <tr><td>Completed reminders</td><td>7 days</td></tr>

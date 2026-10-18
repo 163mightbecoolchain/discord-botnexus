@@ -1382,7 +1382,121 @@ async def api_member_lookup(request):
     except Exception as ex:
         print(f"[LOOKUP] notes: {ex}")
 
+    # Сколько правок сообщений записано (ссылка на «Правки сообщений»)
+    out['edits'] = None
+    try:
+        from witness.database import get_protection
+        if (await get_protection(guild_id))['edits_enabled']:
+            from witness.edits import counts
+            out['edits'] = await counts(guild_id, uid)
+    except Exception as ex:
+        print(f"[LOOKUP] edits: {ex}")
+
     return web.json_response(out)
+
+
+# ── API: история правок сообщений (witness/edits.py) ─────────
+
+async def _edits_guard(request, need_manage=False):
+    """(guild, None) или (None, ответ с ошибкой). Смотреть — модераторам, чистить — Manage Server."""
+    bot = request.app['bot']
+    bg  = bot.get_guild(int(request.match_info['guild_id']))
+    if not bg:
+        return None, web.json_response({'error': 'Guild not found'}, status=404)
+    me = await _get_member(bg, request['session']['user_id'])
+    p  = me.guild_permissions if me else None
+    ok = p and ((p.manage_guild or p.administrator) if need_manage else
+                (p.manage_messages or p.moderate_members or p.ban_members or p.administrator or p.manage_guild))
+    if not ok:
+        return None, web.json_response({'error': 'Forbidden'}, status=403)
+    return bg, None
+
+
+@require_auth
+async def api_edit_authors(request):
+    """GET /api/guild/:id/edits/authors?q=ник — участники с правками: и с сервера, и ушедшие"""
+    bg, err = await _edits_guard(request)
+    if err:
+        return err
+    q = (request.query.get('q') or '').strip()
+    if len(q) < 2:
+        return web.json_response([])
+    from witness import edits
+    out = {}
+    for uid, name, _ in await edits.authors(bg.id, q):
+        m = bg.get_member(uid)
+        n = sum((await edits.counts(bg.id, uid)).values())     # вместе с архивом
+        out[str(uid)] = {'id': str(uid), 'name': m.display_name if m else name, 'tag': str(m) if m else name,
+                         'avatar': m.display_avatar.url if m else '', 'count': n, 'on_server': bool(m)}
+    # Участники сервера, которые подходят по нику, но правок пока нет
+    ql = q.lower()
+    for m in bg.members:
+        if len(out) >= 20:
+            break
+        if str(m.id) not in out and not m.bot and (ql in m.display_name.lower() or ql in m.name.lower()):
+            out[str(m.id)] = {'id': str(m.id), 'name': m.display_name, 'tag': str(m),
+                              'avatar': m.display_avatar.url, 'count': 0, 'on_server': True}
+    return web.json_response(sorted(out.values(), key=lambda x: -x['count']))
+
+
+@require_auth
+async def api_edits(request):
+    """GET /api/guild/:id/edits?user=ID&source=recent|archive&before_at=&before_id=&q=текст"""
+    bg, err = await _edits_guard(request)
+    if err:
+        return err
+    try:
+        uid = int(request.query.get('user') or 0)
+        before_id = int(request.query.get('before_id') or 0)
+    except ValueError:
+        return web.json_response({'error': 'bad_request'}, status=400)
+    if not uid:
+        return web.json_response({'error': 'user_required'}, status=400)
+    q = (request.query.get('q') or '').strip()[:100]
+    from witness import edits
+    from witness.database import get_protection
+    if request.query.get('source') == 'archive':
+        before_at = (request.query.get('before_at') or '')[:40]
+        items, more = await edits.archived(bg.id, uid, q, before_at, before_id)
+    else:
+        items, more = await edits.recent(bg.id, uid, q), False
+    for it in items:
+        ch = bg.get_channel(int(it['channel_id']))
+        it['channel'] = ch.name if ch else ''
+        it['url'] = f"https://discord.com/channels/{bg.id}/{it['channel_id']}/{it['message_id']}"
+    cfg = await get_protection(bg.id)
+    return web.json_response({'items': items, 'more': more, 'counts': await edits.counts(bg.id, uid),
+                              'enabled': cfg['edits_enabled'], 'keep_days': cfg['edits_keep_days']})
+
+
+@require_auth
+async def api_edits_clear(request):
+    """POST /api/guild/:id/edits/clear — {"user": ID} очистить участника, {} — весь сервер"""
+    bg, err = await _edits_guard(request, need_manage=True)
+    if err:
+        return err
+    try:
+        data = await request.json()
+        uid = int(data.get('user') or 0) if isinstance(data, dict) else 0
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+    from witness import edits
+    return web.json_response({'ok': True, 'deleted': await edits.clear(bg.id, uid or None)})
+
+
+@require_auth
+async def api_edits_import(request):
+    """GET — статус импорта из лог-канала, POST — запустить (Manage Server, запись правок включена)"""
+    bg, err = await _edits_guard(request, need_manage=True)
+    if err:
+        return err
+    from witness import edits
+    from witness.database import get_protection
+    if request.method == 'POST':
+        if not (await get_protection(bg.id))['edits_enabled']:
+            return web.json_response({'error': 'edits_disabled'}, status=400)
+        edits.start_import(bg)
+    return web.json_response(edits.import_status(bg.id))
 
 
 @require_auth
@@ -1975,6 +2089,11 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/member/{uid}',          api_member_lookup),
         ('POST', '/guild/{guild_id}/member/{uid}/action',   api_member_action),
         ('POST', '/guild/{guild_id}/member/{uid}/notes',    api_member_notes),
+        ('GET',  '/guild/{guild_id}/edits/authors',         api_edit_authors),
+        ('GET',  '/guild/{guild_id}/edits',                 api_edits),
+        ('POST', '/guild/{guild_id}/edits/clear',           api_edits_clear),
+        ('GET',  '/guild/{guild_id}/edits/import',          api_edits_import),
+        ('POST', '/guild/{guild_id}/edits/import',          api_edits_import),
         ('GET',  '/guild/{guild_id}/punishments',           api_punishments),
         ('POST', '/guild/{guild_id}/alerts/resolve',        api_alerts_resolve),
         ('GET',  '/guild/{guild_id}/banrequests',           api_ban_requests),
