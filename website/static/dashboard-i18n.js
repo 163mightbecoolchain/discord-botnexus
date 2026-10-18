@@ -341,7 +341,7 @@
     'Прошлые правки': 'Past edits', 'Загрузить из лог-канала за 90 дней': 'Load from the log channel (90 days)',
     'Бот прочитает свои логи «Редактирование» в лог-канале и добавит найденные правки. Повторный запуск не создаёт дублей. В логе часто только изменённые строки — такие правки помечены «фрагмент»':
       'The bot will read its “Message edited” logs in the log channel and add the edits it finds. Running it again creates no duplicates. Logs often contain only the changed lines — such edits are marked “fragment”',
-    'из лога': 'from log', 'фрагмент': 'fragment', 'Лог-канал не настроен': 'Log channel is not set',
+    'из лога': 'from log', 'фрагмент': 'fragment', 'Всё из архива — в карточках выше': 'Everything from the archive is in the cards above', 'Лог-канал не настроен': 'Log channel is not set',
     'У бота нет доступа к истории лог-канала': 'The bot cannot read the log channel history',
     'Сначала включи и сохрани запись правок': 'Turn on and save edit recording first',
     'Не удалось — попробуй позже': 'Failed — try again later', 'Не удалось запустить': 'Could not start',
@@ -368,6 +368,9 @@
     [/^код (\d+)$/, (m, n) => `code ${n}`],
     [/^Лимит: (.+)$/, (m, x) => `Limit: ${tr(x)}`],
     [/^правок: (\d+)$/, (m, n) => `edits: ${n}`],
+    [/^правка (\d+)$/, (m, n) => `edit ${n}`],
+    [/^(\d+) (?:правка|правки|правок)$/, (m, n) => `${n} edits`],
+    [/^⋯ (\d+) (?:строка|строки|строк) без изменений$/, (m, n) => `⋯ ${n} unchanged lines`],
     [/^Идёт загрузка… просмотрено сообщений: (\d+), найдено правок: (\d+)$/, (m, a, b) => `Loading… messages scanned: ${a}, edits found: ${b}`],
     [/^Готово: просмотрено (\d+), добавлено правок: (\d+)$/, (m, a, b) => `Done: scanned ${a}, edits added: ${b}`],
     [/^Последних правок: (\d+)(?: · в архиве: (\d+))?$/, (m, n, a) => `Recent edits: ${n}` + (a ? ` · archived: ${a}` : '')],
