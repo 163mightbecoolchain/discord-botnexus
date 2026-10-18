@@ -294,7 +294,23 @@
 
     // Инструменты модераторов, заметки
     'Инструменты модераторов': 'Moderator tools',
-    'Кейсы, заметки, отмена авто-наказаний и подсказки ИИ по жалобам': 'Cases, notes, undoing auto-punishments and AI hints on reports',
+    'Защита модераторов': 'Moderator protection',
+    '🔒 Апелляцию на бан принимает или отклоняет только модератор с правом «Банить участников». Ответить участнику можно выше':
+      '🔒 Only a moderator with the “Ban Members” permission can accept or reject a ban appeal. You can reply to the member above',
+    'Модератора нельзя замутить, заварнить или забанить — это может только владелец сервера или доверенная роль из «Безопасность → Анти-нюк → Не проверять». Таймаут модератору, выданный прямо в Discord, бот снимет. Наказать самого себя нельзя всегда':
+      'A moderator cannot be muted, warned or banned — only the server owner or a trusted role from “Security → Anti-nuke → Don’t check” can do that. A timeout given to a moderator directly in Discord is lifted by the bot. Punishing yourself is never allowed',
+    'Модератора может наказать только владелец сервера или доверенная роль': 'Only the server owner or a trusted role can punish a moderator',
+    'Модератор — наказать может только владелец или доверенная роль': 'Moderator — only the owner or a trusted role can punish',
+    // Переписка по апелляции
+    'Переписка с участником': 'Conversation with the member',
+    'Ответить участнику — решение пока не принимается': 'Reply to the member — no decision yet',
+    'Например: пришли скриншот переписки. Бот отправит в ЛС с кнопкой «Ответить»': 'For example: send a screenshot of the chat. The bot DMs it with a “Reply” button',
+    '💬 Отправить ответ': '💬 Send reply', '👤 Участник': '👤 Member', '💬 новый ответ': '💬 new reply',
+    'Комментарий к решению (опционально)': 'Comment on the decision (optional)',
+    'Напиши текст ответа': 'Write the reply text', 'Апелляция уже рассмотрена': 'The appeal has already been reviewed',
+    'Не удалось отправить': 'Could not send', '✓ Ответ отправлен участнику в ЛС': '✓ Reply sent to the member’s DMs',
+    'Ответ сохранён, но у участника закрыты ЛС — он его не увидит': 'Reply saved, but the member’s DMs are closed — they won’t see it',
+    'Защита модераторов, кейсы, заметки, отмена авто-наказаний и подсказки ИИ по жалобам': 'Moderator protection, cases, notes, undoing auto-punishments and AI hints on reports',
     'Кейсы и заметки': 'Cases and notes', 'У каждой записи в': 'Every entry in',
     'и в «Поиске участника» — номер кейса.': 'and in “Member lookup” gets a case number.',
     'показывает кейс и меняет причину,': 'shows a case and edits its reason,',

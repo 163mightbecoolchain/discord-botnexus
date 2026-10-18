@@ -25,7 +25,7 @@ import discord
 from discord import app_commands
 
 from .config import DB_PATH
-from .core import bot, is_trusted, resolve_member, _invite_cache
+from .core import bot, is_moderator, is_trusted, resolve_member, _invite_cache
 from .database import add_modlog, get_log_ch, get_protection, get_threat_config
 
 # ── Общее ─────────────────────────────────────────────────────
@@ -47,10 +47,7 @@ def _utcnow():
     return datetime.datetime.utcnow()
 
 
-def _is_mod(member) -> bool:
-    p = getattr(member, "guild_permissions", None)
-    return bool(p and (p.administrator or p.manage_guild or p.manage_messages or p.moderate_members
-                       or p.ban_members or p.kick_members))
+_is_mod = is_moderator
 
 
 async def _skip_member(member, cfg) -> tuple[bool, bool]:

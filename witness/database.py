@@ -247,6 +247,17 @@ async def db_init():
                 submitted_at TEXT NOT NULL,
                 reviewed_at  TEXT DEFAULT ''
             );
+            -- Переписка по апелляции: ответы модераторов и участника до решения
+            CREATE TABLE IF NOT EXISTS appeal_messages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                appeal_id   INTEGER NOT NULL,
+                guild_id    INTEGER NOT NULL,
+                author_id   INTEGER NOT NULL,
+                from_mod    INTEGER NOT NULL,
+                text        TEXT NOT NULL,
+                created_at  TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_appeal_messages
+                ON appeal_messages(appeal_id);
             CREATE INDEX IF NOT EXISTS idx_appeals_guild_status
                 ON appeals(guild_id, status);
             CREATE INDEX IF NOT EXISTS idx_appeals_user
@@ -486,6 +497,8 @@ PROTECTION_DEFAULTS = {
     "ai_reports": False, "mod_guard": False,
     # История правок сообщений (witness/edits.py) и сколько дней её хранить.
     "edits_enabled": False, "edits_keep_days": 180,
+    # Модератора наказывает только владелец или доверенная роль (moderation.target_error).
+    "mod_immunity": True,
 }
 PROTECTION_CHOICES = {
     "antinuke_action": ("alert", "strip", "strip_timeout"),
@@ -501,7 +514,7 @@ PROTECTION_BOOLS = (
     "antinuke_enabled", "trap_enabled", "dup_enabled", "joinfilter_enabled",
     "joinfilter_noavatar", "raid_invite_delete", "incident_enabled", "incident_dms",
     "heat_enabled", "cases_enabled", "observe_mode", "undo_buttons", "ai_reports", "mod_guard",
-    "edits_enabled",
+    "edits_enabled", "mod_immunity",
 )
 # (минимум, максимум) для чисел; лимиты анти-нюка — те же для всех действий
 PROTECTION_RANGES = {
