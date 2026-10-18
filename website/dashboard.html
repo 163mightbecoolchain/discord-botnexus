@@ -904,6 +904,38 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="card">
         <div class="card-head">
           <div>
+            <div class="card-title">Инструменты модераторов</div>
+            <div class="card-desc">Кейсы, заметки, отмена авто-наказаний и подсказки ИИ по жалобам</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Кейсы и заметки</div>
+              <div class="toggle-desc">У каждой записи в <span class="text-mono">/modlog</span> и в «Поиске участника» — номер кейса. <span class="text-mono">/case</span> показывает кейс и меняет причину, <span class="text-mono">/note</span> — заметки об участнике, которые видят только модераторы</div>
+            </div>
+            <div class="toggle" id="tog-cases" role="switch" tabindex="0" aria-label="Кейсы и заметки" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Кнопка «Отменить» в логах</div>
+              <div class="toggle-desc">Под логом автоматического таймаута, бана или карантина (ловушка, нагрев, фильтр входа и т.п.) — кнопка, которая снимает наказание</div>
+            </div>
+            <div class="toggle" id="tog-undo" role="switch" tabindex="0" aria-label="Кнопка Отменить" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">ИИ-разбор жалоб</div>
+              <div class="toggle-desc">К жалобе из <span class="text-mono">/report</span> добавляется оценка ИИ: приоритет, токсичность, угрозы, спам. Текст сообщения, на которое пожаловались, отправляется в Groq или Google Gemini. Наказывает всегда модератор</div>
+            </div>
+            <div class="toggle" id="tog-aireports" role="switch" tabindex="0" aria-label="ИИ-разбор жалоб" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
             <div class="card-title">Карантин</div>
             <div class="card-desc">Авто-роль для аккаунтов младше N дней</div>
           </div>
@@ -1306,6 +1338,23 @@ html.theme-anim *::before, html.theme-anim *::after {
             <span class="stepper" data-step="pr-lock" data-min="1" data-max="1440"></span>
             <span>мин</span>
           </div>
+          <div class="rule" data-rule="gd-invdel">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Удалять инвайт волны" onclick="toggleRule(this)"></div>
+            <span>и удалить инвайт, по которому шла волна</span>
+          </div>
+          <div class="rule" data-rule="gd-incident">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Приостановить инвайты" onclick="toggleRule(this)"></div>
+            <span>и приостановить вход по инвайтам на</span>
+            <span class="stepper" data-step="gd-incident" data-min="10" data-max="1440"></span>
+            <span>мин</span>
+          </div>
+          <div class="rule" data-rule="gd-incdms">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Приостановить ЛС" onclick="toggleRule(this)"></div>
+            <span>а заодно и личные сообщения между участниками сервера</span>
+          </div>
+          <div class="input-help" style="margin: -.25rem 0 .75rem;">
+            Пауза — штатная функция Discord, как «Приостановить приглашения» в настройках сервера. Не дольше суток, снимается сама
+          </div>
           <div class="rule">
             <span class="rule-word">Локдаун</span>
             <span>не пускает аккаунты моложе</span>
@@ -1313,6 +1362,127 @@ html.theme-anim *::before, html.theme-anim *::after {
             <span>дн. — и при авто-локдауне, и после <span class="text-mono">/lockdown</span></span>
           </div>
           <div class="input-help">Карантин использует роль из «Модерация → Карантин». Если она не настроена — участники волны будут кикнуты</div>
+        </div>
+        <div class="card-foot">
+          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Фильтр входа</div>
+            <div class="card-desc">Проверка каждого нового участника — всегда, а не только в локдаун</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="rule" data-rule="gd-joinf">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Фильтр входа" onclick="toggleRule(this)"></div>
+            <span>Если аккаунту меньше</span>
+            <span class="stepper" data-step="gd-joinage" data-min="0" data-max="365"></span>
+            <span>дн.</span>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <div class="seg" role="group" aria-label="Что делать с новым участником" data-seg="gd-joinact">
+              <button type="button" data-mode="alert">Уведомить</button>
+              <button type="button" data-mode="quarantine">В карантин</button>
+              <button type="button" data-mode="kick">Кикнуть</button>
+            </div>
+          </div>
+          <div class="rule" data-rule="gd-noavatar">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Без аватарки" onclick="toggleRule(this)"></div>
+            <span>или у него нет аватарки</span>
+          </div>
+          <div class="input-help">0 дней — возраст не проверяется. Владелец и доверенные роли анти-нюка не проверяются</div>
+        </div>
+        <div class="card-foot">
+          <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Взломанные аккаунты и спам</div>
+            <div class="card-desc">Ловят типичную рассылку со взломанного аккаунта: скам-ссылки, @everyone, одно и то же во все каналы</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="rule" data-rule="gd-trap">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Канал-ловушка" onclick="toggleRule(this)"></div>
+            <span>Если кто-то напишет в канал-ловушку</span>
+            <select class="select" id="gd-trapch" aria-label="Канал-ловушка">
+              <option value="">— выбери канал —</option>
+            </select>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <div class="seg" role="group" aria-label="Что делать за сообщение в ловушке" data-seg="gd-trapact">
+              <button type="button" data-mode="softban">Софтбан</button>
+              <button type="button" data-mode="timeout">Таймаут на сутки</button>
+              <button type="button" data-mode="ban">Бан</button>
+            </div>
+          </div>
+          <div class="input-help" style="margin: -.25rem 0 .75rem;">
+            Создай отдельный канал с подписью «Не пишите сюда — бан». Люди туда не пишут, а спам-боты и взломанные аккаунты пишут во все каналы подряд.
+            Софтбан — бан и сразу разбан: сообщения за сутки удаляются, а владелец аккаунта может вернуться, когда восстановит его. Бот пришлёт ему в ЛС, как это сделать
+          </div>
+          <div class="rule" data-rule="gd-dup">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Одинаковые сообщения в разных каналах" onclick="toggleRule(this)"></div>
+            <span>Если одно и то же сообщение придёт</span>
+            <span class="stepper" data-step="gd-dupn" data-min="2" data-max="10"></span>
+            <span>раз за</span>
+            <span class="stepper" data-step="gd-dupw" data-min="5" data-max="300"></span>
+            <span>сек в разные каналы</span>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <span>удалить копии и таймаут на</span>
+            <span class="stepper" data-step="gd-dupt" data-min="1" data-max="10080"></span>
+            <span>мин</span>
+          </div>
+          <div class="rule" data-rule="gd-heat">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Нагрев" onclick="toggleRule(this)"></div>
+            <span>Нагрев за частые сообщения, чувствительность</span>
+            <div class="seg" role="group" aria-label="Чувствительность нагрева" data-seg="gd-heatlvl">
+              <button type="button" data-mode="low">Низкая</button>
+              <button type="button" data-mode="medium">Средняя</button>
+              <button type="button" data-mode="high">Высокая</button>
+            </div>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <span>таймаут на</span>
+            <span class="stepper" data-step="gd-heatt" data-min="1" data-max="1440"></span>
+            <span>мин</span>
+          </div>
+          <div class="input-help" style="margin: -.25rem 0 .75rem;">
+            Каждое сообщение даёт очки — ссылки, упоминания, @everyone и вложения больше, — и со временем они остывают.
+            Перегрелся — таймаут, повторно за сутки — вдвое дольше
+          </div>
+          <div class="rule" data-rule="gd-phish">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Проверка по базам фишинга" onclick="toggleRule(this)"></div>
+            <span>Если ссылка есть в базах фишинга</span>
+            <span class="rule-arrow" aria-hidden="true">→</span>
+            <div class="seg" role="group" aria-label="Что делать со ссылкой из базы" data-seg="gd-phishmode">
+              <button type="button" data-mode="alert">Уведомить</button>
+              <button type="button" data-mode="block">Удалить сообщение</button>
+            </div>
+          </div>
+          <div class="input-help" style="margin: -.25rem 0 .75rem;">
+            Открытые базы Sinking Yachts и Discord-AntiScam (≈45 тыс. доменов, обновляются раз в 6 ч) скачиваются целиком, ссылки проверяются у бота — никуда не отправляются.
+            Роли и каналы из карточки «Исключения» выше действуют и здесь (кроме ловушки)
+          </div>
+
+          <div class="rule-group-title">Для всех фильтров на этой карточке</div>
+          <div class="rule" data-rule="gd-modguard">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Проверять модераторов" onclick="toggleRule(this)"></div>
+            <span>Проверять и модераторов</span>
+          </div>
+          <div class="input-help" style="margin: -.25rem 0 .75rem;">
+            Их аккаунты тоже взламывают. Модератора бот не банит: только таймаут и сообщение владельцу сервера
+          </div>
+          <div class="rule" data-rule="gd-observe">
+            <div class="toggle" role="switch" tabindex="0" aria-label="Режим наблюдения" onclick="toggleRule(this)"></div>
+            <span>Режим наблюдения — никого не наказывать, только писать в лог</span>
+          </div>
+          <div class="input-help">
+            В логе видно, что было бы сделано, — удобно, чтобы сначала подобрать пороги.
+            Действует и на «Фильтр входа», и на паузу инвайтов и удаление инвайта при рейде
+          </div>
         </div>
         <div class="card-foot">
           <button class="btn btn-primary" onclick="btnBusy(this, saveProtection)">Сохранить</button>
@@ -2303,6 +2473,7 @@ async function loadChannelsRoles() {
     _roles = data.roles || [];
     fillChannelSelects();
     fillRoleSelects();
+    fillTrapChannel(_prot ? _prot.trap_channel : undefined);
     csSync();
   } catch(e) {}
 }
@@ -2552,7 +2723,12 @@ async function saveModeration() {
     quarantine_min_age: parseInt(getVal('mod-qage')) || 7,
     quarantine_hours: parseInt(getVal('mod-qhours')) || 24,
   });
-  const ok2 = await postProtection({ warn_expiry_days: warnExpiryDays() });
+  const ok2 = await postProtection({
+    warn_expiry_days: warnExpiryDays(),
+    cases_enabled: getToggle('tog-cases'),
+    undo_buttons: getToggle('tog-undo'),
+    ai_reports: getToggle('tog-aireports'),
+  });
   return ok !== false && ok2;
 }
 
@@ -3058,9 +3234,47 @@ function renderProtection() {
   document.getElementById('raidNotices').innerHTML = p.premium ? '' :
     '<div class="notice">⚠️<div>Анти-рейд работает на тарифе <b>Premium</b>. Настройки сохранятся и включатся вместе с тарифом.</div></div>';
 
+  // Дополнительная защита (witness/guard.py)
+  setRule('gd-invdel', p.raid_invite_delete);
+  setRule('gd-incident', p.incident_enabled);
+  setStep('gd-incident', p.incident_minutes || 60);
+  setRule('gd-incdms', p.incident_dms);
+  setRule('gd-joinf', p.joinfilter_enabled);
+  setStep('gd-joinage', p.joinfilter_age ?? 3);
+  setSegValue('gd-joinact', p.joinfilter_action || 'alert');
+  setRule('gd-noavatar', p.joinfilter_noavatar);
+  fillTrapChannel(p.trap_channel);
+  setRule('gd-trap', p.trap_enabled);
+  setSegValue('gd-trapact', p.trap_action || 'softban');
+  setRule('gd-dup', p.dup_enabled);
+  setStep('gd-dupn', p.dup_count || 3);
+  setStep('gd-dupw', p.dup_window || 30);
+  setStep('gd-dupt', p.dup_timeout || 10);
+  setRule('gd-heat', p.heat_enabled);
+  setSegValue('gd-heatlvl', p.heat_level || 'medium');
+  setStep('gd-heatt', p.heat_timeout || 5);
+  setRule('gd-phish', p.phishdb_mode && p.phishdb_mode !== 'off');
+  setSegValue('gd-phishmode', p.phishdb_mode && p.phishdb_mode !== 'off' ? p.phishdb_mode : 'block');
+  setRule('gd-modguard', p.mod_guard);
+  setRule('gd-observe', p.observe_mode);
+
   initSteppers(document.getElementById('content-moderation'));
   setRule('mod-warnexp', p.warn_expiry_days > 0);
   setStep('mod-warnexp', p.warn_expiry_days || 30);
+  setToggle('tog-cases', p.cases_enabled);
+  setToggle('tog-undo', p.undo_buttons);
+  setToggle('tog-aireports', p.ai_reports);
+}
+
+function fillTrapChannel(current) {
+  const el = document.getElementById('gd-trapch');
+  if (!el) return;
+  const keep = current !== undefined ? String(current || '') : el.value;
+  el.innerHTML = '<option value="">— выбери канал —</option>' +
+    _channels.filter(c => c.type === 'text').map(c =>
+      `<option value="${c.id}">#${escapeHtml(c.name)}</option>`).join('');
+  el.value = keep;
+  csSync();
 }
 
 async function loadProtection() {
@@ -3108,7 +3322,22 @@ async function saveProtection() {
     raid_action: getSegValue('pr-action', 'kick'),
     raid_lockdown_minutes: ruleOn('pr-lock') ? getStep('pr-lock', 10) : 0,
     lockdown_min_age: getStep('pr-minage', 7),
+    raid_invite_delete: ruleOn('gd-invdel'),
+    incident_enabled: ruleOn('gd-incident'), incident_minutes: getStep('gd-incident', 60),
+    incident_dms: ruleOn('gd-incdms'),
+    joinfilter_enabled: ruleOn('gd-joinf'), joinfilter_age: getStep('gd-joinage', 3),
+    joinfilter_action: getSegValue('gd-joinact', 'alert'), joinfilter_noavatar: ruleOn('gd-noavatar'),
+    trap_enabled: ruleOn('gd-trap'), trap_channel: getVal('gd-trapch') || '',
+    trap_action: getSegValue('gd-trapact', 'softban'),
+    dup_enabled: ruleOn('gd-dup'), dup_count: getStep('gd-dupn', 3),
+    dup_window: getStep('gd-dupw', 30), dup_timeout: getStep('gd-dupt', 10),
+    heat_enabled: ruleOn('gd-heat'), heat_level: getSegValue('gd-heatlvl', 'medium'),
+    heat_timeout: getStep('gd-heatt', 5),
+    phishdb_mode: ruleOn('gd-phish') ? getSegValue('gd-phishmode', 'block') : 'off',
+    mod_guard: ruleOn('gd-modguard'), observe_mode: ruleOn('gd-observe'),
   });
+  if (ok && ruleOn('gd-trap') && !_prot.trap_channel)
+    showToast('Канал-ловушка не выбран — ловушка не сработает', 'error');
   if (ok) {
     showToast('✓ Сохранено', 'success'); renderProtection();
     // Анти-рейд есть и среди переключателей логов — держим их в согласии
@@ -3835,7 +4064,7 @@ async function openMember(uid) {
             <thead><tr><th>Действие</th><th>Причина</th><th>Срок</th><th>Когда</th></tr></thead>
             <tbody>${
               (m.history && m.history.length) ? m.history.map(h=>`
-                <tr><td><span class="code">${h.action||'?'}</span></td>
+                <tr><td>${m.cases && h.id ? `<span class="text-mono text-muted">#${h.id}</span> ` : ''}<span class="code">${h.action||'?'}</span></td>
                 <td>${escapeHtml(h.reason||'—')}</td>
                 <td>${escapeHtml(h.duration||'—')}</td>
                 <td class="text-mono text-muted">${d(h.created_at)}</td></tr>`).join('')
@@ -3845,6 +4074,32 @@ async function openMember(uid) {
         </div>
       </div>
 
+      ${m.cases ? `
+      <div class="card">
+        <div class="card-head"><div>
+          <div class="card-title">Заметки модераторов</div>
+          <div class="card-desc">Участник их не видит. В Discord — <span class="text-mono">/note</span></div>
+        </div></div>
+        <div class="card-body">
+          ${(m.notes || []).map(n => `
+            <div class="toggle-row">
+              <div class="toggle-info">
+                <div>${escapeHtml(n.text)}</div>
+                <div class="toggle-desc">#${n.id} · ${escapeHtml(n.mod || '')} · ${d(n.created_at)}</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" aria-label="Удалить заметку #${n.id}"
+                      onclick="btnBusy(this, () => memberNote('${uid}', {delete: ${n.id}}))">Удалить</button>
+            </div>`).join('') || '<div class="input-help" style="margin:0 0 .75rem;">Заметок пока нет</div>'}
+          <div class="form-row" style="margin-top:.75rem; align-items:flex-end;">
+            <div class="form-group" style="flex:1; margin:0;">
+              <label for="noteText">Новая заметка</label>
+              <input class="input" id="noteText" maxlength="1000" placeholder="Например: предупреждён устно в войсе">
+            </div>
+            <button class="btn btn-primary" type="button"
+                    onclick="btnBusy(this, () => memberNote('${uid}', {text: document.getElementById('noteText').value}))">Добавить</button>
+          </div>
+        </div>
+      </div>` : ''}
 
       ${(m.appeals && m.appeals.length) ? `
       <div class="card">
@@ -3867,6 +4122,23 @@ async function openMember(uid) {
       <div class="empty-sub">${escapeHtml(String(e))}</div>
     </div>`;
   }
+}
+
+async function memberNote(uid, payload) {
+  if ('text' in payload && !String(payload.text || '').trim()) {
+    showToast('Напиши текст заметки', 'error'); return false;
+  }
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/member/${uid}/notes`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    if (!r.ok) { showToast('Не удалось сохранить', 'error'); return false; }
+  } catch(e) {
+    showToast('Ошибка соединения', 'error'); return false;
+  }
+  _popCache.delete(uid);
+  await openMember(uid);
+  return true;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

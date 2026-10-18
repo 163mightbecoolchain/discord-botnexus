@@ -132,7 +132,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
                 ("Настройка", "`/setup` — пошаговая настройка\n`/security status` · `toggle` · `setlog`"),
                 ("Логирование", "`joins` `leaves` `bans` `timeouts` `msg_delete` `msg_edit`\n`invites` `suspicious` `nick_change` `role_change` `voice`"),
                 ("Авто-защита", "`anti_raid` · `anti_spam` · `/lockdown` · `/slowmode`\n`/quarantine` — карантин для новых аккаунтов"),
-                ("Модерация", "`/warn` `/unmute` `/tempban` `/warnings` `/clearwarn`\n`/purge` `/report` `/modlog` `/punishments`"),
+                ("Модерация", "`/warn` `/unmute` `/tempban` `/warnings` `/clearwarn`\n`/purge` `/report` `/modlog` `/punishments` `/case` `/note`"),
                 ("Инвайты", "`/invcheck` `/invuser` `/invdel` `/invnote` `/invnotes` `/invstats`"),
                 ("Reaction Roles", "`/reactionrole add/remove/list/clear`"),
                 ("🔐 Advanced Security — префикс `/q` (Security plan)",

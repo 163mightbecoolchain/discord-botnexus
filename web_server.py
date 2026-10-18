@@ -855,6 +855,12 @@ async def api_protection(request):
         if isinstance(data.get('trusted_roles'), list):
             data['trusted_roles'] = [str(r) for r in data['trusted_roles']
                                      if str(r).isdigit() and bg.get_role(int(r))]
+        # Канал-ловушка должен быть текстовым каналом этого сервера
+        if 'trap_channel' in data:
+            import discord
+            ch_id = str(data['trap_channel'] or '')
+            if not (ch_id.isdigit() and isinstance(bg.get_channel(int(ch_id)), discord.TextChannel)):
+                data['trap_channel'] = ''
         await save_protection(guild_id, data)
         # Включение анти-рейда и возраст для локдауна живут в security_settings —
         # там же их читают /lockdown и переключатели логов
@@ -1312,12 +1318,12 @@ async def api_member_lookup(request):
 
             try:
                 async with db.execute("""
-                    SELECT action, reason, duration, created_at FROM modlog
+                    SELECT action, reason, duration, created_at, id FROM modlog
                     WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 15
                 """, (guild_id, uid)) as c:
                     out['history'] = [
-                        {'action': a, 'reason': r, 'duration': d, 'created_at': ts}
-                        for a, r, d, ts in await c.fetchall()
+                        {'action': a, 'reason': r, 'duration': d, 'created_at': ts, 'id': i}
+                        for a, r, d, ts, i in await c.fetchall()
                     ]
             except Exception as ex:
                 print(f"[LOOKUP] modlog: {ex}")
@@ -1362,7 +1368,58 @@ async def api_member_lookup(request):
     except Exception as ex:
         print(f"[LOOKUP] DB error: {ex}")
 
+    # Кейсы и заметки модераторов — только если включены в «Модерации»
+    out.update({'cases': False, 'notes': []})
+    try:
+        from witness.database import get_protection
+        if (await get_protection(guild_id))['cases_enabled']:
+            from witness.guard import get_notes
+            rows = await get_notes(guild_id, uid)
+            names = await _user_names(bot, bg, [r[1] for r in rows])
+            out['cases'] = True
+            out['notes'] = [{'id': i, 'mod': names.get(m) or str(m), 'text': t, 'created_at': ts}
+                            for i, m, t, ts in rows]
+    except Exception as ex:
+        print(f"[LOOKUP] notes: {ex}")
+
     return web.json_response(out)
+
+
+@require_auth
+async def api_member_notes(request):
+    """POST /api/guild/:id/member/:uid/notes — {"text": "..."} добавить, {"delete": id} удалить"""
+    guild_id = int(request.match_info['guild_id'])
+    uid      = int(request.match_info['uid'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    me = await _get_member(bg, s['user_id'])
+    p  = me.guild_permissions if me else None
+    if not p or not (p.manage_messages or p.moderate_members or p.administrator):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    from witness.database import get_protection
+    if not (await get_protection(guild_id))['cases_enabled']:
+        return web.json_response({'error': 'cases_disabled'}, status=400)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({'error': 'bad_json'}, status=400)
+    from witness.guard import add_note, delete_note
+    if 'delete' in data:
+        try:
+            ok = await delete_note(guild_id, int(data['delete']))
+        except (TypeError, ValueError):
+            ok = False
+        return web.json_response({'ok': ok}, status=200 if ok else 404)
+    text = str(data.get('text') or '').strip()[:1000]
+    if not text:
+        return web.json_response({'error': 'text_required'}, status=400)
+    nid = await add_note(guild_id, uid, int(s['user_id']), text)
+    return web.json_response({'ok': True, 'id': nid})
 
 
 @require_auth
@@ -1917,6 +1974,7 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/members/search',        api_member_search),
         ('GET',  '/guild/{guild_id}/member/{uid}',          api_member_lookup),
         ('POST', '/guild/{guild_id}/member/{uid}/action',   api_member_action),
+        ('POST', '/guild/{guild_id}/member/{uid}/notes',    api_member_notes),
         ('GET',  '/guild/{guild_id}/punishments',           api_punishments),
         ('POST', '/guild/{guild_id}/alerts/resolve',        api_alerts_resolve),
         ('GET',  '/guild/{guild_id}/banrequests',           api_ban_requests),

@@ -143,7 +143,8 @@ async def on_ready():
     # ── Persistent views: восстанавливаем кнопки после рестарта ──
     if not hasattr(bot, "_dynamic_items_added"):
         bot._dynamic_items_added = True
-        bot.add_dynamic_items(AppealButton, BanApproveButton, BanRejectButton)
+        from .guard import UndoButton
+        bot.add_dynamic_items(AppealButton, BanApproveButton, BanRejectButton, UndoButton)
 
     # ── Запуск фоновых задач ─────────────────────────────────
     if not hasattr(bot, "_tasks_started"):
@@ -162,6 +163,8 @@ async def on_ready():
         bot.loop.create_task(backup_loop(bot))
         bot.loop.create_task(tier_expiry_loop(bot))
         bot.loop.create_task(log_flush_loop(bot))
+        from .guard import phish_list_loop
+        bot.loop.create_task(phish_list_loop())
         print("✅ Фоновые задачи запущены")
 
     # ── Загружаем языки серверов из БД ───────────────────────

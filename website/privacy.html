@@ -118,7 +118,7 @@ footer a:hover { color: var(--accent); }
 
 <div data-lang="ru" lang="ru">
   <h1>Политика конфиденциальности</h1>
-  <div class="updated">Последнее обновление: 7 октября 2026</div>
+  <div class="updated">Последнее обновление: 18 октября 2026</div>
 
   <p>
     Witness — бот для модерации Discord-серверов. Этот документ описывает, какие данные
@@ -157,6 +157,17 @@ footer a:hover { color: var(--accent); }
       без самого текста — 7 дней.
     </li>
     <li>
+      <strong>Дополнительные фильтры спама</strong> (если администратор их включил): канал-ловушка,
+      одинаковые сообщения в разных каналах, «нагрев» за частые сообщения. Работают в оперативной памяти:
+      хеш текста хранится до 5 минут, счётчики срабатываний — до суток, в базу не записываются.
+      При срабатывании в лог-канал сервера уходит фрагмент сообщения, а наказание записывается в журнал модерации.
+    </li>
+    <li>
+      <strong>Проверка ссылок по открытым базам фишинга</strong> (если включена). Бот скачивает публичные
+      списки фишинговых доменов (Sinking Yachts, Discord-AntiScam) и сверяет с ними ссылки у себя.
+      Ссылки и сообщения в эти сервисы не отправляются.
+    </li>
+    <li>
       <strong>Картинки.</strong> Бот проверяет, нет ли в метаданных изображения GPS-координат,
       и предупреждает модераторов. Изображение не сохраняется.
     </li>
@@ -171,6 +182,7 @@ footer a:hover { color: var(--accent); }
     <li>Предупреждения, муты, кики, баны: кто, кому, когда, причина, срок</li>
     <li>Апелляции: текст обращения участника и решение модератора</li>
     <li>Заявки на бан и алерты безопасности</li>
+    <li>Заметки модераторов об участнике — если сервер включил «Кейсы и заметки»: текст, автор, дата. Участник их не видит</li>
   </ul>
 
   <h3>Данные, которые участник вводит сам</h3>
@@ -212,6 +224,8 @@ footer a:hover { color: var(--accent); }
     <tr><td>Алерты безопасности</td><td>30–90 дней</td></tr>
     <tr><td>Журнал приглашений</td><td>90 дней</td></tr>
     <tr><td>Автоматические записи модерации</td><td>180 дней</td></tr>
+    <tr><td>Заметки модераторов</td><td>Пока их не удалит модератор</td></tr>
+    <tr><td>Хеши и счётчики фильтров спама (в памяти)</td><td>До 5 минут / до суток</td></tr>
     <tr><td>Закрытые тикеты</td><td>60 дней</td></tr>
     <tr><td>Выполненные напоминания</td><td>7 дней</td></tr>
     <tr><td>Настройки сервера</td><td>Пока бот находится на сервере</td></tr>
@@ -240,7 +254,9 @@ footer a:hover { color: var(--accent); }
       что нужно для команды, которую вызвал пользователь: вопрос в <code>/ai</code> и <code>/askalbion</code>, текст
       в <code>/translate</code>, последние сообщения канала (до 50, с отображаемыми именами)
       в <code>/summarize</code>, имя и роли участника в <code>/roast</code>.
-      Автоматически, без команды, сообщения ИИ-сервисам не отправляются.
+      Если администратор сервера включил «ИИ-разбор жалоб», в Groq или Google Gemini отправляется
+      текст сообщения, на которое пожаловались командой <code>/report</code> (без имён и ID), —
+      чтобы модераторы увидели оценку приоритета. Других автоматических отправок сообщений ИИ-сервисам нет.
     </li>
     <li><strong>Pollinations</strong> — описание картинки из <code>/imagine</code></li>
     <li>
@@ -283,7 +299,7 @@ footer a:hover { color: var(--accent); }
 
 <div data-lang="en" lang="en">
   <h1>Privacy Policy</h1>
-  <div class="updated">Last updated: October 7, 2026</div>
+  <div class="updated">Last updated: October 18, 2026</div>
 
   <p>
     Witness is a moderation bot for Discord servers. This document explains what data
@@ -322,6 +338,17 @@ footer a:hover { color: var(--accent); }
       never the text itself — for 7 days.
     </li>
     <li>
+      <strong>Extra spam filters</strong> (if an administrator turns them on): a trap channel,
+      the same message in several channels, and “heat” for rapid posting. They work in memory:
+      a text hash is kept for up to 5 minutes and trigger counters for up to a day; nothing is written to the database.
+      When a filter fires, an excerpt of the message goes to the server's log channel and the punishment is recorded in the moderation log.
+    </li>
+    <li>
+      <strong>Link checks against open phishing lists</strong> (if enabled). The bot downloads public
+      lists of phishing domains (Sinking Yachts, Discord-AntiScam) and compares links against them locally.
+      Links and messages are not sent to these services.
+    </li>
+    <li>
       <strong>Images.</strong> The bot checks image metadata for GPS coordinates and warns
       moderators. Images are not stored.
     </li>
@@ -336,6 +363,7 @@ footer a:hover { color: var(--accent); }
     <li>Warnings, timeouts, kicks, bans: who, whom, when, reason, duration</li>
     <li>Appeals: the member's appeal text and the moderator's decision</li>
     <li>Ban requests and security alerts</li>
+    <li>Moderator notes about a member — if the server turned on “Cases and notes”: text, author, date. The member cannot see them</li>
   </ul>
 
   <h3>Data members enter themselves</h3>
@@ -377,6 +405,8 @@ footer a:hover { color: var(--accent); }
     <tr><td>Security alerts</td><td>30–90 days</td></tr>
     <tr><td>Invite log</td><td>90 days</td></tr>
     <tr><td>Automatic moderation records</td><td>180 days</td></tr>
+    <tr><td>Moderator notes</td><td>Until a moderator deletes them</td></tr>
+    <tr><td>Spam filter hashes and counters (in memory)</td><td>Up to 5 minutes / up to a day</td></tr>
     <tr><td>Closed tickets</td><td>60 days</td></tr>
     <tr><td>Completed reminders</td><td>7 days</td></tr>
     <tr><td>Server settings</td><td>While the bot is on the server</td></tr>
@@ -405,7 +435,9 @@ footer a:hover { color: var(--accent); }
       the user ran needs: the question in <code>/ai</code> and <code>/askalbion</code>, the text in
       <code>/translate</code>, the last messages of the channel (up to 50, with display names) in
       <code>/summarize</code>, a member's name and roles in <code>/roast</code>.
-      Messages are never sent to AI providers automatically, without a command.
+      If a server administrator turns on “AI report triage”, the text of a message reported with
+      <code>/report</code> (without names or IDs) is sent to Groq or Google Gemini so moderators see a
+      priority estimate. Messages are not sent to AI providers automatically in any other case.
     </li>
     <li><strong>Pollinations</strong> — the image description in <code>/imagine</code></li>
     <li>

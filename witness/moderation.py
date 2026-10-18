@@ -1089,17 +1089,23 @@ async def report(interaction: discord.Interaction, message_id: str, reason: str 
     try:
         msg_id = int(message_id)
         msg = await interaction.channel.fetch_message(msg_id)
-        e = discord.Embed(title="🚨 Жалоба на сообщение", color=0xFF4444, timestamp=datetime.datetime.utcnow())
-        e.add_field(name="От кого", value=interaction.user.mention, inline=True)
-        e.add_field(name="Автор сообщения", value=msg.author.mention, inline=True)
-        e.add_field(name="Канал", value=interaction.channel.mention, inline=True)
-        e.add_field(name="Причина", value=reason, inline=False)
-        e.add_field(name="Содержимое", value=msg.content[:500] or "*(вложение/эмбед)*", inline=False)
-        e.add_field(name="Ссылка", value=f"[Перейти]({msg.jump_url})", inline=True)
-        await ch.send(embed=e)
-        await interaction.response.send_message("✅ Жалоба отправлена модераторам.", ephemeral=True)
     except (ValueError, discord.NotFound):
-        await interaction.response.send_message("❌ Сообщение не найдено. Убедись что ID правильный.", ephemeral=True)
+        return await interaction.response.send_message("❌ Сообщение не найдено. Убедись что ID правильный.", ephemeral=True)
+    e = discord.Embed(title="🚨 Жалоба на сообщение", color=0xFF4444, timestamp=datetime.datetime.utcnow())
+    e.add_field(name="От кого", value=interaction.user.mention, inline=True)
+    e.add_field(name="Автор сообщения", value=msg.author.mention, inline=True)
+    e.add_field(name="Канал", value=interaction.channel.mention, inline=True)
+    e.add_field(name="Причина", value=reason, inline=False)
+    e.add_field(name="Содержимое", value=msg.content[:500] or "*(вложение/эмбед)*", inline=False)
+    e.add_field(name="Ссылка", value=f"[Перейти]({msg.jump_url})", inline=True)
+    await interaction.response.send_message("✅ Жалоба отправлена модераторам.", ephemeral=True)
+    # ИИ-разбор жалобы (дашборд → «Модерация»): подсказка о приоритете, не решение
+    from .guard import ai_report_field
+    ai = await ai_report_field(interaction.guild_id, msg.content)
+    if ai:
+        e.add_field(name="🤖 Оценка ИИ", value=ai[0][:1024], inline=False)
+        e.color = ai[1]
+    await ch.send(embed=e)
 
 
 @bot.tree.command(name="tempban", description="Временный бан участника")
@@ -1160,6 +1166,10 @@ async def tempban(interaction: discord.Interaction, member: discord.Member,
 #  MODLOG
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _notes_text(notes) -> str:
+    return "\n".join(f"📝 #{n[0]} {n[2][:150]}" for n in notes)
+
+
 @bot.tree.command(name="modlog", description="История действий над участником")
 @app_commands.describe(member="Участник")
 async def modlog_cmd(interaction: discord.Interaction, member: discord.Member):
@@ -1168,16 +1178,22 @@ async def modlog_cmd(interaction: discord.Interaction, member: discord.Member):
 
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT action,reason,duration,mod_id,created_at FROM modlog "
+            "SELECT action,reason,duration,mod_id,created_at,id FROM modlog "
             "WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 50",
             (interaction.guild_id, member.id)
         ) as c:
             rows = await c.fetchall()
+    # Кейсы и заметки (дашборд → «Модерация»): номер кейса у записи и заметки сверху
+    cases = (await get_protection(interaction.guild_id))["cases_enabled"]
+    notes = []
+    if cases:
+        from .guard import get_notes
+        notes = await get_notes(interaction.guild_id, member.id, limit=3)
 
     if not rows:
         e = discord.Embed(color=0xFEE75C, timestamp=datetime.datetime.utcnow())
         e.set_author(name=f"Modlog — {member.display_name}", icon_url=member.display_avatar.url)
-        e.description = "No moderation history."
+        e.description = "No moderation history." + ("\n\n" + _notes_text(notes) if notes else "")
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
     chunks = [rows[i:i+5] for i in range(0, len(rows), 5)]
@@ -1186,12 +1202,14 @@ async def modlog_cmd(interaction: discord.Interaction, member: discord.Member):
         pe = discord.Embed(color=0xFEE75C, timestamp=datetime.datetime.utcnow())
         pe.set_author(name=f"Modlog — {member.display_name}", icon_url=member.display_avatar.url)
         pe.set_thumbnail(url=member.display_avatar.url)
-        for action, reason, duration, mod_id, created_at in chunk:
+        if notes:
+            pe.description = _notes_text(notes)
+        for action, reason, duration, mod_id, created_at, case_id in chunk:
             mod     = interaction.guild.get_member(mod_id)
             mod_str = mod.display_name if mod else ("Auto" if mod_id == 0 else str(mod_id))
             dur_str = f" · {duration}" if duration else ""
             pe.add_field(
-                name=f"`{action}`{dur_str} · {created_at[:10]}",
+                name=f"{f'#{case_id} ' if cases else ''}`{action}`{dur_str} · {created_at[:10]}",
                 value=f"{reason or '—'} · by {mod_str}",
                 inline=False
             )
