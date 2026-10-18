@@ -359,6 +359,10 @@ tr.resolved td { opacity: .55; }
 .edit-step { grid-template-columns: 5.2rem 1fr; }
 .edit-step .edit-text { color: var(--text); }
 .edit-when { display: block; text-transform: none; letter-spacing: 0; opacity: .8; margin-top: .1rem; }
+.edit-fold summary { cursor: pointer; color: var(--muted); font-size: .76rem; font-family: var(--mono); list-style: none; padding: .1rem 0; }
+.edit-fold summary::-webkit-details-marker { display: none; }
+.edit-fold summary:hover { color: var(--accent); }
+.edit-fold[open] summary { margin-bottom: .2rem; }
 .edit-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
 .edit-after .edit-text { color: var(--text); }
 .edit-text del { background: rgba(255,84,112,.18); color: var(--danger); text-decoration: line-through; border-radius: 3px; }
@@ -4423,17 +4427,17 @@ function plural(n, one, few, many) {
   return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
 }
 
-// Пословный diff: удалённое — <del>, добавленное — <ins>
-function wordDiff(oldText, newText) {
-  const A = oldText.split(/(\s+)/).filter(Boolean), B = newText.split(/(\s+)/).filter(Boolean);
+// LCS двух списков (строк или слов): [['=', x] | ['-', x] | ['+', x]].
+// Общие начало и конец отрезаются заранее; слишком большая середина — целиком «удалено/добавлено».
+function lcsOps(A, B, limit = 2500000) {
   let p = 0;
   while (p < A.length && p < B.length && A[p] === B[p]) p++;
   let s = 0;
   while (s < A.length - p && s < B.length - p && A[A.length - 1 - s] === B[B.length - 1 - s]) s++;
   const a = A.slice(p, A.length - s), b = B.slice(p, B.length - s);
   let mid = [];
-  if (a.length * b.length > 200000) {
-    mid = [...a.map(t => ['-', t]), ...b.map(t => ['+', t])];      // огромный текст — без LCS
+  if (a.length * b.length > limit || a.length > 65000 || b.length > 65000) {
+    mid = [...a.map(t => ['-', t]), ...b.map(t => ['+', t])];
   } else {
     const n = a.length, m = b.length;
     const L = Array.from({length: n + 1}, () => new Uint16Array(m + 1));
@@ -4449,7 +4453,31 @@ function wordDiff(oldText, newText) {
     while (i < n) mid.push(['-', a[i++]]);
     while (j < m) mid.push(['+', b[j++]]);
   }
-  const ops = [...A.slice(0, p).map(t => ['=', t]), ...mid, ...A.slice(A.length - s).map(t => ['=', t])];
+  return [...A.slice(0, p).map(t => ['=', t]), ...mid, ...A.slice(A.length - s).map(t => ['=', t])];
+}
+
+// Пословный diff: удалённое — <del>, добавленное — <ins>.
+// Сначала сравниваются строки, потом слова внутри изменённых строк — так и в длинном
+// сообщении с правками в начале и в конце подсвечиваются только сами правки.
+function wordDiff(oldText, newText) {
+  const words = t => t.split(/(\s+)/).filter(Boolean);
+  const ops = [], segs = [];       // segs — по строкам: неизменённая строка или изменённый кусок
+  let dels = [], ins = [], first = true;
+  const sep = () => { if (!first) ops.push(['=', '\n']); first = false; };
+  const flush = () => {
+    if (!dels.length && !ins.length) return;
+    sep();
+    const block = lcsOps(words(dels.join('\n')), words(ins.join('\n')));
+    ops.push(...block);
+    segs.push({changed: true, ops: block});
+    dels = []; ins = [];
+  };
+  for (const [op, line] of lcsOps(oldText.split('\n'), newText.split('\n'))) {
+    if (op === '-') dels.push(line);
+    else if (op === '+') ins.push(line);
+    else { flush(); sep(); if (line) ops.push(['=', line]); segs.push({changed: false, text: line}); }
+  }
+  flush();
   const side = (keep, tag) => {
     let out = '', run = '', cur = null;
     const flush = () => { if (run) out += cur === '=' ? escapeHtml(run) : `<${tag}>${escapeHtml(run)}</${tag}>`; run = ''; };
@@ -4465,7 +4493,7 @@ function wordDiff(oldText, newText) {
   };
   // Всё в одной строке: в каждом изменённом куске сначала старое (зачёркнуто красным),
   // потом новое (зелёным). Пробелы между изменёнными словами — часть куска.
-  const inline = () => {
+  const inline = (ops) => {
     let out = '', i = 0;
     while (i < ops.length) {
       if (ops[i][0] === '=') { out += escapeHtml(ops[i][1]); i++; continue; }
@@ -4488,7 +4516,29 @@ function wordDiff(oldText, newText) {
     }
     return out;
   };
-  return { before: side('-', 'del'), after: side('+', 'ins'), inline: inline() };
+  return {
+    before: side('-', 'del'), after: side('+', 'ins'), inline: inline(ops),
+    lines: segs.map(s => ({changed: s.changed, html: s.changed ? inline(s.ops) : escapeHtml(s.text)})),
+  };
+}
+
+// Длинное сообщение: в правке показываем изменённые строки и по одной строке вокруг,
+// остальное сворачиваем в «⋯ N строк без изменений» (раскрывается кликом)
+function foldedInline(d, ctx = 1) {
+  const L = d.lines;
+  if (L.length <= 6) return d.inline;
+  const keep = L.map((l, i) => L.slice(Math.max(0, i - ctx), i + ctx + 1).some(x => x.changed));
+  let out = '', i = 0;
+  while (i < L.length) {
+    if (keep[i]) { out += (out && !out.endsWith('</details>') ? '\n' : '') + L[i].html; i++; continue; }
+    let j = i;
+    while (j < L.length && !keep[j]) j++;
+    if (j - i < 2) { keep[i] = true; continue; }        // одну строку сворачивать незачем
+    const hidden = L.slice(i, j).map(x => x.html).join('\n');
+    out += `<details class="edit-fold"><summary>⋯ ${j - i} ${plural(j - i, 'строка', 'строки', 'строк')} без изменений</summary>${hidden}</details>`;
+    i = j;
+  }
+  return out;
 }
 
 async function copyMsgLink(url) {
@@ -4504,7 +4554,7 @@ async function copyMsgLink(url) {
 
 // Клик по правке копирует ссылку — кроме кнопок и случаев, когда выделяют текст
 function editItemClick(ev, el) {
-  if (ev.target.closest('a, button, .edit-go')) return;
+  if (ev.target.closest('a, button, .edit-go, details')) return;
   if (String(window.getSelection() || '').trim()) return;
   copyMsgLink(el.dataset.url);
 }
@@ -4553,7 +4603,7 @@ function editGroupHtml(g) {
   // «было» — исходный текст, дальше каждая правка относительно предыдущей версии
   const steps = g.map((it, k) => {
     const prev = it.before ?? (k ? g[k - 1].after : null);
-    const body = prev == null ? escapeHtml(it.after) || EMPTY_TXT : wordDiff(prev, it.after).inline || EMPTY_TXT;
+    const body = prev == null ? escapeHtml(it.after) || EMPTY_TXT : foldedInline(wordDiff(prev, it.after)) || EMPTY_TXT;
     return `<div class="edit-line edit-step"><span class="edit-tag">правка ${k + 1}
         <span class="edit-when">${_fmtWhen(it.edited_at, {hour: '2-digit', minute: '2-digit'})}</span></span>
       <div class="edit-text">${body}</div></div>`;
