@@ -1441,7 +1441,7 @@ async def api_edit_authors(request):
 
 @require_auth
 async def api_edits(request):
-    """GET /api/guild/:id/edits?user=ID&source=recent|archive&before_id=&q=текст"""
+    """GET /api/guild/:id/edits?user=ID&source=recent|archive&before_at=&before_id=&q=текст"""
     bg, err = await _edits_guard(request)
     if err:
         return err
@@ -1456,7 +1456,8 @@ async def api_edits(request):
     from witness import edits
     from witness.database import get_protection
     if request.query.get('source') == 'archive':
-        items, more = await edits.archived(bg.id, uid, q, before_id)
+        before_at = (request.query.get('before_at') or '')[:40]
+        items, more = await edits.archived(bg.id, uid, q, before_at, before_id)
     else:
         items, more = await edits.recent(bg.id, uid, q), False
     for it in items:
@@ -1481,6 +1482,21 @@ async def api_edits_clear(request):
         return web.json_response({'error': 'bad_json'}, status=400)
     from witness import edits
     return web.json_response({'ok': True, 'deleted': await edits.clear(bg.id, uid or None)})
+
+
+@require_auth
+async def api_edits_import(request):
+    """GET — статус импорта из лог-канала, POST — запустить (Manage Server, запись правок включена)"""
+    bg, err = await _edits_guard(request, need_manage=True)
+    if err:
+        return err
+    from witness import edits
+    from witness.database import get_protection
+    if request.method == 'POST':
+        if not (await get_protection(bg.id))['edits_enabled']:
+            return web.json_response({'error': 'edits_disabled'}, status=400)
+        edits.start_import(bg)
+    return web.json_response(edits.import_status(bg.id))
 
 
 @require_auth
@@ -2076,6 +2092,8 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/edits/authors',         api_edit_authors),
         ('GET',  '/guild/{guild_id}/edits',                 api_edits),
         ('POST', '/guild/{guild_id}/edits/clear',           api_edits_clear),
+        ('GET',  '/guild/{guild_id}/edits/import',          api_edits_import),
+        ('POST', '/guild/{guild_id}/edits/import',          api_edits_import),
         ('GET',  '/guild/{guild_id}/punishments',           api_punishments),
         ('POST', '/guild/{guild_id}/alerts/resolve',        api_alerts_resolve),
         ('GET',  '/guild/{guild_id}/banrequests',           api_ban_requests),

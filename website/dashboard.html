@@ -1607,6 +1607,15 @@ html.theme-anim *::before, html.theme-anim *::after {
             который не нагружает основную базу и подгружается по кнопке. Правки старше срока удаляются.
             Текст «до» бот знает, если видел сообщение недавно; для старых сообщений он может быть неизвестен
           </div>
+          <div class="rule-group-title" style="margin-top:1rem;">Прошлые правки</div>
+          <div style="display:flex; gap:.75rem; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-ghost btn-sm" id="edImportBtn" onclick="btnBusy(this, startEditImport)">Загрузить из лог-канала за 90 дней</button>
+            <span class="input-help" id="edImportState" style="margin:0;"></span>
+          </div>
+          <div class="input-help">
+            Бот прочитает свои логи «Редактирование» в лог-канале и добавит найденные правки. Повторный запуск не создаёт дублей.
+            В логе часто только изменённые строки — такие правки помечены «фрагмент»
+          </div>
         </div>
         <div class="card-foot" style="justify-content:space-between;">
           <button class="btn btn-ghost btn-sm" onclick="clearEdits(null)">Очистить всю историю</button>
@@ -4238,6 +4247,7 @@ async function loadEditSettings() {
     if (!r.ok) return;
     _prot = await r.json();
     renderEditSettings();
+    pollEditImport();
   } catch(e) {}
 }
 
@@ -4248,6 +4258,54 @@ function renderEditSettings() {
   document.getElementById('edState').textContent = _prot.edits_enabled
     ? `Включено — правки хранятся ${_prot.edits_keep_days} дн.`
     : 'Выключено — бот ничего не записывает';
+}
+
+const IMPORT_ERRORS = {
+  no_log_channel: 'Лог-канал не настроен', no_history_access: 'У бота нет доступа к истории лог-канала',
+  edits_disabled: 'Сначала включи и сохрани запись правок', failed: 'Не удалось — попробуй позже',
+};
+let _edImportTimer = null;
+
+function renderImportState(s) {
+  const el = document.getElementById('edImportState');
+  const btn = document.getElementById('edImportBtn');
+  if (!el) return;
+  if (s.running) {
+    el.textContent = `Идёт загрузка… просмотрено сообщений: ${s.scanned}, найдено правок: ${s.found}`;
+  } else if (s.error) {
+    el.textContent = IMPORT_ERRORS[s.error] || ('Ошибка: ' + s.error);
+  } else if (s.finished_at) {
+    el.textContent = `Готово: просмотрено ${s.scanned}, добавлено правок: ${s.imported}`;
+  } else {
+    el.textContent = '';
+  }
+  if (btn) btn.disabled = !!s.running;
+}
+
+async function pollEditImport() {
+  clearTimeout(_edImportTimer);
+  if (!currentGuild || !hasPerm('manage_guild')) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits/import`);
+    if (!r.ok) return;
+    const s = await r.json();
+    renderImportState(s);
+    if (s.running) _edImportTimer = setTimeout(pollEditImport, 2000);
+    else if (s.finished_at && _ed && _edImportWatching) { _edImportWatching = false; openEdits(_ed.uid, _ed.name); }
+  } catch(e) {}
+}
+let _edImportWatching = false;
+
+async function startEditImport() {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/edits/import`, { method: 'POST' });
+    const s = await r.json().catch(() => ({}));
+    if (!r.ok) { showToast(IMPORT_ERRORS[s.error] || 'Не удалось запустить', 'error'); return false; }
+    _edImportWatching = true;
+    renderImportState(s);
+    _edImportTimer = setTimeout(pollEditImport, 1500);
+    return true;
+  } catch(e) { showToast('Ошибка соединения', 'error'); return false; }
 }
 
 async function saveEditSettings() {
@@ -4339,7 +4397,7 @@ async function openEdits(uid, name, q = '') {
 async function loadEditArchive() {
   if (!_ed) return;
   const last = _ed.archive[_ed.archive.length - 1];
-  const before = last ? `&before_id=${last.id}` : '';
+  const before = last ? `&before_at=${encodeURIComponent(last.edited_at)}&before_id=${last.id}` : '';
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/edits?user=${_ed.uid}&source=archive` +
                              `&q=${encodeURIComponent(_ed.q)}${before}`);
@@ -4435,6 +4493,8 @@ function editItemHtml(it) {
       <div class="edit-meta">
         <span>${it.channel ? '#' + escapeHtml(it.channel) : 'канал удалён'}</span>
         <span class="text-mono">${when}</span>
+        ${it.source === 'log' ? '<span class="chip" title="Восстановлено из лог-канала">из лога</span>' : ''}
+        ${it.partial ? '<span class="chip warn" title="В логе была только часть текста — изменённые строки">фрагмент</span>' : ''}
         <span class="edit-go">
           <a class="go-app" href="${app}" title="Открыть сообщение в приложении Discord">Открыть в Discord</a>
           <a href="${it.url}" target="_blank" rel="noopener" title="Открыть сообщение в браузере">в браузере ↗</a>

@@ -183,7 +183,9 @@ footer a:hover { color: var(--accent); }
       Последние 100 правок каждого участника лежат в основной базе, более старые — в отдельном файле-архиве
       на том же томе. Всё удаляется по истечении срока, который выбрал сервер (от 7 до 730 дней, по умолчанию 180),
       а также по кнопке «Очистить» в панели. Видят правки только модераторы этого сервера. Бот записывает
-      только сообщения, отредактированные после включения функции; неотредактированные сообщения не сохраняются.
+      правки, сделанные после включения функции. Кроме того, по запросу администратора он может один раз
+      загрузить прошлые правки за последние 90 дней из собственных логов редактирования в лог-канале этого
+      сервера — только то, что в этих логах уже было. Неотредактированные сообщения не сохраняются.
     </li>
   </ul>
 
@@ -375,7 +377,9 @@ footer a:hover { color: var(--accent); }
       The last 100 edits of each member are kept in the main database, older ones in a separate archive file
       on the same volume. Everything is deleted after the period the server chose (7 to 730 days, 180 by default)
       or with the “Clear” button in the dashboard. Only that server's moderators can see edits. The bot records
-      only messages edited after the feature was turned on; unedited messages are never stored.
+      edits made after the feature was turned on. In addition, at an administrator's request it can once load
+      past edits from the last 90 days out of its own edit logs in that server's log channel — only what those
+      logs already contained. Unedited messages are never stored.
     </li>
   </ul>
 
