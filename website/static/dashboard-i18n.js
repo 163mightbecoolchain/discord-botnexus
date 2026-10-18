@@ -295,6 +295,7 @@
     // Инструменты модераторов, заметки
     'Инструменты модераторов': 'Moderator tools',
     'Защита модераторов': 'Moderator protection',
+    '🔒 Принимать и отклонять апелляции могут только модераторы': '🔒 Only moderators can accept or reject appeals',
     'Модератора нельзя замутить, заварнить или забанить — это может только владелец сервера или доверенная роль из «Безопасность → Анти-нюк → Не проверять». Таймаут модератору, выданный прямо в Discord, бот снимет. Наказать самого себя нельзя всегда':
       'A moderator cannot be muted, warned or banned — only the server owner or a trusted role from “Security → Anti-nuke → Don’t check” can do that. A timeout given to a moderator directly in Discord is lifted by the bot. Punishing yourself is never allowed',
     'Модератора может наказать только владелец сервера или доверенная роль': 'Only the server owner or a trusted role can punish a moderator',

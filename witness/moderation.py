@@ -523,31 +523,14 @@ async def notify_appeal_result(user_id: int, guild_id: int, appeal_id: int,
 
 
 # ── Решение и переписка по апелляции ─────────────────────────
-# Решать апелляцию может тот, кто вправе снять это наказание (так же в api_appeal_action).
-# Отвечать участнику, не решая, может любой модератор, который видит апелляции.
+# Любой модератор может и ответить участнику, и решить апелляцию любого типа —
+# одна проверка для бота (/appeal) и сайта (api_appeals, api_appeal_action).
 
-def appeal_need(atype: str) -> str:
-    return ("ban_members" if atype in ("BAN", "TEMPBAN") else
-            "moderate_members" if atype == "MUTE" else "manage_messages")
-
-
-def can_decide_appeal(p: discord.Permissions, atype: str) -> bool:
-    if p.administrator or p.manage_guild or p.ban_members:
-        return True
-    need = appeal_need(atype)
-    return (p.moderate_members if need == "moderate_members" else
-            need == "manage_messages" and (p.manage_messages or p.moderate_members))
+def can_handle_appeal(p: discord.Permissions) -> bool:
+    return bool(p.administrator or p.manage_guild or p.manage_messages or p.moderate_members
+                or p.ban_members or p.kick_members)
 
 
-def can_reply_appeal(p: discord.Permissions) -> bool:
-    return bool(p.administrator or p.manage_guild or p.manage_messages or p.moderate_members or p.ban_members)
-
-
-APPEAL_PERM_MSG = {
-    "ban_members": "❌ Решить апелляцию на бан может только тот, у кого есть право «Банить участников». Ответить участнику можно: `/appeal reply`.",
-    "moderate_members": "❌ Решить апелляцию на мут может только тот, у кого есть право «Модерировать участников». Ответить участнику можно: `/appeal reply`.",
-    "manage_messages": "❌ Нужно право «Управлять сообщениями».",
-}
 APPEAL_REPLY_RESULT = {
     "sent": "💬 Ответ по апелляции #{id} отправлен участнику в ЛС.",
     "saved": "💬 Ответ по апелляции #{id} сохранён, но у участника закрыты ЛС — он его не получит.",
@@ -916,10 +899,10 @@ async def appeal_cmd(interaction: discord.Interaction,
         modal = AppealModal(gid, action_type, reason)
         return await interaction.response.send_modal(modal)
 
-    # Остальные действия требуют прав модератора
-    if not interaction.user.guild_permissions.manage_messages:
+    # Остальные действия — для любого модератора (can_handle_appeal)
+    if not can_handle_appeal(interaction.user.guild_permissions):
         return await interaction.response.send_message(
-            "❌ Нужно право `Manage Messages` для управления апелляциями.",
+            "❌ Апелляциями занимаются модераторы.",
             ephemeral=True
         )
 
@@ -1007,8 +990,6 @@ async def appeal_cmd(interaction: discord.Interaction,
         if not r:
             return await interaction.followup.send("Апелляция не найдена.", ephemeral=True)
         uid, atype, status = r
-        if not can_decide_appeal(interaction.user.guild_permissions, atype):
-            return await interaction.followup.send(APPEAL_PERM_MSG[appeal_need(atype)], ephemeral=True)
         if status != "pending":
             return await interaction.followup.send(
                 f"Апелляция уже {status}.", ephemeral=True
@@ -1091,8 +1072,6 @@ async def appeal_cmd(interaction: discord.Interaction,
         if not r:
             return await interaction.response.send_message("Апелляция не найдена.", ephemeral=True)
         uid, status, atype = r
-        if not can_decide_appeal(interaction.user.guild_permissions, atype):
-            return await interaction.response.send_message(APPEAL_PERM_MSG[appeal_need(atype)], ephemeral=True)
         if status != "pending":
             return await interaction.response.send_message(
                 f"Апелляция уже {status}.", ephemeral=True

@@ -2463,7 +2463,7 @@ function hasPerm(name) {
 }
 
 // Апелляции видит любой, кто может решить хоть одну (как в api_appeals)
-const APPEALS_PERM = 'manage_messages|moderate_members|ban_members';
+const APPEALS_PERM = 'manage_messages|moderate_members|ban_members|kick_members';
 
 function computePerms(g) {
   let raw = 0n;
@@ -3892,11 +3892,8 @@ function openAppealDetails(id) {
   if (!a) return;
 
   const isPending = a.status === 'pending';
-  // Право решать зависит от типа наказания (как на бэке)
-  const canDecide =
-    (a.action_type === 'BAN' || a.action_type === 'TEMPBAN') ? hasPerm('ban_members') :
-    (a.action_type === 'MUTE') ? (hasPerm('moderate_members') || hasPerm('ban_members')) :
-    (hasPerm('manage_messages') || hasPerm('moderate_members') || hasPerm('ban_members'));
+  // Решает любой модератор; что можно — говорит сервер (can_decide) по данным бота
+  const canDecide = a.can_decide ?? hasPerm(APPEALS_PERM);
   document.getElementById('appealModalContent').innerHTML = `
     <div class="modal-title">Апелляция #${a.id}</div>
     <div style="margin-bottom: 1rem;">
@@ -3957,9 +3954,7 @@ function openAppealDetails(id) {
     ` : ''}
     ${isPending && !canDecide ? `
       <div class="input-help" style="padding:.6rem .75rem; background:var(--bg-3); border-radius:6px;">
-        🔒 Принять или отклонить апелляцию типа <b>${a.action_type}</b> может только тот, у кого есть право
-        ${a.action_type==='BAN'||a.action_type==='TEMPBAN' ? '«Банить участников»' :
-          a.action_type==='MUTE' ? '«Модерировать участников»' : '«Управлять сообщениями»'} на сервере
+        🔒 Принимать и отклонять апелляции могут только модераторы
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>
