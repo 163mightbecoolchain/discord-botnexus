@@ -343,11 +343,16 @@ tr.resolved td { opacity: .55; }
 .search-result img { width: 30px; height: 30px; border-radius: 50%; }
 .search-result .av-empty { width: 30px; height: 30px; border-radius: 50%; background: var(--bg-3); flex-shrink: 0; }
 /* Правки сообщений */
-.edit-item { padding: .9rem 1.4rem; border-top: 1px solid var(--border); }
+.edit-item { padding: .9rem 1.4rem; border-top: 1px solid var(--border); cursor: copy; transition: background .12s; }
+.edit-item:hover { background: rgba(var(--accent-rgb), .04); }
 .edit-item:first-child { border-top: 0; }
 .edit-meta { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; font-size: .75rem; color: var(--muted); margin-bottom: .45rem; }
-.edit-meta a { color: var(--accent); text-decoration: none; }
-.edit-meta a:hover { text-decoration: underline; }
+.edit-go { margin-left: auto; display: flex; gap: .35rem; align-items: center; cursor: default; }
+.edit-go a, .edit-go button { font: inherit; font-size: .72rem; font-weight: 600; padding: .22rem .6rem; border-radius: 6px;
+  border: 1px solid var(--border-2); background: var(--bg-3); color: var(--text-2); text-decoration: none; cursor: pointer; }
+.edit-go a:hover, .edit-go button:hover { border-color: var(--accent); color: var(--accent); }
+.edit-go .go-app { background: rgba(var(--accent-rgb), .12); border-color: transparent; color: var(--accent); }
+.edit-text, .edit-tag { cursor: text; }
 .edit-line { display: grid; grid-template-columns: 3.4rem 1fr; gap: .6rem; font-size: .86rem; line-height: 1.5; padding: .3rem 0; }
 .edit-line + .edit-line { border-top: 1px dashed var(--border); }
 .edit-tag { font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: .15rem; }
@@ -4400,16 +4405,41 @@ function wordDiff(oldText, newText) {
   return { before: side('-', 'del'), after: side('+', 'ins') };
 }
 
+async function copyMsgLink(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch (e) {
+    const t = document.createElement('textarea');
+    t.value = url; document.body.appendChild(t); t.select();
+    document.execCommand('copy'); t.remove();
+  }
+  showToast('✓ Ссылка скопирована — вставь её в любой чат Discord и нажми', 'success');
+}
+
+// Клик по правке копирует ссылку — кроме кнопок и случаев, когда выделяют текст
+function editItemClick(ev, el) {
+  if (ev.target.closest('a, button, .edit-go')) return;
+  if (String(window.getSelection() || '').trim()) return;
+  copyMsgLink(el.dataset.url);
+}
+
 function editItemHtml(it) {
   const when = new Date(it.edited_at + 'Z').toLocaleString('ru-RU',
     {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'});
   const diff = it.before == null ? null : wordDiff(it.before, it.after);
+  // discord:// открывает сообщение сразу в приложении (ПК и телефон), https — в браузере
+  const app = it.url.replace('https://discord.com/', 'discord://-/');
   return `
-    <div class="edit-item">
+    <div class="edit-item" data-url="${it.url}" onclick="editItemClick(event, this)"
+         title="Нажми, чтобы скопировать ссылку на сообщение">
       <div class="edit-meta">
         <span>${it.channel ? '#' + escapeHtml(it.channel) : 'канал удалён'}</span>
         <span class="text-mono">${when}</span>
-        <a href="${it.url}" target="_blank" rel="noopener">перейти к сообщению ↗</a>
+        <span class="edit-go">
+          <a class="go-app" href="${app}" title="Открыть сообщение в приложении Discord">Открыть в Discord</a>
+          <a href="${it.url}" target="_blank" rel="noopener" title="Открыть сообщение в браузере">в браузере ↗</a>
+          <button type="button" onclick="copyMsgLink('${it.url}')" title="Скопировать ссылку на сообщение">Копировать ссылку</button>
+        </span>
       </div>
       <div class="edit-line edit-before"><span class="edit-tag">было</span>
         <div class="edit-text">${diff ? (diff.before || '<span class="edit-unknown">пусто</span>')

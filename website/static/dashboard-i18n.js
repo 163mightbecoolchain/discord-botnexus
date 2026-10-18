@@ -320,6 +320,8 @@
     'не на сервере': 'not on the server', 'правок нет': 'no edits', 'Искать в тексте...': 'Search in text...',
     'Удалить правки': 'Delete edits', 'было': 'before', 'стало': 'after', 'пусто': 'empty', 'Архив': 'Archive',
     'канал удалён': 'channel deleted', 'перейти к сообщению ↗': 'go to message ↗',
+    'Открыть в Discord': 'Open in Discord', 'в браузере ↗': 'in browser ↗', 'Копировать ссылку': 'Copy link',
+    '✓ Ссылка скопирована — вставь её в любой чат Discord и нажми': '✓ Link copied — paste it into any Discord chat and click it',
     'неизвестно — сообщение старше памяти бота': 'unknown — the message is older than the bot’s memory',
     'Загрузить ещё из архива': 'Load more from the archive', 'В архиве ничего не найдено': 'Nothing found in the archive',
     'Среди последних правок такого текста нет': 'No recent edits contain this text', 'Правок пока нет': 'No edits yet',
