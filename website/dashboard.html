@@ -356,6 +356,9 @@ tr.resolved td { opacity: .55; }
 .edit-line { display: grid; grid-template-columns: 3.4rem 1fr; gap: .6rem; font-size: .86rem; line-height: 1.5; padding: .3rem 0; }
 .edit-line + .edit-line { border-top: 1px dashed var(--border); }
 .edit-tag { font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: .15rem; }
+.edit-step { grid-template-columns: 5.2rem 1fr; }
+.edit-step .edit-text { color: var(--text); }
+.edit-when { display: block; text-transform: none; letter-spacing: 0; opacity: .8; margin-top: .1rem; }
 .edit-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
 .edit-after .edit-text { color: var(--text); }
 .edit-text del { background: rgba(255,84,112,.18); color: var(--danger); text-decoration: line-through; border-radius: 3px; }
@@ -4460,7 +4463,32 @@ function wordDiff(oldText, newText) {
     flush();
     return out;
   };
-  return { before: side('-', 'del'), after: side('+', 'ins') };
+  // Всё в одной строке: в каждом изменённом куске сначала старое (зачёркнуто красным),
+  // потом новое (зелёным). Пробелы между изменёнными словами — часть куска.
+  const inline = () => {
+    let out = '', i = 0;
+    while (i < ops.length) {
+      if (ops[i][0] === '=') { out += escapeHtml(ops[i][1]); i++; continue; }
+      let j = i, del = '', ins = '';
+      while (j < ops.length) {
+        const [op, t] = ops[j];
+        if (op === '=' && !(/^\s+$/.test(t) && j + 1 < ops.length && ops[j + 1][0] !== '=')) break;
+        if (op !== '+') del += t;
+        if (op !== '-') ins += t;
+        j++;
+      }
+      const raw = del || ins;
+      const lead = raw.match(/^\s*/)[0], tail = raw.match(/\s*$/)[0];
+      out += escapeHtml(lead);
+      if (del.trim()) out += `<del>${escapeHtml(del.trim())}</del>`;
+      if (del.trim() && ins.trim()) out += ' ';
+      if (ins.trim()) out += `<ins>${escapeHtml(ins.trim())}</ins>`;
+      out += escapeHtml(tail);
+      i = j;
+    }
+    return out;
+  };
+  return { before: side('-', 'del'), after: side('+', 'ins'), inline: inline() };
 }
 
 async function copyMsgLink(url) {
@@ -4481,32 +4509,75 @@ function editItemClick(ev, el) {
   copyMsgLink(el.dataset.url);
 }
 
-function editItemHtml(it) {
-  const when = new Date(it.edited_at + 'Z').toLocaleString('ru-RU',
-    {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'});
-  const diff = it.before == null ? null : wordDiff(it.before, it.after);
+const _fmtWhen = (s, opts) => new Date(s + 'Z').toLocaleString('ru-RU', opts ||
+  {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'});
+const EMPTY_TXT = '<span class="edit-unknown">пусто</span>';
+const UNKNOWN_TXT = '<span class="edit-unknown">неизвестно — сообщение старше памяти бота</span>';
+
+// Правки одного сообщения — в одну карточку, по порядку (старые сначала)
+function groupEdits(items) {
+  const map = new Map();
+  for (const it of items) {
+    if (!map.has(it.message_id)) map.set(it.message_id, []);
+    if (!map.get(it.message_id).some(x => x.id === it.id && x.edited_at === it.edited_at)) map.get(it.message_id).push(it);
+  }
+  const groups = [...map.values()];
+  groups.forEach(g => g.sort((a, b) => a.edited_at < b.edited_at ? -1 : a.edited_at > b.edited_at ? 1 : a.id - b.id));
+  return groups.sort((a, b) => a.at(-1).edited_at < b.at(-1).edited_at ? 1 : -1);
+}
+
+function editMetaHtml(g) {
+  const last = g.at(-1);
   // discord:// открывает сообщение сразу в приложении (ПК и телефон), https — в браузере
-  const app = it.url.replace('https://discord.com/', 'discord://-/');
+  const app = last.url.replace('https://discord.com/', 'discord://-/');
+  const when = g.length > 1
+    ? `${_fmtWhen(g[0].edited_at)} — ${_fmtWhen(last.edited_at)}` : _fmtWhen(last.edited_at);
+  return `
+      <div class="edit-meta">
+        <span>${last.channel ? '#' + escapeHtml(last.channel) : 'канал удалён'}</span>
+        <span class="text-mono">${when}</span>
+        ${g.length > 1 ? `<span class="chip ok">${g.length} ${plural(g.length, 'правка', 'правки', 'правок')}</span>` : ''}
+        ${g.some(x => x.source === 'log') ? '<span class="chip" title="Восстановлено из лог-канала">из лога</span>' : ''}
+        ${g.some(x => x.partial) ? '<span class="chip warn" title="В логе была только часть текста — изменённые строки">фрагмент</span>' : ''}
+        <span class="edit-go">
+          <a class="go-app" href="${app}" title="Открыть сообщение в приложении Discord">Открыть в Discord</a>
+          <a href="${last.url}" target="_blank" rel="noopener" title="Открыть сообщение в браузере">в браузере ↗</a>
+          <button type="button" onclick="copyMsgLink('${last.url}')" title="Скопировать ссылку на сообщение">Копировать ссылку</button>
+        </span>
+      </div>`;
+}
+
+function editGroupHtml(g) {
+  if (g.length === 1) return editItemHtml(g[0]);
+  const first = g[0];
+  // «было» — исходный текст, дальше каждая правка относительно предыдущей версии
+  const steps = g.map((it, k) => {
+    const prev = it.before ?? (k ? g[k - 1].after : null);
+    const body = prev == null ? escapeHtml(it.after) || EMPTY_TXT : wordDiff(prev, it.after).inline || EMPTY_TXT;
+    return `<div class="edit-line edit-step"><span class="edit-tag">правка ${k + 1}
+        <span class="edit-when">${_fmtWhen(it.edited_at, {hour: '2-digit', minute: '2-digit'})}</span></span>
+      <div class="edit-text">${body}</div></div>`;
+  }).join('');
+  return `
+    <div class="edit-item" data-url="${g.at(-1).url}" onclick="editItemClick(event, this)"
+         title="Нажми, чтобы скопировать ссылку на сообщение">
+      ${editMetaHtml(g)}
+      <div class="edit-line edit-step edit-before"><span class="edit-tag">было</span>
+        <div class="edit-text">${first.before == null ? UNKNOWN_TXT : escapeHtml(first.before) || EMPTY_TXT}</div></div>
+      ${steps}
+    </div>`;
+}
+
+function editItemHtml(it) {
+  const diff = it.before == null ? null : wordDiff(it.before, it.after);
   return `
     <div class="edit-item" data-url="${it.url}" onclick="editItemClick(event, this)"
          title="Нажми, чтобы скопировать ссылку на сообщение">
-      <div class="edit-meta">
-        <span>${it.channel ? '#' + escapeHtml(it.channel) : 'канал удалён'}</span>
-        <span class="text-mono">${when}</span>
-        ${it.source === 'log' ? '<span class="chip" title="Восстановлено из лог-канала">из лога</span>' : ''}
-        ${it.partial ? '<span class="chip warn" title="В логе была только часть текста — изменённые строки">фрагмент</span>' : ''}
-        <span class="edit-go">
-          <a class="go-app" href="${app}" title="Открыть сообщение в приложении Discord">Открыть в Discord</a>
-          <a href="${it.url}" target="_blank" rel="noopener" title="Открыть сообщение в браузере">в браузере ↗</a>
-          <button type="button" onclick="copyMsgLink('${it.url}')" title="Скопировать ссылку на сообщение">Копировать ссылку</button>
-        </span>
-      </div>
+      ${editMetaHtml([it])}
       <div class="edit-line edit-before"><span class="edit-tag">было</span>
-        <div class="edit-text">${diff ? (diff.before || '<span class="edit-unknown">пусто</span>')
-          : '<span class="edit-unknown">неизвестно — сообщение старше памяти бота</span>'}</div></div>
+        <div class="edit-text">${diff ? (diff.before || EMPTY_TXT) : UNKNOWN_TXT}</div></div>
       <div class="edit-line edit-after"><span class="edit-tag">стало</span>
-        <div class="edit-text">${diff ? (diff.after || '<span class="edit-unknown">пусто</span>')
-          : escapeHtml(it.after) || '<span class="edit-unknown">пусто</span>'}</div></div>
+        <div class="edit-text">${diff ? (diff.after || EMPTY_TXT) : escapeHtml(it.after) || EMPTY_TXT}</div></div>
     </div>`;
 }
 
@@ -4515,13 +4586,20 @@ function renderEdits() {
   const box = document.getElementById('edBox');
   const filterVal = document.getElementById('edFilter')?.value ?? e.q;
   const hadFocus = document.activeElement?.id === 'edFilter';
-  let list = e.recent.map(editItemHtml).join('');
+  // Одно сообщение — одна карточка. Если его правки разошлись между основной базой
+  // и архивом, карточка остаётся среди последних и дополняется после загрузки архива.
+  const groups = groupEdits([...e.recent, ...e.archive]);
+  const recentIds = new Set(e.recent.map(x => x.message_id));
+  const top = groups.filter(g => recentIds.has(g[0].message_id));
+  const older = groups.filter(g => !recentIds.has(g[0].message_id));
+  let list = top.map(editGroupHtml).join('');
   if (!e.recent.length) list = `<div class="empty" style="padding:1.5rem;"><div class="empty-sub">${
     e.q ? 'Среди последних правок такого текста нет' :
     e.enabled ? 'Правок пока нет' : 'Правок нет — запись выключена'}</div></div>`;
   if (e.archiveOpen) {
-    list += `<div class="edit-divider">Архив</div>` + (e.archive.length ? e.archive.map(editItemHtml).join('')
-      : `<div class="empty" style="padding:1.5rem;"><div class="empty-sub">В архиве ничего не найдено</div></div>`);
+    list += `<div class="edit-divider">Архив</div>` + (older.length ? older.map(editGroupHtml).join('')
+      : `<div class="empty" style="padding:1.5rem;"><div class="empty-sub">${
+          e.archive.length ? 'Всё из архива — в карточках выше' : 'В архиве ничего не найдено'}</div></div>`);
   }
   const canMore = e.archiveOpen ? e.more : c.archive > 0;
   if (canMore) list += `<div class="edit-more"><button class="btn btn-ghost btn-sm"
