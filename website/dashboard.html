@@ -347,6 +347,52 @@ tr.resolved td { opacity: .55; }
 .search-result:hover { background: var(--panel-2); border-color: var(--border-2); }
 .search-result img { width: 30px; height: 30px; border-radius: 50%; }
 .search-result .av-empty { width: 30px; height: 30px; border-radius: 50%; background: var(--bg-3); flex-shrink: 0; }
+/* Инвайты */
+.stat-sub { font-size: .9rem; color: var(--muted); font-weight: 600; }
+.inv-legend { display: flex; flex-wrap: wrap; gap: .4rem 1rem; }
+.inv-legend span, .inv-tip div { display: inline-flex; align-items: center; gap: .35rem; }
+.inv-legend i, .inv-tip i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.inv-chart { position: relative; }
+.inv-chart svg { width: 100%; height: 170px; display: block; overflow: visible; }
+.inv-grid { stroke: var(--border); stroke-width: 1; }
+.inv-axis { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
+.inv-hit { fill: transparent; cursor: crosshair; }
+.inv-hit.on { fill: rgba(255,255,255,.04); }
+.inv-tip { position: absolute; top: 4px; pointer-events: none; background: var(--panel-2); border: 1px solid var(--border-2);
+  border-radius: 8px; padding: .45rem .65rem; font-size: .76rem; color: var(--text-2); box-shadow: 0 8px 20px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; gap: .15rem; white-space: nowrap; z-index: 5; }
+.inv-tip[hidden] { display: none; }
+.inv-tip b { color: var(--text); }
+.inv-search { position: relative; }
+.inv-suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 50; background: var(--panel);
+  border: 1px solid var(--border-2); border-radius: 10px; padding: .35rem; max-height: 360px; overflow-y: auto;
+  box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+.inv-sg-title { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: .45rem .55rem .2rem; font-weight: 600; }
+.inv-sg { display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left; background: none; border: 0;
+  color: var(--text); font: inherit; font-size: .84rem; padding: .45rem .55rem; border-radius: 7px; cursor: pointer; }
+.inv-sg:hover, .inv-sg:focus-visible { background: var(--panel-2); outline: none; }
+.inv-sg-meta { margin-left: auto; font-size: .72rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.inv-sg-empty { padding: .6rem; font-size: .82rem; color: var(--muted); }
+.inv-chips { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; margin-top: .8rem; }
+.inv-chip { font: inherit; font-size: .76rem; font-weight: 600; padding: .3rem .75rem; border-radius: 999px; cursor: pointer;
+  background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); }
+.inv-chip:hover { border-color: var(--border-2); color: var(--text); }
+.inv-chip[aria-pressed="true"] { background: rgba(var(--accent-rgb), .14); color: var(--accent); border-color: transparent; }
+.inv-chip.warn[aria-pressed="true"] { background: rgba(255,84,112,.14); color: var(--danger); }
+.inv-table th.sortable { cursor: pointer; user-select: none; }
+.inv-table th.sortable:hover { color: var(--text); }
+.inv-table th.sortable[data-dir="desc"]::after { content: ' ↓'; color: var(--accent); }
+.inv-table th.sortable[data-dir="asc"]::after { content: ' ↑'; color: var(--accent); }
+.inv-row { cursor: pointer; }
+.inv-sub { font-size: .7rem; color: var(--muted); }
+mark { background: rgba(var(--accent-rgb), .22); color: inherit; border-radius: 3px; padding: 0 1px; }
+.inv-modal { max-width: 680px; }
+.inv-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .8rem 1rem; }
+.inv-facts label { display: block; font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .2rem; }
+.inv-members { max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.inv-member { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; padding: .45rem .7rem; border-top: 1px solid var(--border); font-size: .84rem; }
+.inv-member:first-child { border-top: 0; }
+.inv-member.focus { background: rgba(var(--accent-rgb), .1); }
 /* Правки сообщений */
 .edit-item { padding: .9rem 1.4rem; border-top: 1px solid var(--border); cursor: copy; transition: background .12s; }
 .edit-item:hover { background: rgba(var(--accent-rgb), .04); }
@@ -1796,33 +1842,86 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Инвайты</div>
-          <div class="page-subtitle">Кто кого пригласил на сервер</div>
+          <div class="page-subtitle">Откуда приходят участники и сколько из них остаётся</div>
+        </div>
+        <div class="seg" role="group" aria-label="Период" data-seg="inv-days">
+          <button type="button" data-mode="7" onclick="setInvDays(7)">7 дней</button>
+          <button type="button" data-mode="30" onclick="setInvDays(30)">30 дней</button>
+          <button type="button" data-mode="90" onclick="setInvDays(90)">90 дней</button>
         </div>
       </div>
 
-      <div class="search-bar">
-        <input type="text" class="input" id="inviteSearch"
-               placeholder="Поиск по коду, имени, заметке..."
-               oninput="debounceInviteSearch()">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('inviteSearch').value=''; loadInvites('')">Сбросить</button>
+      <div class="stats-grid" id="invStats"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Входы по дням</div>
+            <div class="card-desc inv-legend">
+              <span><i style="background:#00a67c"></i>по ссылкам</span>
+              <span><i style="background:#6d86c9"></i>источник не определён</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-body" style="padding-top:.25rem;">
+          <div class="inv-chart" id="invChart"></div>
+        </div>
+      </div>
+
+      <div class="card" style="overflow:visible; position:relative; z-index:3;">
+        <div class="card-body">
+          <div class="inv-search">
+            <input type="text" class="input" id="inviteSearch" autocomplete="off" aria-label="Поиск по инвайтам"
+                   placeholder="Код или ссылка, создатель, заметка или ник того, кто зашёл..."
+                   oninput="debounceInviteSearch()" onkeydown="if(event.key==='Escape')closeInvSuggest()">
+            <div class="inv-suggest" id="invSuggest" hidden></div>
+          </div>
+          <div class="inv-chips" id="invChips">
+            <button type="button" class="inv-chip" data-f="active" onclick="toggleInvFilter('active')">Активные</button>
+            <button type="button" class="inv-chip" data-f="gone" onclick="toggleInvFilter('gone')">Истёкшие и удалённые</button>
+            <button type="button" class="inv-chip" data-f="nojoins" onclick="toggleInvFilter('nojoins')">Без входов</button>
+            <button type="button" class="inv-chip" data-f="note" onclick="toggleInvFilter('note')">С заметкой</button>
+            <button type="button" class="inv-chip warn" data-f="suspicious" onclick="toggleInvFilter('suspicious')">⚠️ Подозрительные</button>
+            <span id="invActiveFilters"></span>
+          </div>
+        </div>
       </div>
 
       <div class="table-wrap">
-        <table class="table">
+        <table class="table inv-table">
           <thead>
             <tr>
-              <th>Код</th><th>Создал</th><th>Использований</th>
-              <th>Последний раз</th><th>Заметка</th>
+              <th>Ссылка</th><th>Создал</th>
+              <th class="sortable" data-sort="joins" onclick="sortInv('joins')">Входы</th>
+              <th class="sortable" data-sort="retention" onclick="sortInv('retention')">Остались</th>
+              <th class="sortable" data-sort="punished" onclick="sortInv('punished')">Наказаны</th>
+              <th class="sortable" data-sort="uses" onclick="sortInv('uses')">В Discord</th>
+              <th class="sortable" data-sort="last_join" onclick="sortInv('last_join')">Последний вход</th>
+              <th>Заметка</th>
             </tr>
           </thead>
           <tbody id="invitesTable">
-            <tr><td colspan="5"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
+            <tr><td colspan="8"><div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Загрузка...</div></div></td></tr>
           </tbody>
         </table>
       </div>
+
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-head"><div>
+          <div class="card-title">Топ пригласивших</div>
+          <div class="card-desc">За выбранный период: сколько людей пришло по их ссылкам и сколько осталось</div>
+        </div></div>
+        <div id="invTop"></div>
+      </div>
     </div>
 
+
   </main>
+</div>
+
+<!-- Карточка инвайта -->
+<div class="modal-bg" id="invModal" onclick="if(event.target===this)closeInvModal()">
+  <div class="modal inv-modal" id="invModalContent"></div>
 </div>
 
 <!-- GUILD PICKER MODAL -->
@@ -2396,7 +2495,11 @@ async function init() {
   showApp();
   await loadGuilds();
 
-  const savedGuild = localStorage.getItem('current_guild');
+  // Ссылка на выборку инвайтов (?page=invites&g=…) — открываем её сервер и страницу.
+  // Параметры запоминаем до selectGuild: он переходит на «Обзор» и чистит адрес.
+  const deep = new URLSearchParams(location.search);
+  const deepGuild = deep.get('page') === 'invites' ? userGuilds.find(x => x.id === deep.get('g')) : null;
+  const savedGuild = deepGuild ? deepGuild.id : localStorage.getItem('current_guild');
   if (savedGuild) {
     const g = userGuilds.find(x => x.id === savedGuild);
     if (g) await selectGuild(g);
@@ -2406,6 +2509,10 @@ async function init() {
     await selectGuild(userGuilds[0]);
   }
   if (!currentGuild) openGuildPicker();
+  else if (deepGuild) {
+    history.replaceState(null, '', '/dashboard?' + deep);
+    await showPage('invites');
+  }
 }
 
 async function loadGuilds() {
@@ -2535,6 +2642,8 @@ async function selectGuild(g) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function showPage(name) {
   closeSidebar();
+  // Адрес хранит состояние страницы «Инвайты» — на других страницах он не нужен
+  if (name !== 'invites' && location.search.includes('page=invites')) history.replaceState(null, '', '/dashboard');
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === name);
   });
@@ -2562,7 +2671,7 @@ async function showPage(name) {
   if (name === 'security') await Promise.all([loadSecurity(), loadProtection()]);
   if (name === 'moderation') await loadProtection();
   if (name === 'banreq') await loadBanRequests();
-  if (name === 'invites') await loadInvites('');
+  if (name === 'invites') { invStateFromUrl(); await loadInvites(); }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -5032,40 +5141,382 @@ async function reviewBanReq(id, action) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  INVITES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Цвета графика проверены валидатором палитры на тёмной поверхности (контраст, дальтонизм)
+const INV_COLORS = { known: '#00a67c', unknown: '#6d86c9' };
+const INV_STATUS = { active: 'активна', vanity: 'vanity', gone: 'истекла или удалена', unknown: '' };
+let _inv = { days: 30, data: null, filters: new Set(), creator: null, q: '', sort: { key: 'joins', dir: -1 } };
 let _inviteSearchTimer = null;
-function debounceInviteSearch() {
-  clearTimeout(_inviteSearchTimer);
-  _inviteSearchTimer = setTimeout(() => {
-    const q = document.getElementById('inviteSearch')?.value || '';
-    loadInvites(q);
-  }, 400);
+
+const invCodeUrl = code => encodeURIComponent(code || '_unknown');
+const invDate = s => s ? new Date(s + 'Z').toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit', year: '2-digit'}) : '—';
+
+// Состояние страницы — в адресе: выборкой можно поделиться ссылкой
+function invStateToUrl() {
+  if (!currentGuild) return;
+  const p = new URLSearchParams({ page: 'invites', g: currentGuild.id });
+  if (_inv.days !== 30) p.set('d', _inv.days);
+  if (_inv.filters.size) p.set('f', [..._inv.filters].join(','));
+  if (_inv.creator) { p.set('c', _inv.creator.id); p.set('cn', _inv.creator.name); }
+  if (_inv.q) p.set('q', _inv.q);
+  if (_inv.sort.key !== 'joins' || _inv.sort.dir !== -1) p.set('s', `${_inv.sort.key}.${_inv.sort.dir}`);
+  history.replaceState(null, '', '/dashboard?' + p);
 }
 
-async function loadInvites(q='') {
+function invStateFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('page') !== 'invites') return;
+  _inv.days = [7, 30, 90].includes(+p.get('d')) ? +p.get('d') : 30;
+  _inv.filters = new Set((p.get('f') || '').split(',').filter(Boolean));
+  _inv.creator = p.get('c') ? { id: p.get('c'), name: p.get('cn') || p.get('c') } : null;
+  _inv.q = p.get('q') || '';
+  const [k, d] = (p.get('s') || '').split('.');
+  if (k) _inv.sort = { key: k, dir: +d || -1 };
+  const inp = document.getElementById('inviteSearch');
+  if (inp) inp.value = _inv.q;
+}
+
+function setInvDays(d) {
+  _inv.days = d;
+  loadInvites();
+}
+
+async function loadInvites() {
   if (!currentGuild) return;
-  document.getElementById('invitesTable').innerHTML = skeletonRows(5, 6);
+  setSegValue('inv-days', String(_inv.days));
+  document.getElementById('invitesTable').innerHTML = skeletonRows(5, 8);
   try {
-    const url = `/api/guild/${currentGuild.id}/invites` + (q ? `?q=${encodeURIComponent(q)}` : '');
-    const r = await apiFetch(url);
-    const rows = r.ok ? await r.json() : [];
-    const tbody = document.getElementById('invitesTable');
-    if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="empty">
-        <div class="empty-title">${q ? 'Ничего не найдено' : 'Нет данных'}</div>
-        ${q ? `<div class="empty-sub">по запросу «${escapeHtml(q)}»</div>` : ''}
-      </div></td></tr>`;
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites?days=${_inv.days}`);
+    if (!r.ok) throw new Error(r.status);
+    _inv.data = await r.json();
+  } catch(e) {
+    document.getElementById('invitesTable').innerHTML =
+      '<tr><td colspan="8"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
+    return;
+  }
+  renderInvStats();
+  renderInvChart();
+  renderInvTable();
+  renderInvTop();
+  invStateToUrl();
+}
+
+function renderInvStats() {
+  const t = _inv.data.totals, d = _inv.days;
+  const pctUnknown = t.joins ? Math.round(100 * t.unknown / t.joins) : 0;
+  document.getElementById('invStats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Входов за ${d} дн.</div><div class="stat-value">${t.joins}</div></div>
+    <div class="stat-card info"><div class="stat-label">Остались на сервере</div>
+      <div class="stat-value">${t.retention == null ? '—' : t.retention + '%'}</div></div>
+    <div class="stat-card warning"><div class="stat-label">Источник не определён</div>
+      <div class="stat-value">${t.unknown}<span class="stat-sub">${t.joins ? ` · ${pctUnknown}%` : ''}</span></div></div>
+    <div class="stat-card"><div class="stat-label">Активных ссылок</div><div class="stat-value">${t.active}</div></div>
+    <div class="stat-card ${t.suspicious ? 'danger' : ''}" style="cursor:pointer" onclick="toggleInvFilter('suspicious', true)">
+      <div class="stat-label">Подозрительных</div><div class="stat-value">${t.suspicious}</div></div>
+    ${_inv.data.can_read_invites ? '' : `<div class="notice" style="grid-column:1/-1;">⚠️<div>У бота нет права «Управлять сервером» —
+      действующие ссылки и их счётчики не видны, показана только история входов.</div></div>`}`;
+}
+
+// Столбцы по дням: снизу «по ссылкам», сверху «не определён», 2px зазор, скругление только сверху
+function renderInvChart() {
+  const box = document.getElementById('invChart');
+  const s = _inv.data.series;
+  // Ширина — реальная, чтобы подписи не растягивались; при ресайзе график перестраивается
+  const W = Math.max(320, box.clientWidth || 900), H = 170, L = 30, B = 22, T = 8;
+  const max = Math.max(1, ...s.map(x => x.known + x.unknown));
+  const nice = max <= 4 ? max : Math.ceil(max / 4) * 4;
+  const step = (W - L) / s.length, bw = Math.max(2, Math.min(22, step - 3));
+  const y = v => H - B - (v / nice) * (H - B - T);
+  const top = (x, y0, y1, w) => {          // столбик со скруглёнными верхними углами
+    const h = y0 - y1, r = Math.min(4, h, w / 2);
+    if (h <= 0) return '';
+    return `M${x},${y0} V${y1 + r} Q${x},${y1} ${x + r},${y1} H${x + w - r} Q${x + w},${y1} ${x + w},${y1 + r} V${y0} Z`;
+  };
+  let grid = '', bars = '', hits = '', labels = '';
+  for (const v of [0, nice / 2, nice]) {
+    grid += `<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" class="inv-grid"/>
+             <text x="${L - 6}" y="${y(v) + 3}" class="inv-axis" text-anchor="end">${Math.round(v)}</text>`;
+  }
+  const every = Math.ceil(s.length / Math.max(3, Math.floor(W / 110)));
+  s.forEach((d, i) => {
+    const x = L + i * step + (step - bw) / 2, yk = y(d.known), yt = y(d.known + d.unknown);
+    if (d.unknown) bars += `<path d="${top(x, yk - (d.known ? 2 : 0), yt, bw)}" fill="${INV_COLORS.unknown}"/>`;
+    if (d.known) bars += d.unknown
+      ? `<rect x="${x}" y="${yk}" width="${bw}" height="${H - B - yk}" fill="${INV_COLORS.known}"/>`
+      : `<path d="${top(x, H - B, yk, bw)}" fill="${INV_COLORS.known}"/>`;
+    hits += `<rect x="${L + i * step}" y="${T}" width="${step}" height="${H - B - T}" class="inv-hit" data-i="${i}"/>`;
+    if (i % every === 0 || i === s.length - 1)
+      labels += `<text x="${L + i * step + step / 2}" y="${H - 6}" class="inv-axis" text-anchor="middle">${d.day.slice(8, 10)}.${d.day.slice(5, 7)}</text>`;
+  });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img"
+      aria-label="Входы по дням за ${_inv.days} дней">${grid}${bars}${labels}${hits}</svg>
+    <div class="inv-tip" id="invTip" hidden></div>`;
+  const tip = document.getElementById('invTip');
+  box.querySelectorAll('.inv-hit').forEach(h => {
+    h.addEventListener('mouseenter', () => {
+      const d = s[+h.dataset.i];
+      tip.innerHTML = `<b>${invDate(d.day)}</b><div><i style="background:${INV_COLORS.known}"></i>по ссылкам: ${d.known}</div>
+        <div><i style="background:${INV_COLORS.unknown}"></i>не определён: ${d.unknown}</div>`;
+      const br = box.getBoundingClientRect(), hr = h.getBoundingClientRect();
+      tip.hidden = false;
+      // сбоку от столбика, чтобы не закрывать его; у правого края — слева
+      const right = hr.right - br.left + 6, left = hr.left - br.left - tip.offsetWidth - 6;
+      tip.style.left = (right + tip.offsetWidth <= br.width ? right : Math.max(0, left)) + 'px';
+      h.classList.add('on');
+    });
+    h.addEventListener('mouseleave', () => { tip.hidden = true; h.classList.remove('on'); });
+  });
+}
+
+let _invResize = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_invResize);
+  _invResize = setTimeout(() => {
+    if (_inv.data && document.getElementById('content-invites')?.classList.contains('active')) renderInvChart();
+  }, 150);
+});
+
+function toggleInvFilter(f, only = false) {
+  if (only) { _inv.filters = new Set([f]); }
+  else if (_inv.filters.has(f)) _inv.filters.delete(f);
+  else {
+    _inv.filters.add(f);
+    if (f === 'active') _inv.filters.delete('gone');      // взаимоисключающие
+    if (f === 'gone') _inv.filters.delete('active');
+  }
+  renderInvTable();
+  invStateToUrl();
+}
+
+function setInvCreator(id, name) {
+  _inv.creator = id ? { id: String(id), name } : null;
+  closeInvSuggest();
+  renderInvTable();
+  invStateToUrl();
+}
+
+function sortInv(key) {
+  _inv.sort = _inv.sort.key === key ? { key, dir: -_inv.sort.dir } : { key, dir: -1 };
+  renderInvTable();
+  invStateToUrl();
+}
+
+function invMatch(text) {
+  // подсветка совпадения с тем, что набрано в поиске
+  const t = escapeHtml(text || ''), q = _inv.q.trim();
+  if (!q || q.length < 2) return t;
+  const i = (text || '').toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return t;
+  return escapeHtml(text.slice(0, i)) + '<mark>' + escapeHtml(text.slice(i, i + q.length)) + '</mark>' + escapeHtml(text.slice(i + q.length));
+}
+
+function invFiltered() {
+  const f = _inv.filters, q = invCleanCode(_inv.q).toLowerCase(), qr = _inv.q.trim().toLowerCase();
+  let rows = _inv.data.invites.filter(r => {
+    if ((f.has('active') || f.has('gone')) &&
+        !((f.has('active') && (r.status === 'active' || r.status === 'vanity')) || (f.has('gone') && r.status === 'gone'))) return false;
+    if (f.has('nojoins') && (r.joins || r.status === 'unknown')) return false;
+    if (f.has('note') && !r.note) return false;
+    if (f.has('suspicious') && !r.suspicious) return false;
+    if (_inv.creator && r.inviter_id !== _inv.creator.id) return false;
+    if (qr.length >= 2 && !(r.code.toLowerCase().includes(q) || (r.note || '').toLowerCase().includes(qr)
+        || (r.inviter_name || '').toLowerCase().includes(qr))) return false;
+    return true;
+  });
+  const { key, dir } = _inv.sort;
+  const val = r => key === 'last_join' ? (r.last_join || '') : (r[key] ?? -1);
+  return rows.sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir || b.joins - a.joins);
+}
+
+function invCleanCode(s) {
+  return (s || '').trim().replace(/^(https?:\/\/)?(www\.)?/, '')
+    .replace(/^(discord\.gg|discord(app)?\.com\/invite)\//, '').split('?')[0].replace(/\/+$/, '');
+}
+
+function renderInvTable() {
+  if (!_inv.data) return;
+  document.querySelectorAll('#invChips .inv-chip').forEach(b =>
+    b.setAttribute('aria-pressed', String(_inv.filters.has(b.dataset.f))));
+  document.getElementById('invActiveFilters').innerHTML = _inv.creator
+    ? `<span class="chip-x">Создатель: ${escapeHtml(_inv.creator.name)}
+        <button type="button" aria-label="Сбросить создателя" onclick="setInvCreator(null)">×</button></span>` : '';
+  document.querySelectorAll('.inv-table th.sortable').forEach(th =>
+    th.dataset.dir = th.dataset.sort === _inv.sort.key ? (_inv.sort.dir < 0 ? 'desc' : 'asc') : '');
+  const rows = invFiltered();
+  const tbody = document.getElementById('invitesTable');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-title">Ничего не найдено</div>
+      <div class="empty-sub">Попробуй снять фильтры или изменить запрос</div></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.slice(0, 300).map((r, i) => {
+    const name = r.status === 'unknown' ? '<span class="text-muted">Источник не определён</span>'
+      : `<span class="code">${invMatch(r.code)}</span>`;
+    const status = r.status === 'unknown' ? '' : r.status === 'vanity' ? '<span class="chip">vanity</span>'
+      : r.status === 'active' ? `<span class="chip ok">активна</span>${r.temporary ? ' <span class="chip">временная</span>' : ''}`
+      : '<span class="chip">истекла / удалена</span>';
+    const discord = r.uses == null ? '<span class="text-muted">—</span>'
+      : `${r.uses}${r.max_uses ? ' / ' + r.max_uses : ''}<div class="inv-sub">${r.expires_at ? 'до ' + invDate(r.expires_at) : 'бессрочно'}</div>`;
+    const kept = r.joins ? `${r.stayed} из ${r.joins}<div class="inv-sub">${r.retention}%</div>` : '<span class="text-muted">—</span>';
+    return `
+      <tr class="stagger-in inv-row" style="animation-delay:${Math.min(i, 15) * 30}ms" onclick="if(!event.target.closest('.uchip'))openInvite('${escapeHtml(r.code)}')">
+        <td>${name} ${status}${r.suspicious ? ` <span class="chip danger" title="${escapeHtml(r.flag)}">⚠️ подозрительная</span>` : ''}</td>
+        <td>${r.inviter_id ? userChip(r.inviter_id, r.inviter_name) : `<span class="text-muted">${escapeHtml(r.inviter_name || '—')}</span>`}</td>
+        <td class="text-mono">${r.joins}</td>
+        <td class="text-mono">${kept}</td>
+        <td class="text-mono">${r.punished ? `<span style="color:var(--danger)">${r.punished}</span>` : '0'}</td>
+        <td class="text-mono">${discord}</td>
+        <td class="text-mono text-muted">${invDate(r.last_join)}</td>
+        <td>${r.note ? invMatch(r.note) : '<span class="text-muted">—</span>'}</td>
+      </tr>`;
+  }).join('');
+}
+
+function renderInvTop() {
+  const box = document.getElementById('invTop'), top = _inv.data.top;
+  box.innerHTML = !top.length ? '<div class="empty" style="padding:1.5rem;"><div class="empty-sub">За этот период по ссылкам никто не заходил</div></div>' : `
+    <div class="table-wrap" style="border:0; border-radius:0;"><table class="table">
+      <thead><tr><th>#</th><th>Кто</th><th>Ссылок</th><th>Пришло</th><th>Остались</th></tr></thead>
+      <tbody>${top.map((t, i) => `
+        <tr class="inv-row" onclick="setInvCreator('${t.id}', ${escapeHtml(JSON.stringify(t.name))}); document.getElementById('invitesTable').scrollIntoView({behavior:'smooth', block:'start'})"
+            title="Показать ссылки этого участника">
+          <td class="text-mono text-muted">${i + 1}</td><td>${escapeHtml(t.name)}</td>
+          <td class="text-mono">${t.invites}</td><td class="text-mono">${t.joins}</td>
+          <td class="text-mono">${t.stayed} · ${t.retention}%</td></tr>`).join('')}
+      </tbody></table></div>`;
+}
+
+// Поиск: таблица фильтруется сразу, подсказки по трём разделам — с сервера
+function debounceInviteSearch() {
+  clearTimeout(_inviteSearchTimer);
+  _inv.q = document.getElementById('inviteSearch')?.value || '';
+  renderInvTable();
+  _inviteSearchTimer = setTimeout(runInvSuggest, 300);
+}
+
+async function runInvSuggest() {
+  invStateToUrl();
+  const q = _inv.q.trim();
+  const box = document.getElementById('invSuggest');
+  if (q.length < 2 || !currentGuild) return closeInvSuggest();
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites/search?q=${encodeURIComponent(q)}`);
+    if (!r.ok) return closeInvSuggest();
+    const d = await r.json();
+    if (_inv.q.trim() !== q) return;          // пока ждали ответ, запрос сменился
+    const group = (title, items) => items.length ? `<div class="inv-sg-title">${title}</div>${items.join('')}` : '';
+    const html =
+      group('🔗 Инвайты', d.invites.map(x => `<button type="button" class="inv-sg" onclick="closeInvSuggest(); openInvite('${escapeHtml(x.code)}')">
+        <span class="code">${invMatch(x.code)}</span> <span class="text-muted">${escapeHtml(x.inviter_name)}${x.note ? ' · ' + invMatch(x.note) : ''}</span>
+        <span class="inv-sg-meta">${x.joins} вх.</span></button>`)) +
+      group('👤 Создатели', d.creators.map(x => `<button type="button" class="inv-sg" onclick="setInvCreator('${x.id}', ${escapeHtml(JSON.stringify(x.name))})">
+        ${invMatch(x.name)} <span class="inv-sg-meta">ссылок: ${x.invites} · пришло: ${x.joins}</span></button>`)) +
+      group('🚪 Зашедшие', d.joined.map(x => `<button type="button" class="inv-sg" onclick="closeInvSuggest(); openInvite('${escapeHtml(x.code)}', '${x.id}')">
+        ${invMatch(x.name)} <span class="text-muted">→ ${x.code ? `<span class="code">${escapeHtml(x.code)}</span>` : 'источник не определён'}${x.inviter_name ? ' · ' + escapeHtml(x.inviter_name) : ''}</span>
+        <span class="inv-sg-meta">${invDate(x.joined_at)}</span></button>`));
+    box.innerHTML = html || '<div class="inv-sg-empty">Ничего не найдено</div>';
+    box.hidden = false;
+  } catch(e) {}
+}
+
+function closeInvSuggest() {
+  const box = document.getElementById('invSuggest');
+  if (box) box.hidden = true;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.inv-search')) closeInvSuggest();
+});
+
+// ── Карточка инвайта ─────────────────────────────────────────
+let _invCard = null;
+
+async function openInvite(code, focusUid = null) {
+  const box = document.getElementById('invModalContent');
+  box.innerHTML = '<div class="empty"><div class="empty-title">Загрузка...</div></div>';
+  document.getElementById('invModal').classList.add('show');
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites/code/${invCodeUrl(code)}`);
+    if (!r.ok) throw new Error(r.status);
+    _invCard = await r.json();
+  } catch(e) {
+    box.innerHTML = `<div class="empty"><div class="empty-title">Не удалось загрузить</div></div>`;
+    return;
+  }
+  const c = _invCard, a = c.active;
+  const title = c.code ? `Инвайт <span class="code">${escapeHtml(c.code)}</span>` : 'Источник не определён';
+  box.innerHTML = `
+    <div class="modal-title">${title}</div>
+    ${c.flag ? `<div class="notice" style="margin-bottom:1rem;">⚠️<div>Подозрительная ссылка: ${escapeHtml(c.flag)}</div></div>` : ''}
+    ${!c.code ? `<div class="input-help" style="margin-bottom:1rem;">Бот не смог определить, по какой ссылке зашли эти участники:
+      Discord не сообщает это напрямую, и иногда инвайт не вычислить (например, при нескольких входах одновременно)</div>` : ''}
+    <div class="inv-facts">
+      ${c.code ? `<div><label>Статус</label><div>${a ? (a.vanity ? 'vanity-ссылка сервера' : 'активна') : 'истекла или удалена'}</div></div>` : ''}
+      ${c.inviter_id || c.inviter_name ? `<div><label>Создал</label><div>${c.inviter_id ? userChip(c.inviter_id, c.inviter_name) : escapeHtml(c.inviter_name)}</div></div>` : ''}
+      ${a && a.channel ? `<div><label>Канал</label><div>#${escapeHtml(a.channel)}</div></div>` : ''}
+      ${a ? `<div><label>Использований</label><div class="text-mono">${a.uses}${a.max_uses ? ' / ' + a.max_uses : ''}</div></div>
+             <div><label>Истекает</label><div class="text-mono">${a.expires_at ? invDate(a.expires_at) : 'бессрочно'}${a.temporary ? ' · временное членство' : ''}</div></div>` : ''}
+      <div><label>Зашло</label><div class="text-mono">${c.joins}</div></div>
+      <div><label>Остались</label><div class="text-mono">${c.stayed}${c.joins ? ` · ${Math.round(100 * c.stayed / c.joins)}%` : ''}</div></div>
+      <div><label>Наказаны</label><div class="text-mono"${c.punished ? ' style="color:var(--danger)"' : ''}>${c.punished}</div></div>
+    </div>
+    ${c.code ? `<div class="form-group" style="margin-top:1rem;">
+      <label for="invNote">Заметка</label>
+      ${c.can_manage ? `<div style="display:flex; gap:.5rem;">
+          <input class="input" id="invNote" maxlength="200" value="${escapeHtml(c.note)}" placeholder="Например: реклама на Reddit, осень">
+          <button class="btn btn-ghost btn-sm" onclick="btnBusy(this, saveInvNote)">Сохранить</button></div>`
+        : `<div>${escapeHtml(c.note || '—')}</div>`}
+    </div>` : ''}
+    <div class="form-group" style="margin-top:1rem;">
+      <label>Кто зашёл${c.joins >= 300 ? ' (последние 300)' : ''}</label>
+      ${c.members.length ? `<div class="inv-members">${c.members.map(m => `
+        <div class="inv-member${m.id === focusUid ? ' focus' : ''}" ${m.id === focusUid ? 'id="invFocus"' : ''}>
+          ${userChip(m.id, m.name)}
+          <span class="text-mono text-muted">${invDate(m.joined_at)}</span>
+          ${m.on_server ? '<span class="chip ok">на сервере</span>' : '<span class="chip">ушёл</span>'}
+          ${m.punished ? '<span class="chip danger">наказан</span>' : ''}
+        </div>`).join('')}</div>` : '<div class="input-help">По этой ссылке пока никто не заходил</div>'}
+    </div>
+    <div class="modal-actions" style="justify-content:space-between;">
+      ${c.can_manage && a && !a.vanity ? `<button class="btn btn-danger btn-sm" onclick="deleteInvite('${escapeHtml(c.code)}')">Удалить инвайт</button>` : '<span></span>'}
+      <button class="btn btn-ghost btn-sm" onclick="closeInvModal()">Закрыть</button>
+    </div>`;
+  document.getElementById('invFocus')?.scrollIntoView({ block: 'center' });
+}
+
+function closeInvModal() {
+  document.getElementById('invModal').classList.remove('show');
+  _invCard = null;
+}
+
+async function saveInvNote() {
+  if (!_invCard) return false;
+  const note = document.getElementById('invNote').value.trim();
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites/code/${invCodeUrl(_invCard.code)}/note`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ note })
+    });
+    if (!r.ok) { showToast('Не удалось сохранить', 'error'); return false; }
+  } catch(e) { showToast('Ошибка соединения', 'error'); return false; }
+  const row = _inv.data?.invites.find(x => x.code === _invCard.code);
+  if (row) { row.note = note; renderInvTable(); }
+  showToast('✓ Сохранено', 'success');
+  return true;
+}
+
+async function deleteInvite(code) {
+  const ok = await askAction({ title: `Удалить инвайт ${code}?`, okText: 'Удалить', danger: true, reason: null,
+    sub: 'Ссылка перестанет работать. История входов по ней останется.' });
+  if (!ok) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites/code/${invCodeUrl(code)}/delete`, { method: 'POST' });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showToast(d.error === 'not_found' ? 'Инвайт уже не существует' : 'Не удалось удалить', 'error');
       return;
     }
-    tbody.innerHTML = rows.map((row, i) => `
-      <tr class="stagger-in" style="animation-delay:${Math.min(i,15)*35}ms">
-        <td><span class="code">${escapeHtml(row.invite_code)}</span></td>
-        <td>${userChip(row.inviter_id, row.inviter_name)}</td>
-        <td>${row.uses || 0}</td>
-        <td class="text-mono text-muted">${(row.last_used || '').slice(0, 10) || '—'}</td>
-        <td>${escapeHtml(row.note || '—')}</td>
-      </tr>
-    `).join('');
-  } catch(e) {}
+  } catch(e) { showToast('Ошибка соединения', 'error'); return; }
+  showToast(`✓ Инвайт ${code} удалён`, 'success');
+  closeInvModal();
+  loadInvites();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

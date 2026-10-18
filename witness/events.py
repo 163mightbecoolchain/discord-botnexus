@@ -272,12 +272,25 @@ async def on_member_join(member):
     except Exception as ex:
         print(f"[INVITE] {member.guild.name}: {ex}")
 
+    # Vanity-ссылка сервера (discord.gg/имя) в guild.invites() не входит — проверяем отдельно
+    vanity = member.guild.vanity_url_code
+    vanity_key = f"{gid}:{vanity}" if vanity else None
+    if not used_code and vanity:
+        try:
+            vi = await member.guild.vanity_invite()
+            if vi and vanity_key in old_snapshot and (vi.uses or 0) > old_snapshot[vanity_key]:
+                used_code, inviter_name = vanity, "vanity-ссылка сервера"
+            if vi:
+                _invite_cache[vanity_key] = vi.uses or 0
+        except Exception:
+            pass
+
     # Разовые инвайты — исчезли из списка после использования
     if not used_code:
         try:
             fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.invites()}
             for cache_key in list(old_snapshot.keys()):
-                if cache_key not in fresh_codes:
+                if cache_key not in fresh_codes and cache_key != vanity_key:
                     used_code = cache_key.split(":", 1)[1]
                     inviter_name = "неизвестно (разовый инвайт)"
                     _invite_cache.pop(cache_key, None)
@@ -286,9 +299,10 @@ async def on_member_join(member):
             pass
 
 
-    # Пишем в БД всегда (для /invcheck и /invuser)
-    if used_code and inviter_id:
-        await log_invite_use(gid, used_code, inviter_id, inviter_name, member.id, member.name)
+    # Пишем в БД всегда — и когда инвайт не определён (пустой код): на сайте это
+    # «источник не определён». Раньше такие входы и разовые инвайты не записывались.
+    await log_invite_use(gid, used_code or "", inviter_id or 0, inviter_name if used_code else "",
+                         member.id, member.name)
 
     age = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
     ch = await sec_check(member.guild, "joins")
