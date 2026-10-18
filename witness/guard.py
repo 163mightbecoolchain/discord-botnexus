@@ -518,8 +518,8 @@ async def on_raid(guild, cfg) -> list[str]:
                 lines.append(f"Приостановлены {what} до {until.strftime('%H:%M')} UTC")
             except (discord.HTTPException, TypeError) as ex:
                 lines.append(f"Приостановить {what} не удалось: {ex}")
-    if cfg["raid_invite_delete"]:
-        asyncio.create_task(_delete_raid_invites(guild, cfg))
+    # Инвайт волны помечается всегда (страница «Инвайты»), удаляется — если включено
+    asyncio.create_task(_delete_raid_invites(guild, cfg))
     return lines
 
 
@@ -545,8 +545,19 @@ async def _delete_raid_invites(guild, cfg):
     except Exception as ex:
         print(f"[GUARD] raid invites: {ex}")
     total = sum(counts.values())
-    bad = [code for code, n in counts.items() if n >= 3 or (total and n * 2 >= total and n >= 2)]
+    bad = [code for code, n in counts.items() if code and (n >= 3 or (total and n * 2 >= total and n >= 2))]
     by_code = {inv.code: inv for inv in invites}
+    # Помечаем для страницы «Инвайты» (фильтр «Подозрительные») — и в режиме наблюдения
+    if bad:
+        now = _utcnow().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.executemany(
+                "INSERT INTO invite_flags (guild_id,invite_code,reason,flagged_at) VALUES (?,?,?,?) "
+                "ON CONFLICT(guild_id,invite_code) DO UPDATE SET reason=excluded.reason, flagged_at=excluded.flagged_at",
+                [(guild.id, code, f"волна рейда: {counts[code]} входов", now) for code in bad])
+            await db.commit()
+    if not cfg["raid_invite_delete"]:
+        return
     done = []
     for code in bad:
         inv = by_code.get(code)

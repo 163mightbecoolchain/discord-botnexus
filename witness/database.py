@@ -45,6 +45,12 @@ async def db_init():
                 invite_code TEXT, inviter_id INTEGER, inviter_name TEXT,
                 member_id INTEGER, member_name TEXT, joined_at TEXT,
                 note TEXT DEFAULT '');
+            -- Инвайты, по которым шла волна рейда (guard._delete_raid_invites) —
+            -- фильтр «Подозрительные» на странице «Инвайты»
+            CREATE TABLE IF NOT EXISTS invite_flags (
+                guild_id INTEGER NOT NULL, invite_code TEXT NOT NULL,
+                reason TEXT DEFAULT '', flagged_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, invite_code));
             CREATE TABLE IF NOT EXISTS tier_warnings (
                 guild_id   INTEGER NOT NULL,
                 days_left  INTEGER NOT NULL,
@@ -634,7 +640,7 @@ async def log_invite_use(gid, code, inviter_id, inviter_name, member_id, member_
 
 async def get_invite_history(gid, code):
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT member_name,member_id,joined_at FROM invite_log WHERE guild_id=? AND invite_code=? ORDER BY joined_at DESC", (gid,code)) as c:
+        async with db.execute("SELECT member_name,member_id,joined_at FROM invite_log WHERE guild_id=? AND invite_code=? AND member_id IS NOT NULL ORDER BY joined_at DESC", (gid,code)) as c:
             return await c.fetchall()
 
 async def get_user_invites(gid, inviter_id):

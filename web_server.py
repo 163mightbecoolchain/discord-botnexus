@@ -993,46 +993,96 @@ async def api_invites(request):
     if not bg:
         return web.json_response([])
     member = await _get_member(bg, s['user_id'])
-    if not member or not member.guild_permissions.manage_messages:
+    from witness.core import is_moderator
+    if not member or not is_moderator(member):
         return web.json_response({'error': 'Forbidden'}, status=403)
-
-    q = request.rel_url.query.get('q', '').lower().strip()
-
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            if q:
-                async with db.execute("""
-                    SELECT invite_code, inviter_id, inviter_name,
-                           COUNT(*) as uses, MAX(joined_at) as last_used, MAX(note) as note
-                    FROM invite_log WHERE guild_id=?
-                      AND (LOWER(invite_code) LIKE ? OR LOWER(inviter_name) LIKE ?
-                           OR LOWER(note) LIKE ?)
-                    GROUP BY invite_code
-                    ORDER BY uses DESC LIMIT 50
-                """, (guild_id, f'%{q}%', f'%{q}%', f'%{q}%')) as c:
-                    rows = await c.fetchall()
-            else:
-                async with db.execute("""
-                    SELECT invite_code, inviter_id, inviter_name,
-                           COUNT(*) as uses, MAX(joined_at) as last_used, MAX(note) as note
-                    FROM invite_log WHERE guild_id=?
-                    GROUP BY invite_code
-                    ORDER BY uses DESC LIMIT 100
-                """, (guild_id,)) as c:
-                    rows = await c.fetchall()
-        result = []
-        for code, iid, iname, uses, last, note in rows:
-            result.append({
-                'invite_code':  code,
-                'inviter_id':   str(iid) if iid else '',
-                'inviter_name': iname,
-                'uses':         uses,
-                'last_used':    last,
-                'note':         note,
-            })
-        return web.json_response(result)
+        days = max(1, min(90, int(request.rel_url.query.get('days') or 30)))
+    except ValueError:
+        days = 30
+    try:
+        from witness.invites import invite_overview
+        data = await invite_overview(bg, days)
+        data['can_manage'] = bool(member.guild_permissions.manage_guild)
+        return web.json_response(data)
+    except Exception as e:
+        return _server_error(request, e)
+
+
+async def _invites_guard(request, need_manage=False):
+    """(guild, member, None) или (None, None, ответ). Смотреть — модераторам, менять — Manage Server."""
+    bot = request.app['bot']
+    bg  = bot.get_guild(int(request.match_info['guild_id']))
+    if not bg:
+        return None, None, web.json_response({'error': 'Guild not found'}, status=404)
+    member = await _get_member(bg, request['session']['user_id'])
+    from witness.core import is_moderator
+    ok = member and (member.guild_permissions.manage_guild if need_manage else is_moderator(member))
+    if not ok:
+        return None, None, web.json_response({'error': 'Forbidden'}, status=403)
+    return bg, member, None
+
+
+def _invite_code(request) -> str:
+    # «_unknown» в адресе — записи без определённого инвайта (код '')
+    code = request.match_info['code']
+    return '' if code == '_unknown' else code
+
+
+@require_auth
+async def api_invite_search(request):
+    """GET /api/guild/:id/invites/search?q= — инвайты, создатели и зашедшие разом"""
+    bg, _, err = await _invites_guard(request)
+    if err:
+        return err
+    q = (request.rel_url.query.get('q') or '').strip()[:100]
+    if len(q) < 2:
+        return web.json_response({'invites': [], 'creators': [], 'joined': []})
+    from witness.invites import invite_search
+    return web.json_response(await invite_search(bg, q))
+
+
+@require_auth
+async def api_invite_details(request):
+    """GET /api/guild/:id/invites/code/:code — карточка инвайта"""
+    bg, member, err = await _invites_guard(request)
+    if err:
+        return err
+    from witness.invites import invite_details
+    data = await invite_details(bg, _invite_code(request))
+    data['can_manage'] = bool(member.guild_permissions.manage_guild)
+    return web.json_response(data)
+
+
+@require_auth
+async def api_invite_note(request):
+    """POST /api/guild/:id/invites/code/:code/note {"note": "..."} — как /invnote"""
+    bg, _, err = await _invites_guard(request, need_manage=True)
+    if err:
+        return err
+    code = _invite_code(request)
+    try:
+        data = await request.json()
     except Exception:
-        return web.json_response([])
+        return web.json_response({'error': 'bad_json'}, status=400)
+    if not code:
+        return web.json_response({'error': 'no_code'}, status=400)
+    from witness.invites import set_invite_note
+    await set_invite_note(bg.id, code, str((data or {}).get('note') or '').strip()[:200])
+    return web.json_response({'ok': True})
+
+
+@require_auth
+async def api_invite_delete(request):
+    """POST /api/guild/:id/invites/code/:code/delete — удалить действующий инвайт"""
+    bg, member, err = await _invites_guard(request, need_manage=True)
+    if err:
+        return err
+    from witness.invites import delete_invite
+    res = await delete_invite(bg, _invite_code(request), member)
+    if res:
+        return web.json_response({'error': res}, status=404 if res == 'not_found' else 400)
+    return web.json_response({'ok': True})
 
 
 # ── API: Discord Activity ─────────────────────────────────────
@@ -2124,6 +2174,10 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/channels',              api_channels),
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),
+        ('GET',  '/guild/{guild_id}/invites/search',        api_invite_search),
+        ('GET',  '/guild/{guild_id}/invites/code/{code}',   api_invite_details),
+        ('POST', '/guild/{guild_id}/invites/code/{code}/note',   api_invite_note),
+        ('POST', '/guild/{guild_id}/invites/code/{code}/delete', api_invite_delete),
         ('GET',  '/guild/{guild_id}/appeals',               api_appeals),
         ('GET',  '/guild/{guild_id}/appeal/{appeal_id}/messages', api_appeal_messages),
         ('POST', '/guild/{guild_id}/appeal/{appeal_id}/messages', api_appeal_messages),

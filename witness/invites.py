@@ -25,36 +25,16 @@ async def invnote(interaction: discord.Interaction, code: str, note: str = ""):
     if not interaction.user.guild_permissions.manage_guild:
         return await interaction.response.send_message("❌ Нужно право Manage Server.", ephemeral=True)
     gid = interaction.guild_id
-    code = code.strip().removeprefix("https://discord.gg/").removeprefix("discord.gg/")
+    code = clean_code(code)
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        if note:
-            # Обновляем note во всех записях с этим кодом
-            await db.execute(
-                "UPDATE invite_log SET note=? WHERE guild_id=? AND invite_code=?",
-                (note, gid, code)
-            )
-            # Если записей ещё нет — вставляем placeholder
-            async with db.execute(
-                "SELECT COUNT(*) FROM invite_log WHERE guild_id=? AND invite_code=?", (gid, code)
-            ) as c:
-                count = (await c.fetchone())[0]
-            if count == 0:
-                await db.execute(
-                    "INSERT INTO invite_log (guild_id, invite_code, note) VALUES (?,?,?)",
-                    (gid, code, note)
-                )
-            await db.commit()
-            e = discord.Embed(title="📝 Заметка сохранена", color=0x57F287)
-            e.add_field(name="Код",      value=f"`{code}`",             inline=True)
-            e.add_field(name="Заметка",  value=note,                    inline=True)
-            e.add_field(name="Добавил",  value=interaction.user.mention, inline=True)
-        else:
-            await db.execute(
-                "UPDATE invite_log SET note='' WHERE guild_id=? AND invite_code=?", (gid, code)
-            )
-            await db.commit()
-            e = discord.Embed(title="🗑️ Заметка удалена", description=f"Код: `{code}`", color=0x36393F)
+    await set_invite_note(gid, code, note)
+    if note:
+        e = discord.Embed(title="📝 Заметка сохранена", color=0x57F287)
+        e.add_field(name="Код",      value=f"`{code}`",             inline=True)
+        e.add_field(name="Заметка",  value=note,                    inline=True)
+        e.add_field(name="Добавил",  value=interaction.user.mention, inline=True)
+    else:
+        e = discord.Embed(title="🗑️ Заметка удалена", description=f"Код: `{code}`", color=0x36393F)
 
     await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -67,7 +47,7 @@ async def invnotes(interaction: discord.Interaction):
 
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT invite_code, note, MAX(joined_at) as last_use, COUNT(*) as uses
+            SELECT invite_code, note, MAX(joined_at) as last_use, SUM(member_id IS NOT NULL) as uses
             FROM invite_log
             WHERE guild_id=? AND note != '' AND note IS NOT NULL
             GROUP BY invite_code
@@ -320,7 +300,7 @@ async def invstats(interaction: discord.Interaction):
         async with db.execute("""
             SELECT invite_code, COUNT(*) as uses, inviter_name
             FROM invite_log
-            WHERE guild_id=? AND invite_code IS NOT NULL
+            WHERE guild_id=? AND invite_code != '' AND member_id IS NOT NULL
             GROUP BY invite_code
             ORDER BY uses DESC
             LIMIT 5
@@ -329,7 +309,7 @@ async def invstats(interaction: discord.Interaction):
 
         # Всего вошло
         async with db.execute(
-            "SELECT COUNT(*) FROM invite_log WHERE guild_id=?", (gid,)
+            "SELECT COUNT(*) FROM invite_log WHERE guild_id=? AND member_id IS NOT NULL", (gid,)
         ) as c:
             total = (await c.fetchone())[0]
 
@@ -351,3 +331,272 @@ async def invstats(interaction: discord.Interaction):
         e.add_field(name="Top invite codes", value="\n".join(lines), inline=False)
 
     await interaction.response.send_message(embed=e, ephemeral=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ДАННЫЕ ДЛЯ СТРАНИЦЫ «ИНВАЙТЫ» (web_server.api_invites*)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# invite_log — журнал входов: код ('' — источник не определён), кто создал, кто зашёл.
+# Строки без member_id — заглушки, в которых /invnote хранит заметку к коду без входов.
+# Активные инвайты берём у Discord (кэш ACTIVE_TTL сек), удержание и наказания считаем
+# по тем, кто зашёл: на сервере ли сейчас, есть ли наказание в modlog.
+
+ACTIVE_TTL = 30
+PUNISH_ACTIONS = ("BAN", "TEMPBAN", "KICK", "MUTE", "WARN", "AUTO_BAN", "AUTO_SOFTBAN", "AUTO_KICK",
+                  "AUTO_TIMEOUT", "AUTO_MUTE", "AUTO_QUARANTINE")
+UNKNOWN = ""                      # код записи «источник не определён»
+_active_cache: dict = {}          # gid → (время, [инвайты])
+
+
+def clean_code(raw: str) -> str:
+    """discord.gg/abc, https://discord.com/invite/abc → abc."""
+    s = (raw or "").strip()
+    for p in ("https://", "http://", "www."):
+        s = s.removeprefix(p)
+    for p in ("discord.gg/", "discord.com/invite/", "discordapp.com/invite/"):
+        s = s.removeprefix(p)
+    return s.split("?")[0].strip("/ ")
+
+
+def _iso(dt):
+    return dt.replace(tzinfo=None).isoformat() if dt else ""
+
+
+async def active_invites(guild, fresh=False):
+    """Действующие инвайты сервера, вместе с vanity. None — у бота нет права их читать."""
+    hit = _active_cache.get(guild.id)
+    if hit and not fresh and time.time() - hit[0] < ACTIVE_TTL:
+        return hit[1]
+    try:
+        invs = await guild.invites()
+    except discord.HTTPException:
+        return None
+    out = [{
+        "code": inv.code, "inviter_id": str(inv.inviter.id) if inv.inviter else "",
+        "inviter_name": inv.inviter.display_name if isinstance(inv.inviter, discord.Member)
+                        else (str(inv.inviter) if inv.inviter else ""),
+        "channel": getattr(inv.channel, "name", "") or "", "uses": inv.uses or 0,
+        "max_uses": inv.max_uses or 0, "max_age": inv.max_age or 0, "temporary": bool(inv.temporary),
+        "created_at": _iso(inv.created_at), "expires_at": _iso(inv.expires_at), "vanity": False,
+    } for inv in invs]
+    if guild.vanity_url_code:
+        try:
+            vi = await guild.vanity_invite()
+            if vi:
+                out.append({"code": vi.code, "inviter_id": "", "inviter_name": "vanity-ссылка сервера",
+                            "channel": "", "uses": vi.uses or 0, "max_uses": 0, "max_age": 0,
+                            "temporary": False, "created_at": "", "expires_at": "", "vanity": True})
+        except discord.HTTPException:
+            pass
+    _active_cache[guild.id] = (time.time(), out)
+    return out
+
+
+async def _punished_ids(db, gid) -> set:
+    marks = ",".join("?" * len(PUNISH_ACTIONS))
+    async with db.execute(f"SELECT DISTINCT user_id FROM modlog WHERE guild_id=? AND action IN ({marks})",
+                          (gid, *PUNISH_ACTIONS)) as c:
+        return {r[0] for r in await c.fetchall()}
+
+
+async def invite_overview(guild, days: int = 30) -> dict:
+    """Всё для страницы: инвайты (активные + из журнала), итоги за период, входы по дням, топ."""
+    gid = guild.id
+    since = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT invite_code, MAX(inviter_id), MAX(inviter_name), MAX(note),
+                   MAX(CASE WHEN member_id IS NOT NULL THEN joined_at END)
+            FROM invite_log WHERE guild_id=? GROUP BY invite_code""", (gid,)) as c:
+            logged = {r[0] or UNKNOWN: r for r in await c.fetchall()}
+        async with db.execute("""SELECT invite_code, member_id, joined_at FROM invite_log
+                                 WHERE guild_id=? AND member_id IS NOT NULL AND joined_at >= ?""",
+                              (gid, since)) as c:
+            joins = await c.fetchall()
+        async with db.execute("SELECT invite_code, reason FROM invite_flags WHERE guild_id=?", (gid,)) as c:
+            flags = dict(await c.fetchall())
+        punished = await _punished_ids(db, gid)
+
+    per: dict = {}
+    days_map: dict = {}
+    for code, uid, at in joins:
+        code = code or UNKNOWN
+        s = per.setdefault(code, {"joins": 0, "stayed": 0, "punished": 0})
+        s["joins"] += 1
+        s["stayed"] += guild.get_member(uid) is not None
+        s["punished"] += uid in punished
+        d = days_map.setdefault(at[:10], {"known": 0, "unknown": 0})
+        d["unknown" if code == UNKNOWN else "known"] += 1
+
+    active = await active_invites(guild)
+    rows = {}
+    for a in active or []:
+        rows[a["code"]] = {**a, "status": "vanity" if a["vanity"] else "active"}
+    for code, (c, iid, iname, note, last) in logged.items():
+        r = rows.setdefault(code, {"code": code, "inviter_id": str(iid or ""), "inviter_name": iname or "",
+                                   "channel": "", "uses": None, "max_uses": 0, "max_age": 0, "temporary": False,
+                                   "created_at": "", "expires_at": "", "vanity": False,
+                                   "status": "unknown" if code == UNKNOWN else "gone"})
+        r["note"], r["last_join"] = note or "", last or ""
+    for code, r in rows.items():
+        s = per.get(code, {"joins": 0, "stayed": 0, "punished": 0})
+        r.update(s)
+        r.setdefault("note", "")
+        r.setdefault("last_join", "")
+        r["retention"] = round(100 * s["stayed"] / s["joins"]) if s["joins"] else None
+        r["flag"] = flags.get(code, "")
+        if not r["flag"] and s["joins"] >= 3 and s["punished"] * 2 >= s["joins"]:
+            r["flag"] = f"наказаны {s['punished']} из {s['joins']} зашедших"
+        r["suspicious"] = bool(r["flag"])
+
+    total = sum(s["joins"] for s in per.values())
+    stayed = sum(s["stayed"] for s in per.values())
+    # Топ пригласивших — по людям, а не по ссылкам
+    top: dict = {}
+    for r in rows.values():
+        if r["status"] in ("vanity", "unknown") or not r["inviter_id"] or not r["joins"]:
+            continue
+        t = top.setdefault(r["inviter_id"], {"id": r["inviter_id"], "name": r["inviter_name"],
+                                             "joins": 0, "stayed": 0, "invites": 0})
+        t["joins"] += r["joins"]
+        t["stayed"] += r["stayed"]
+        t["invites"] += 1
+    for t in top.values():
+        m = guild.get_member(int(t["id"]))
+        if m:
+            t["name"] = m.display_name
+        t["retention"] = round(100 * t["stayed"] / t["joins"])
+    today = datetime.datetime.utcnow().date()
+    series = [{"day": d, **days_map.get(d, {"known": 0, "unknown": 0})}
+              for d in ((today - datetime.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1))]
+    return {
+        "days": days, "invites": sorted(rows.values(), key=lambda r: (-r["joins"], r["code"])),
+        "can_read_invites": active is not None,
+        "totals": {"joins": total, "unknown": per.get(UNKNOWN, {}).get("joins", 0),
+                   "retention": round(100 * stayed / total) if total else None,
+                   "active": sum(1 for r in rows.values() if r["status"] in ("active", "vanity")),
+                   "suspicious": sum(1 for r in rows.values() if r["suspicious"])},
+        "series": series,
+        "top": sorted(top.values(), key=lambda t: -t["joins"])[:10],
+    }
+
+
+async def invite_details(guild, code: str, limit: int = 300) -> dict:
+    """Карточка инвайта: кто по нему зашёл (за всё время журнала) и кто из них где сейчас."""
+    gid = guild.id
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""SELECT member_id, member_name, joined_at FROM invite_log
+                                 WHERE guild_id=? AND invite_code=? AND member_id IS NOT NULL
+                                 ORDER BY joined_at DESC LIMIT ?""", (gid, code, limit)) as c:
+            rows = await c.fetchall()
+        async with db.execute("SELECT MAX(inviter_id), MAX(inviter_name), MAX(note) FROM invite_log "
+                              "WHERE guild_id=? AND invite_code=?", (gid, code)) as c:
+            iid, iname, note = await c.fetchone()
+        async with db.execute("SELECT reason FROM invite_flags WHERE guild_id=? AND invite_code=?", (gid, code)) as c:
+            flag = await c.fetchone()
+        punished = await _punished_ids(db, gid)
+    active = next((a for a in await active_invites(guild) or [] if a["code"] == code), None)
+    members = [{"id": str(uid), "name": name or str(uid), "joined_at": at,
+                "on_server": guild.get_member(uid) is not None, "punished": uid in punished}
+               for uid, name, at in rows]
+    return {"code": code, "active": active, "inviter_id": str(iid or ""), "inviter_name": iname or "",
+            "note": note or "", "flag": flag[0] if flag else "", "members": members,
+            "joins": len(members), "stayed": sum(m["on_server"] for m in members),
+            "punished": sum(m["punished"] for m in members)}
+
+
+async def set_invite_note(gid: int, code: str, note: str):
+    """Заметка к коду (общая с /invnote). Пустая — удалить."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE invite_log SET note=? WHERE guild_id=? AND invite_code=?", (note, gid, code))
+        if note:
+            async with db.execute("SELECT 1 FROM invite_log WHERE guild_id=? AND invite_code=? LIMIT 1",
+                                  (gid, code)) as c:
+                if not await c.fetchone():
+                    await db.execute("INSERT INTO invite_log (guild_id, invite_code, note) VALUES (?,?,?)",
+                                     (gid, code, note))
+        await db.commit()
+
+
+async def delete_invite(guild, code: str, by) -> str:
+    """Удаляет действующий инвайт. '' — удалён, иначе код ошибки."""
+    inv = next((i for i in await guild.invites() if i.code == code), None) if code else None
+    if not inv:
+        return "not_found"
+    try:
+        await inv.delete(reason=f"Удалён с сайта: {getattr(by, 'display_name', by)}")
+    except discord.Forbidden:
+        return "forbidden"
+    except discord.HTTPException:
+        return "failed"
+    _active_cache.pop(guild.id, None)
+    _invite_cache.pop(f"{guild.id}:{code}", None)
+    ch = await get_log_ch(guild)
+    if ch:
+        e = build_embed(C.MUTED)
+        e.set_author(name="🔗 Инвайт удалён с сайта")
+        e.add_field(name="Код", value=f"`{code}`", inline=True)
+        e.add_field(name="Кто удалил", value=getattr(by, "mention", str(by)), inline=True)
+        try:
+            await ch.send(embed=e)
+        except discord.HTTPException:
+            pass
+    return ""
+
+
+async def invite_search(guild, q: str, limit: int = 8) -> dict:
+    """Поиск сразу по трём разделам: инвайты (код, заметка), создатели, зашедшие."""
+    gid = guild.id
+    raw = q.strip()
+    code_q = clean_code(raw).lower()
+    ql = raw.lower()
+
+    def name_now(uid):
+        m = guild.get_member(int(uid)) if uid else None
+        return f"{m.display_name} {m.name}" if m else ""
+
+    # Сравниваем в Python: LOWER() в SQLite понимает только латиницу,
+    # и «реклама» не находила заметку «Реклама Reddit»
+    has = lambda text: bool(ql) and ql in (text or "").lower()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT invite_code, MAX(inviter_name), MAX(note), SUM(member_id IS NOT NULL)
+            FROM invite_log WHERE guild_id=? AND invite_code != ''
+            GROUP BY invite_code ORDER BY 4 DESC""", (gid,)) as c:
+            inv_rows = [r for r in await c.fetchall()
+                        if (code_q and code_q in r[0].lower()) or has(r[2])][:limit]
+        async with db.execute("""
+            SELECT inviter_id, MAX(inviter_name), COUNT(DISTINCT invite_code), SUM(member_id IS NOT NULL)
+            FROM invite_log WHERE guild_id=? AND inviter_id > 0
+            GROUP BY inviter_id ORDER BY 4 DESC""", (gid,)) as c:
+            creators = [r for r in await c.fetchall()
+                        if has(r[1]) or str(r[0]) == raw or has(name_now(r[0]))][:limit]
+        # Зашедшие: по нику на момент входа, по ID и по нынешнему нику на сервере
+        async with db.execute("""
+            SELECT member_id, member_name, invite_code, inviter_name, joined_at FROM invite_log
+            WHERE guild_id=? AND member_id IS NOT NULL ORDER BY joined_at DESC""", (gid,)) as c:
+            joined = [r for r in await c.fetchall()
+                      if has(r[1]) or str(r[0]) == raw or has(name_now(r[0]))][:limit]
+    invites = {r[0]: {"code": r[0], "inviter_name": r[1] or "", "note": r[2] or "", "joins": r[3] or 0}
+               for r in inv_rows}
+    # Активные инвайты без входов в журнале тоже ищутся по коду и создателю
+    for a in await active_invites(guild) or []:
+        if a["code"] not in invites and (code_q and code_q in a["code"].lower()):
+            invites[a["code"]] = {"code": a["code"], "inviter_name": a["inviter_name"], "note": "", "joins": 0}
+    creators = list(creators)
+    seen = {str(r[0]) for r in creators}
+    for a in await active_invites(guild) or []:
+        if a["inviter_id"] and a["inviter_id"] not in seen and ql and ql in a["inviter_name"].lower():
+            seen.add(a["inviter_id"])
+            creators.append((a["inviter_id"], a["inviter_name"], 1, 0))
+
+    def name_of(uid, fallback):
+        m = guild.get_member(int(uid))
+        return m.display_name if m else (fallback or str(uid))
+    return {
+        "invites": list(invites.values())[:limit],
+        "creators": [{"id": str(i), "name": name_of(i, n), "invites": k, "joins": j or 0}
+                     for i, n, k, j in creators],
+        "joined": [{"id": str(u), "name": name_of(u, n), "code": c or "", "inviter_name": iname or "",
+                    "joined_at": at} for u, n, c, iname, at in joined],
+    }

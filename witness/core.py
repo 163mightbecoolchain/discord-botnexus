@@ -392,6 +392,14 @@ async def refresh_invite_cache(guild) -> bool:
         invites = await guild.invites()
         for inv in invites:
             _invite_cache[f"{guild.id}:{inv.code}"] = inv.uses or 0
+        # Vanity-ссылка в guild.invites() не входит — без неё входы по ней не определить
+        if guild.vanity_url_code:
+            try:
+                vi = await guild.vanity_invite()
+                if vi:
+                    _invite_cache[f"{guild.id}:{vi.code}"] = vi.uses or 0
+            except discord.HTTPException:
+                pass
         print(f"✅ Invite cache loaded for {guild.name}: {len(invites)} invites")
         return True
     except discord.Forbidden:
