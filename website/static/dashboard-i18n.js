@@ -308,6 +308,25 @@
     'Заметки модераторов': 'Moderator notes', 'Участник их не видит. В Discord —': 'The member cannot see them. In Discord —',
     'Заметок пока нет': 'No notes yet', 'Новая заметка': 'New note', 'Добавить': 'Add', 'Удалить': 'Delete',
     'Например: предупреждён устно в войсе': 'For example: warned verbally in voice',
+
+    // Правки сообщений
+    'Правки сообщений': 'Message edits', 'Что участник писал до правки и что после': 'What a member wrote before and after an edit',
+    'Запись правок': 'Edit recording', 'Выключено — бот ничего не записывает': 'Off — the bot records nothing',
+    'Записывать правки сообщений и хранить': 'Record message edits and keep them for', 'Записывать правки': 'Record edits',
+    'Последние 100 правок каждого участника открываются сразу, более старые уходят в архив — отдельный файл, который не нагружает основную базу и подгружается по кнопке. Правки старше срока удаляются. Текст «до» бот знает, если видел сообщение недавно; для старых сообщений он может быть неизвестен':
+      'The last 100 edits of each member open right away; older ones go to an archive — a separate file that does not weigh on the main database and loads on demand. Edits older than the limit are deleted. The bot knows the “before” text if it saw the message recently; for old messages it may be unknown',
+    'Очистить всю историю': 'Clear all history', 'Ник или ID участника...': 'Member name or ID...',
+    'Введи ник или ID — найдутся и те, кто уже ушёл с сервера': 'Enter a name or ID — members who left are found too',
+    'не на сервере': 'not on the server', 'правок нет': 'no edits', 'Искать в тексте...': 'Search in text...',
+    'Удалить правки': 'Delete edits', 'было': 'before', 'стало': 'after', 'пусто': 'empty', 'Архив': 'Archive',
+    'канал удалён': 'channel deleted', 'перейти к сообщению ↗': 'go to message ↗',
+    'неизвестно — сообщение старше памяти бота': 'unknown — the message is older than the bot’s memory',
+    'Загрузить ещё из архива': 'Load more from the archive', 'В архиве ничего не найдено': 'Nothing found in the archive',
+    'Среди последних правок такого текста нет': 'No recent edits contain this text', 'Правок пока нет': 'No edits yet',
+    'Правок нет — запись выключена': 'No edits — recording is off', 'Не удалось загрузить архив': 'Could not load the archive',
+    'Записи удалятся и из основной базы, и из архива. Вернуть их будет нельзя.':
+      'Records will be deleted from both the main database and the archive. This cannot be undone.',
+    'открыть →': 'open →', 'нет': 'none',
     'Напиши текст заметки': 'Write the note text',
   };
 
@@ -323,6 +342,12 @@
     [/^Инициатор: (.*?)(?: · Решил: (.*))?$/, (m, a, b) => `Requested by: ${a}` + (b ? ` · Decided by: ${b}` : '')],
     [/^код (\d+)$/, (m, n) => `code ${n}`],
     [/^Лимит: (.+)$/, (m, x) => `Limit: ${tr(x)}`],
+    [/^правок: (\d+)$/, (m, n) => `edits: ${n}`],
+    [/^Последних правок: (\d+)(?: · в архиве: (\d+))?$/, (m, n, a) => `Recent edits: ${n}` + (a ? ` · archived: ${a}` : '')],
+    [/^Открыть архив · (\d+) \S+$/, (m, n) => `Open archive · ${n} edits`],
+    [/^Включено — правки хранятся (\d+) дн\.$/, (m, n) => `On — edits are kept for ${n} days`],
+    [/^✓ Удалено записей: (\d+)$/, (m, n) => `✓ Records deleted: ${n}`],
+    [/^Удалить историю правок (.+)\?$/, (m, x) => `Delete the edit history of ${x === 'всего сервера' ? 'the whole server' : x.replace(/^участника /, '')}?`],
     [/^Убрать (.+)$/, (m, x) => `Remove ${x}`],
     [/^(.+): режим$/, (m, x) => `${tr(x)}: mode`],
     [/^AutoMod: (блокирует|алерт)(?: \+ (алерт))?$/, (m, a, b) =>

@@ -484,6 +484,8 @@ PROTECTION_DEFAULTS = {
     # проверка модераторов фильтрами (взломанный модератор).
     "cases_enabled": False, "observe_mode": False, "undo_buttons": False,
     "ai_reports": False, "mod_guard": False,
+    # История правок сообщений (witness/edits.py) и сколько дней её хранить.
+    "edits_enabled": False, "edits_keep_days": 180,
 }
 PROTECTION_CHOICES = {
     "antinuke_action": ("alert", "strip", "strip_timeout"),
@@ -499,6 +501,7 @@ PROTECTION_BOOLS = (
     "antinuke_enabled", "trap_enabled", "dup_enabled", "joinfilter_enabled",
     "joinfilter_noavatar", "raid_invite_delete", "incident_enabled", "incident_dms",
     "heat_enabled", "cases_enabled", "observe_mode", "undo_buttons", "ai_reports", "mod_guard",
+    "edits_enabled",
 )
 # (минимум, максимум) для чисел; лимиты анти-нюка — те же для всех действий
 PROTECTION_RANGES = {
@@ -506,6 +509,7 @@ PROTECTION_RANGES = {
     "warn_expiry_days": (0, 3650), "limit_count": (2, 100), "limit_window": (5, 600),
     "dup_count": (2, 10), "dup_window": (5, 300), "dup_timeout": (1, 10080),
     "joinfilter_age": (0, 365), "incident_minutes": (10, 1440), "heat_timeout": (1, 1440),
+    "edits_keep_days": (7, 730),
 }
 _protection_cache: dict = {}
 

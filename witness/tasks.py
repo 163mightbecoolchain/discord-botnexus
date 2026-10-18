@@ -116,6 +116,12 @@ async def memory_cleanup_loop(bot_instance):
             if not hasattr(bot, '_last_db_cleanup') or                time.time() - bot._last_db_cleanup > 86400:
                 bot._last_db_cleanup = time.time()
                 try:
+                    # История правок: свой срок хранения у каждого сервера
+                    from .edits import cleanup as edits_cleanup
+                    await edits_cleanup()
+                except Exception as ex:
+                    print(f"[CLEANUP] edits: {ex}")
+                try:
                     async with aiosqlite.connect(DB_PATH) as db:
                         # content_hashes: журнал найденных дублей сообщений.
                         # Детект работает на кэше в памяти (окно 1 час),
