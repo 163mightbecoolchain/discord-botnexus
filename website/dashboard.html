@@ -3954,7 +3954,7 @@ function openAppealDetails(id) {
     ` : ''}
     ${isPending && !canDecide ? `
       <div class="input-help" style="padding:.6rem .75rem; background:var(--bg-3); border-radius:6px;">
-        🔒 Принимать и отклонять апелляции могут только модераторы
+        🔒 Апелляцию на бан принимает или отклоняет только модератор с правом «Банить участников». Ответить участнику можно выше
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" onclick="closeAppealModal()">Закрыть</button>

@@ -1761,9 +1761,9 @@ async def api_appeal_action(request):
         if status != 'pending':
             return web.json_response({'error': 'already_reviewed'}, status=400)
 
-        # Право на решение зависит от типа наказания (то же в /appeal accept|reject)
-        from witness.moderation import can_handle_appeal
-        if not can_handle_appeal(member.guild_permissions):
+        # Любой модератор, апелляцию на бан — только с правом бана (то же в /appeal accept|reject)
+        from witness.moderation import can_decide_appeal
+        if not can_decide_appeal(member.guild_permissions, atype):
             return web.json_response(
                 {'error': 'missing_permission', 'need': atype}, status=403)
 
@@ -1854,10 +1854,10 @@ async def api_appeals(request):
     if not bg:
         return web.json_response([])
     member = await _get_member(bg, s['user_id'])
-    # Апелляции видит и решает любой модератор (moderation.can_handle_appeal).
+    # Апелляции видит любой модератор, решает — по can_decide_appeal (бан — только с правом бана).
     # Право решать сайт берёт отсюда (can_decide), по данным бота, а не из прав
     # OAuth на фронте: они расходились, и модератор видел замок вместо кнопок.
-    from witness.moderation import can_handle_appeal
+    from witness.moderation import can_decide_appeal, can_handle_appeal
     if not member or not can_handle_appeal(member.guild_permissions):
         return web.json_response({'error': 'Forbidden'}, status=403)
 
@@ -1919,7 +1919,7 @@ async def api_appeals(request):
                 'reviewed_at':   rev_at,
                 'messages':      thread.get(aid, (0, None))[0],
                 'last_from':     {1: 'mod', 0: 'user'}.get(thread.get(aid, (0, None))[1]),
-                'can_decide':    True,
+                'can_decide':    can_decide_appeal(member.guild_permissions, atype),
             })
         return web.json_response(result)
     except Exception:

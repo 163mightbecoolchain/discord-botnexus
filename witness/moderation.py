@@ -523,12 +523,23 @@ async def notify_appeal_result(user_id: int, guild_id: int, appeal_id: int,
 
 
 # ── Решение и переписка по апелляции ─────────────────────────
-# Любой модератор может и ответить участнику, и решить апелляцию любого типа —
-# одна проверка для бота (/appeal) и сайта (api_appeals, api_appeal_action).
+# Ответить участнику и решить апелляцию может любой модератор, кроме апелляций на бан:
+# их решает только право «Банить участников» (принять = разбанить).
+# Одни проверки для бота (/appeal) и сайта (api_appeals, api_appeal_action).
 
 def can_handle_appeal(p: discord.Permissions) -> bool:
     return bool(p.administrator or p.manage_guild or p.manage_messages or p.moderate_members
                 or p.ban_members or p.kick_members)
+
+
+def can_decide_appeal(p: discord.Permissions, atype: str) -> bool:
+    if atype in ("BAN", "TEMPBAN"):
+        return bool(p.ban_members or p.administrator or p.manage_guild)
+    return can_handle_appeal(p)
+
+
+BAN_APPEAL_MSG = ("❌ Апелляцию на бан решает только тот, у кого есть право «Банить участников». "
+                  "Ответить участнику можно: `/appeal reply`.")
 
 
 APPEAL_REPLY_RESULT = {
@@ -990,6 +1001,8 @@ async def appeal_cmd(interaction: discord.Interaction,
         if not r:
             return await interaction.followup.send("Апелляция не найдена.", ephemeral=True)
         uid, atype, status = r
+        if not can_decide_appeal(interaction.user.guild_permissions, atype):
+            return await interaction.followup.send(BAN_APPEAL_MSG, ephemeral=True)
         if status != "pending":
             return await interaction.followup.send(
                 f"Апелляция уже {status}.", ephemeral=True
@@ -1072,6 +1085,8 @@ async def appeal_cmd(interaction: discord.Interaction,
         if not r:
             return await interaction.response.send_message("Апелляция не найдена.", ephemeral=True)
         uid, status, atype = r
+        if not can_decide_appeal(interaction.user.guild_permissions, atype):
+            return await interaction.response.send_message(BAN_APPEAL_MSG, ephemeral=True)
         if status != "pending":
             return await interaction.response.send_message(
                 f"Апелляция уже {status}.", ephemeral=True
