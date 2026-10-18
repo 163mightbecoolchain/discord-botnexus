@@ -1295,8 +1295,8 @@ async def api_member_lookup(request):
                        for r in reversed(member.roles[1:])] if member else [],
     }
     # Быстрые действия в мини-профиле: показываем только разрешённые
-    from witness.moderation import panel_target_error, MUTE_DURATIONS
-    blocked = panel_target_error(me, member)
+    from witness.moderation import target_error, MUTE_DURATIONS
+    blocked = await target_error(me, member)
     out['can'] = {
         'warn':   bool(member) and p.moderate_members and not blocked,
         'mute':   bool(member) and p.moderate_members and not blocked,
@@ -1761,15 +1761,9 @@ async def api_appeal_action(request):
         if status != 'pending':
             return web.json_response({'error': 'already_reviewed'}, status=400)
 
-        # Право на решение зависит от типа наказания
-        p = member.guild_permissions
-        if atype in ('BAN', 'TEMPBAN'):
-            allowed = p.ban_members
-        elif atype == 'MUTE':
-            allowed = p.moderate_members or p.ban_members
-        else:  # WARN, KICK и прочее
-            allowed = p.manage_messages or p.moderate_members or p.ban_members
-        if not (allowed or p.administrator or p.manage_guild):
+        # Право на решение зависит от типа наказания (то же в /appeal accept|reject)
+        from witness.moderation import can_decide_appeal
+        if not can_decide_appeal(member.guild_permissions, atype):
             return web.json_response(
                 {'error': 'missing_permission', 'need': atype}, status=403)
 
@@ -1891,6 +1885,19 @@ async def api_appeals(request):
                     rows = await c.fetchall()
         result = []
         names = await _user_names(bot, bg, [r[8] for r in rows])
+        # Переписка: сколько сообщений и кто написал последним (бейдж «новый ответ»)
+        thread = {}
+        if rows:
+            async with aiosqlite.connect(DB_PATH) as db:
+                marks = ','.join('?' * len(rows))
+                async with db.execute(f"""
+                    SELECT appeal_id, COUNT(*),
+                           (SELECT from_mod FROM appeal_messages m2 WHERE m2.appeal_id = m.appeal_id
+                            ORDER BY id DESC LIMIT 1)
+                    FROM appeal_messages m WHERE guild_id=? AND appeal_id IN ({marks})
+                    GROUP BY appeal_id
+                """, (guild_id, *[r[0] for r in rows])) as c:
+                    thread = {a: (n, last) for a, n, last in await c.fetchall()}
         for (aid, uid, uname, atype, astatus, oreason, atext, wchange,
              rev_id, rnote, sub_at, rev_at) in rows:
             m = bg.get_member(uid)
@@ -1910,10 +1917,45 @@ async def api_appeals(request):
                 'reviewer_note': rnote,
                 'submitted_at':  sub_at,
                 'reviewed_at':   rev_at,
+                'messages':      thread.get(aid, (0, None))[0],
+                'last_from':     {1: 'mod', 0: 'user'}.get(thread.get(aid, (0, None))[1]),
             })
         return web.json_response(result)
     except Exception:
         return web.json_response([])
+
+
+@require_auth
+async def api_appeal_messages(request):
+    """GET/POST /api/guild/:id/appeal/:appeal_id/messages — переписка с участником до решения.
+    Отвечать может любой модератор, который видит апелляции, даже без права решать её."""
+    guild_id  = int(request.match_info['guild_id'])
+    appeal_id = int(request.match_info['appeal_id'])
+    s   = request['session']
+    bot = request.app['bot']
+    bg  = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Guild not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    from witness.moderation import can_reply_appeal, get_appeal_messages, send_appeal_reply
+    if not member or not can_reply_appeal(member.guild_permissions):
+        return web.json_response({'error': 'Forbidden'}, status=403)
+    if request.method == 'POST':
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        text = str((data or {}).get('text') or '').strip()
+        if not text:
+            return web.json_response({'error': 'text_required'}, status=400)
+        res = await send_appeal_reply(bg, appeal_id, int(s['user_id']), text)
+        if res in ('not_found', 'closed'):
+            return web.json_response({'error': res}, status=404 if res == 'not_found' else 400)
+        return web.json_response({'ok': True, 'delivered': res == 'sent'})
+    rows = await get_appeal_messages(appeal_id, guild_id)
+    names = await _user_names(bot, bg, [r[1] for r in rows if r[2]])
+    return web.json_response([{'id': i, 'from_mod': bool(fm), 'author': names.get(a) or str(a) if fm else '',
+                               'text': t, 'created_at': ts} for i, a, fm, t, ts in rows])
 
 # ── API: активные наказания и действия из панели ──────────────
 
@@ -1994,7 +2036,7 @@ async def api_member_action(request):
     if action in ('warn', 'mute'):
         if not target:
             return web.json_response({'error': 'not_on_server'}, status=400)
-        blocked = mod.panel_target_error(me, target)
+        blocked = await mod.target_error(me, target)
         if blocked:
             return web.json_response({'error': blocked}, status=403)
 
@@ -2082,6 +2124,8 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/modlog',                api_modlog),
         ('GET',  '/guild/{guild_id}/invites',               api_invites),
         ('GET',  '/guild/{guild_id}/appeals',               api_appeals),
+        ('GET',  '/guild/{guild_id}/appeal/{appeal_id}/messages', api_appeal_messages),
+        ('POST', '/guild/{guild_id}/appeal/{appeal_id}/messages', api_appeal_messages),
         ('POST', '/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action),
         ('GET',  '/guild/{guild_id}/automation',            api_automation_get),
         ('POST', '/guild/{guild_id}/automation',            api_automation_post),

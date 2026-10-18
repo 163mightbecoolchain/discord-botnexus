@@ -29,9 +29,12 @@ from .ui import (
     PaginatedView,
 )
 from .core import (
+    _audit_actor,
     antinuke_check,
     bot,
     forget_member,
+    is_moderator,
+    is_trusted,
     notify_mute_over,
     get_tier,
     resolve_member,
@@ -519,11 +522,138 @@ async def notify_appeal_result(user_id: int, guild_id: int, appeal_id: int,
         return False
 
 
+# ── Решение и переписка по апелляции ─────────────────────────
+# Решать апелляцию может тот, кто вправе снять это наказание (так же в api_appeal_action).
+# Отвечать участнику, не решая, может любой модератор, который видит апелляции.
+
+def appeal_need(atype: str) -> str:
+    return ("ban_members" if atype in ("BAN", "TEMPBAN") else
+            "moderate_members" if atype == "MUTE" else "manage_messages")
+
+
+def can_decide_appeal(p: discord.Permissions, atype: str) -> bool:
+    if p.administrator or p.manage_guild or p.ban_members:
+        return True
+    need = appeal_need(atype)
+    return (p.moderate_members if need == "moderate_members" else
+            need == "manage_messages" and (p.manage_messages or p.moderate_members))
+
+
+def can_reply_appeal(p: discord.Permissions) -> bool:
+    return bool(p.administrator or p.manage_guild or p.manage_messages or p.moderate_members or p.ban_members)
+
+
+APPEAL_PERM_MSG = {
+    "ban_members": "❌ Решить апелляцию на бан может только тот, у кого есть право «Банить участников». Ответить участнику можно: `/appeal reply`.",
+    "moderate_members": "❌ Решить апелляцию на мут может только тот, у кого есть право «Модерировать участников». Ответить участнику можно: `/appeal reply`.",
+    "manage_messages": "❌ Нужно право «Управлять сообщениями».",
+}
+APPEAL_REPLY_RESULT = {
+    "sent": "💬 Ответ по апелляции #{id} отправлен участнику в ЛС.",
+    "saved": "💬 Ответ по апелляции #{id} сохранён, но у участника закрыты ЛС — он его не получит.",
+    "not_found": "Апелляция не найдена.",
+    "closed": "Апелляция #{id} уже рассмотрена — переписка закрыта.",
+}
+
+
+async def add_appeal_message(appeal_id: int, guild_id: int, author_id: int, from_mod: bool, text: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO appeal_messages (appeal_id,guild_id,author_id,from_mod,text,created_at) VALUES (?,?,?,?,?,?)",
+            (appeal_id, guild_id, author_id, int(from_mod), text[:1500], datetime.datetime.utcnow().isoformat()))
+        await db.commit()
+
+
+async def get_appeal_messages(appeal_id: int, guild_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT id, author_id, from_mod, text, created_at FROM appeal_messages "
+                              "WHERE appeal_id=? AND guild_id=? ORDER BY id", (appeal_id, guild_id)) as c:
+            return await c.fetchall()
+
+
+async def send_appeal_reply(guild: discord.Guild, appeal_id: int, mod_id: int, text: str) -> str:
+    """Ответ модератора участнику: сохраняется в переписке и уходит в ЛС с кнопкой «Ответить».
+    Возвращает ключ APPEAL_REPLY_RESULT."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id, status FROM appeals WHERE id=? AND guild_id=?",
+                              (appeal_id, guild.id)) as c:
+            row = await c.fetchone()
+    if not row:
+        return "not_found"
+    uid, status = row
+    if status != "pending":
+        return "closed"
+    text = text.strip()[:1500]
+    await add_appeal_message(appeal_id, guild.id, mod_id, True, text)
+    try:
+        user = bot.get_user(uid) or await bot.fetch_user(uid)
+        e = build_embed(C.INFO)
+        e.set_author(name=f"💬 Ответ модерации по апелляции #{appeal_id}")
+        e.description = text
+        e.set_footer(text=f"Сервер: {guild.name} · решение ещё не принято")
+        view = discord.ui.View(timeout=None)
+        view.add_item(AppealReplyButton(guild.id, appeal_id))
+        await user.send(embed=e, view=view)
+        return "sent"
+    except (discord.Forbidden, discord.HTTPException):
+        return "saved"
+
+
+class AppealReplyModal(discord.ui.Modal, title="Ответ модераторам"):
+    text = discord.ui.TextInput(label="Твой ответ", style=discord.TextStyle.long, max_length=1500,
+                                placeholder="Ответь на вопрос модератора...")
+
+    def __init__(self, guild_id: int, appeal_id: int):
+        super().__init__()
+        self.guild_id, self.appeal_id = guild_id, appeal_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT status FROM appeals WHERE id=? AND guild_id=? AND user_id=?",
+                                  (self.appeal_id, self.guild_id, interaction.user.id)) as c:
+                row = await c.fetchone()
+        if not row or row[0] != "pending":
+            return await interaction.response.send_message(
+                "Апелляция уже рассмотрена — ответить больше нельзя.", ephemeral=True)
+        await add_appeal_message(self.appeal_id, self.guild_id, interaction.user.id, False, str(self.text))
+        await interaction.response.send_message("✅ Ответ отправлен модераторам.", ephemeral=True)
+        guild = bot.get_guild(self.guild_id)
+        ch = await get_log_ch(guild) if guild else None
+        if ch:
+            e = build_embed(C.INFO)
+            e.set_author(name=f"💬 Ответ участника по апелляции #{self.appeal_id}")
+            e.add_field(name="Участник", value=f"{interaction.user.mention} (`{interaction.user}`)", inline=False)
+            e.add_field(name="Текст", value=str(self.text)[:1000], inline=False)
+            e.set_footer(text="Ответить: дашборд → «Апелляции» или /appeal reply")
+            try:
+                await ch.send(embed=e)
+            except discord.HTTPException:
+                pass
+
+
+class AppealReplyButton(discord.ui.DynamicItem[discord.ui.Button],
+                        template=r"appealreply:(?P<guild_id>\d+):(?P<appeal_id>\d+)"):
+    """Кнопка «Ответить» под ответом модератора в ЛС — работает и после перезапуска бота."""
+    def __init__(self, guild_id: int, appeal_id: int):
+        self.guild_id, self.appeal_id = guild_id, appeal_id
+        super().__init__(discord.ui.Button(label="Ответить", style=discord.ButtonStyle.primary, emoji="💬",
+                                           custom_id=f"appealreply:{guild_id}:{appeal_id}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["guild_id"]), int(match["appeal_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AppealReplyModal(self.guild_id, self.appeal_id))
+
+
 @bot.tree.command(name="warn", description="Выдать варн [Premium]")
 @app_commands.describe(member="Пользователь", reason="Причина")
 async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "Не указана"):
     if not interaction.user.guild_permissions.moderate_members:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
+    if err := await target_error(interaction.user, member):
+        return await interaction.response.send_message(TARGET_ERRORS[err], ephemeral=True)
     await add_warning(interaction.guild_id, member.id, interaction.user.id, reason)
     # Сгоревшие варны (старше warn_expiry_days из дашборда) к наказанию не ведут
     warns = await get_active_warnings(interaction.guild_id, member.id)
@@ -600,6 +730,8 @@ async def mute_cmd(interaction: discord.Interaction, member: discord.Member,
                    duration: str, reason: str = "Не указана"):
     if not interaction.user.guild_permissions.moderate_members:
         return await interaction.response.send_message("❌ Нужно Moderate Members.", ephemeral=True)
+    if err := await target_error(interaction.user, member):
+        return await interaction.response.send_message(TARGET_ERRORS[err], ephemeral=True)
 
     delta = MUTE_DURATIONS.get(duration)
     if not delta:
@@ -732,9 +864,9 @@ async def banrequests_cmd(interaction: discord.Interaction, status: str = "pendi
 
 
 @bot.tree.command(name="appeal", description="Апелляции и заявки на бан")
-@app_commands.describe(action="submit / list / view / accept / reject / banrequests",
+@app_commands.describe(action="submit / list / view / accept / reject / reply / banrequests",
                        appeal_id="ID апелляции или заявки на бан",
-                       note="Комментарий (для accept/reject)")
+                       note="Комментарий (для accept/reject) или текст ответа (для reply)")
 async def appeal_cmd(interaction: discord.Interaction,
                      action: str = "submit",
                      appeal_id: int = 0,
@@ -875,6 +1007,8 @@ async def appeal_cmd(interaction: discord.Interaction,
         if not r:
             return await interaction.followup.send("Апелляция не найдена.", ephemeral=True)
         uid, atype, status = r
+        if not can_decide_appeal(interaction.user.guild_permissions, atype):
+            return await interaction.followup.send(APPEAL_PERM_MSG[appeal_need(atype)], ephemeral=True)
         if status != "pending":
             return await interaction.followup.send(
                 f"Апелляция уже {status}.", ephemeral=True
@@ -950,13 +1084,15 @@ async def appeal_cmd(interaction: discord.Interaction,
             return await interaction.response.send_message("Укажи `appeal_id`.", ephemeral=True)
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                "SELECT user_id, status FROM appeals WHERE id=? AND guild_id=?",
+                "SELECT user_id, status, action_type FROM appeals WHERE id=? AND guild_id=?",
                 (appeal_id, gid)
             ) as c:
                 r = await c.fetchone()
         if not r:
             return await interaction.response.send_message("Апелляция не найдена.", ephemeral=True)
-        uid, status = r
+        uid, status, atype = r
+        if not can_decide_appeal(interaction.user.guild_permissions, atype):
+            return await interaction.response.send_message(APPEAL_PERM_MSG[appeal_need(atype)], ephemeral=True)
         if status != "pending":
             return await interaction.response.send_message(
                 f"Апелляция уже {status}.", ephemeral=True
@@ -977,8 +1113,17 @@ async def appeal_cmd(interaction: discord.Interaction,
             f"❌ Апелляция #{appeal_id} отклонена.", ephemeral=True
         )
 
+    # ── REPLY — ответить участнику, не принимая решения ────────
+    if action == "reply":
+        if not appeal_id or not note.strip():
+            return await interaction.response.send_message(
+                "Укажи `appeal_id` и текст ответа в `note`.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        res = await send_appeal_reply(interaction.guild, appeal_id, interaction.user.id, note)
+        return await interaction.followup.send(APPEAL_REPLY_RESULT[res].format(id=appeal_id), ephemeral=True)
+
     return await interaction.response.send_message(
-        "Действие: `submit`, `list`, `view`, `accept`, `reject`.", ephemeral=True
+        "Действие: `submit`, `list`, `view`, `accept`, `reject`, `reply`.", ephemeral=True
     )
 
 @bot.tree.command(name="muteboard", description="Лидерборд по времени в муте")
@@ -1118,6 +1263,8 @@ async def tempban(interaction: discord.Interaction, member: discord.Member,
                   duration: str = "1d", reason: str = "Нарушение правил"):
     if not interaction.user.guild_permissions.ban_members:
         return await interaction.response.send_message("❌ Нет прав.", ephemeral=True)
+    if err := await target_error(interaction.user, member):
+        return await interaction.response.send_message(TARGET_ERRORS[err], ephemeral=True)
 
     # Парсим длительность
     unit_map = {"h": 1, "d": 24, "w": 168}
@@ -1420,6 +1567,63 @@ def panel_target_error(actor: discord.Member, target) -> str:
     if actor.id != actor.guild.owner_id and target.top_role >= actor.top_role:
         return 'hierarchy'
     return ''
+
+
+TARGET_ERRORS = {
+    'self': "❌ Нельзя наказать самого себя.",
+    'owner': "❌ Это владелец сервера.",
+    'bot': "❌ Бота так не наказать.",
+    'hierarchy': "❌ Роль участника не ниже вашей.",
+    'moderator': ("❌ Модератора может наказать только владелец сервера или доверенная роль "
+                  "(дашборд → «Безопасность» → «Анти-нюк» → «Не проверять»)."),
+}
+
+
+async def target_error(actor: discord.Member, target) -> str:
+    """panel_target_error плюс защита модераторов: модератора наказывает только
+    владелец или доверенная роль анти-нюка (дашборд → «Модерация», mod_immunity)."""
+    err = panel_target_error(actor, target)
+    if err or target is None or not getattr(target, "guild", None):
+        return err
+    cfg = await get_protection(actor.guild.id)
+    if cfg["mod_immunity"] and is_moderator(target) and not await is_trusted(actor.guild, actor.id, cfg):
+        return 'moderator'
+    return ''
+
+
+@bot.listen("on_member_update")
+async def _mod_immunity_timeout(before, after):
+    """Таймаут модератору, выданный прямо в Discord (в обход бота), снимается."""
+    now = discord.utils.utcnow()
+    if (not after.timed_out_until or after.timed_out_until <= now
+            or before.timed_out_until == after.timed_out_until or not is_moderator(after)):
+        return
+    guild = after.guild
+    cfg = await get_protection(guild.id)
+    if not cfg["mod_immunity"]:
+        return
+    actor_id, _ = await _audit_actor(guild, discord.AuditLogAction.member_update, after.id)
+    # None — таймаут выдал сам бот (например, «Проверять и модераторов»), 0 — неизвестно кто
+    if not actor_id or await is_trusted(guild, actor_id, cfg):
+        return
+    try:
+        await after.timeout(None, reason="Witness: модератора может наказать только владелец или доверенная роль")
+        done = "Таймаут снят."
+    except discord.HTTPException as ex:
+        done = f"Снять таймаут не удалось: {ex}"
+    await add_modlog(guild.id, after.id, 0, "AUTO_UNMUTE", f"Таймаут модератору от <@{actor_id}> отменён")
+    e = build_embed(C.WARNING)
+    e.set_author(name="🛡️ Модератору выдали таймаут в обход бота")
+    e.add_field(name="Кому", value=after.mention, inline=True)
+    e.add_field(name="Кто выдал", value=f"<@{actor_id}>", inline=True)
+    e.add_field(name="Что сделано", value=done, inline=False)
+    e.set_footer(text="Отключить: дашборд → «Модерация» → «Защита модераторов»")
+    ch = await get_log_ch(guild)
+    if ch:
+        try:
+            await ch.send(embed=e)
+        except discord.HTTPException:
+            pass
 
 
 async def send_warn_dm(member: discord.Member, guild: discord.Guild, reason: str,

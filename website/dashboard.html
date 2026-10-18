@@ -246,6 +246,11 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
   max-height: 260px; overflow-y: auto;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+.appeal-msg { padding: .55rem .75rem; background: var(--bg-3); border-radius: 6px; margin-bottom: .4rem;
+  border-left: 3px solid var(--warning); }
+.appeal-msg.mod { border-left-color: var(--accent); }
+.appeal-msg-meta { font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
+.appeal-msg-text { font-size: .88rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .card-exit-accept, .card-exit-reject { animation: cardExit .45s ease forwards; pointer-events: none; }
 .card-exit-accept { border-left-color: var(--accent) !important; background: rgba(var(--accent-rgb), .08); }
@@ -930,10 +935,17 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Инструменты модераторов</div>
-            <div class="card-desc">Кейсы, заметки, отмена авто-наказаний и подсказки ИИ по жалобам</div>
+            <div class="card-desc">Защита модераторов, кейсы, заметки, отмена авто-наказаний и подсказки ИИ по жалобам</div>
           </div>
         </div>
         <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Защита модераторов</div>
+              <div class="toggle-desc">Модератора нельзя замутить, заварнить или забанить — это может только владелец сервера или доверенная роль из «Безопасность → Анти-нюк → Не проверять». Таймаут модератору, выданный прямо в Discord, бот снимет. Наказать самого себя нельзя всегда</div>
+            </div>
+            <div class="toggle" id="tog-modimmune" role="switch" tabindex="0" aria-label="Защита модераторов" onclick="this.classList.toggle('on')"></div>
+          </div>
           <div class="toggle-row">
             <div class="toggle-info">
               <div class="toggle-label">Кейсы и заметки</div>
@@ -2816,6 +2828,7 @@ async function saveModeration() {
     warn_expiry_days: warnExpiryDays(),
     cases_enabled: getToggle('tog-cases'),
     undo_buttons: getToggle('tog-undo'),
+    mod_immunity: getToggle('tog-modimmune'),
     ai_reports: getToggle('tog-aireports'),
   });
   return ok !== false && ok2;
@@ -3352,6 +3365,7 @@ function renderProtection() {
   setStep('mod-warnexp', p.warn_expiry_days || 30);
   setToggle('tog-cases', p.cases_enabled);
   setToggle('tog-undo', p.undo_buttons);
+  setToggle('tog-modimmune', p.mod_immunity);
   setToggle('tog-aireports', p.ai_reports);
 }
 
@@ -3519,7 +3533,9 @@ async function loadAppeals() {
         <div class="card-body" style="display: flex; align-items: center; gap: 1rem;">
           <span class="status-pill ${a.status}">${a.status}</span>
           <div style="flex: 1; min-width: 0;">
-            <div style="font-weight: 600;">#${a.id} · ${userChip(a.user_id, a.username)}</div>
+            <div style="font-weight: 600;">#${a.id} · ${userChip(a.user_id, a.username)}${
+              a.status === 'pending' && a.last_from === 'user' ? ' <span class="chip warn">💬 новый ответ</span>' :
+              a.messages ? ` <span class="chip">💬 ${a.messages}</span>` : ''}</div>
             <div style="font-size: .8rem; color: var(--muted); margin-top: .2rem; overflow-wrap: anywhere;">
               ${a.action_type} · ${escapeHtml(shortText(a.appeal_text, 100))}
             </div>
@@ -3732,6 +3748,7 @@ const ACTION_ERRORS = {
   bad_duration: 'Неверный срок', antinuke: 'Анти-нюк: слишком много мутов подряд, подождите',
   bot_forbidden: 'У бота не хватает прав — его роль ниже роли участника?',
   not_muted: 'Мута уже нет',
+  moderator: 'Модератора может наказать только владелец сервера или доверенная роль',
 };
 
 function memberActionButtons(m, cls) {
@@ -3741,7 +3758,8 @@ function memberActionButtons(m, cls) {
   if (can.mute && !m.timed_out) b.push(`<button class="btn btn-ghost btn-sm" onclick="memberAction('${uid}', 'mute')">🔇 Мут</button>`);
   if (can.unmute && (m.timed_out || m.active_mute)) b.push(`<button class="btn btn-ghost btn-sm" onclick="memberAction('${uid}', 'unmute')">Снять мут</button>`);
   const note = { hierarchy: 'Роль участника не ниже вашей — наказать нельзя',
-                 owner: 'Владелец сервера', self: 'Это вы', bot: 'Это бот' }[m.blocked];
+                 owner: 'Владелец сервера', self: 'Это вы', bot: 'Это бот',
+                 moderator: 'Модератор — наказать может только владелец или доверенная роль' }[m.blocked];
   if (!b.length && !note) return '';
   return `<div class="${cls}">${b.join('')}</div>${note && cls === 'up-actions' ? `<div class="up-note">${note}</div>` : ''}`;
 }
@@ -3923,9 +3941,23 @@ function openAppealDetails(id) {
       </div>
     ` : ''}
 
+    <div class="form-group" id="appealThreadWrap" hidden>
+      <label>Переписка с участником</label>
+      <div id="appealThread"></div>
+    </div>
+    ${isPending ? `
+      <div class="form-group">
+        <label for="appealReply">Ответить участнику — решение пока не принимается</label>
+        <textarea class="textarea" id="appealReply" rows="2" maxlength="1500"
+                  placeholder="Например: пришли скриншот переписки. Бот отправит в ЛС с кнопкой «Ответить»"></textarea>
+        <div style="display:flex; justify-content:flex-end; margin-top:.4rem;">
+          <button class="btn btn-ghost btn-sm" onclick="btnBusy(this, sendAppealReply)">💬 Отправить ответ</button>
+        </div>
+      </div>
+    ` : ''}
     ${isPending && !canDecide ? `
       <div class="input-help" style="padding:.6rem .75rem; background:var(--bg-3); border-radius:6px;">
-        🔒 Для решения по типу <b>${a.action_type}</b> нужно право
+        🔒 Принять или отклонить апелляцию типа <b>${a.action_type}</b> может только тот, у кого есть право
         ${a.action_type==='BAN'||a.action_type==='TEMPBAN' ? '«Банить участников»' :
           a.action_type==='MUTE' ? '«Модерировать участников»' : '«Управлять сообщениями»'} на сервере
       </div>
@@ -3935,7 +3967,7 @@ function openAppealDetails(id) {
     ` : ''}
     ${isPending && canDecide ? `
       <div class="form-group">
-        <label>Твой комментарий (опционально)</label>
+        <label>Комментарий к решению (опционально)</label>
         <textarea class="textarea" id="appealNote" rows="2" placeholder="Будет показан участнику..."></textarea>
       </div>
       <div class="modal-actions">
@@ -3951,6 +3983,47 @@ function openAppealDetails(id) {
     ` : ''}
   `;
   document.getElementById('appealModal').classList.add('show');
+  loadAppealThread(id);
+}
+
+async function loadAppealThread(id) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeal/${id}/messages`);
+    if (!r.ok || _currentAppealId !== id) return;
+    const msgs = await r.json();
+    const wrap = document.getElementById('appealThreadWrap');
+    if (!wrap) return;
+    wrap.hidden = !msgs.length;
+    document.getElementById('appealThread').innerHTML = msgs.map(m => `
+      <div class="appeal-msg ${m.from_mod ? 'mod' : 'user'}">
+        <div class="appeal-msg-meta">${m.from_mod ? '🛡️ ' + escapeHtml(m.author || 'Модератор') : '👤 Участник'}
+          · <span class="text-mono">${escapeHtml((m.created_at || '').slice(0, 16).replace('T', ' '))}</span></div>
+        <div class="appeal-msg-text">${escapeHtml(m.text)}</div>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+async function sendAppealReply() {
+  const id = _currentAppealId;
+  const box = document.getElementById('appealReply');
+  const text = (box?.value || '').trim();
+  if (!id) return false;
+  if (!text) { showToast('Напиши текст ответа', 'error'); return false; }
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/appeal/${id}/messages`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      showToast(d.error === 'closed' ? 'Апелляция уже рассмотрена' : 'Не удалось отправить', 'error');
+      return false;
+    }
+    showToast(d.delivered ? '✓ Ответ отправлен участнику в ЛС'
+                          : 'Ответ сохранён, но у участника закрыты ЛС — он его не увидит', d.delivered ? 'success' : 'error');
+    box.value = '';
+    await loadAppealThread(id);
+    return true;
+  } catch(e) { showToast('Ошибка соединения', 'error'); return false; }
 }
 
 function closeAppealModal() {

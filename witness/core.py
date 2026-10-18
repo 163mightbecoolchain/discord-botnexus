@@ -44,6 +44,13 @@ DANGEROUS_PERMS = ("administrator", "ban_members", "kick_members", "manage_guild
                    "manage_roles", "manage_channels", "manage_webhooks", "moderate_members")
 
 
+def is_moderator(member) -> bool:
+    """Модератор — у кого есть хоть одно право модерации."""
+    p = getattr(member, "guild_permissions", None)
+    return bool(p and (p.administrator or p.manage_guild or p.manage_messages or p.moderate_members
+                       or p.ban_members or p.kick_members))
+
+
 async def is_trusted(guild: discord.Guild, user_id: int, cfg: dict = None) -> bool:
     """Владелец, сам бот и участники с доверенными ролями анти-нюк не трогает."""
     if not user_id or user_id == guild.owner_id or (bot.user and user_id == bot.user.id):
