@@ -1310,6 +1310,24 @@ html.theme-anim *::before, html.theme-anim *::after {
             </div>
             <div id="customWordsErr"></div>
           </div>
+          <div class="form-row" style="margin-top: 1rem;">
+            <div class="form-group">
+              <label for="invPingAdd">Чужие инвайты: кого пинговать</label>
+              <div class="chip-list" id="invPingRoles"></div>
+              <select class="select" id="invPingAdd" onchange="addInvitePing(this)">
+                <option value="">+ добавить роль</option>
+              </select>
+              <div class="input-help">Для режима «Пинг», до 5 ролей. Роль, которую нельзя упоминать,
+                бот пингует только с правом «Упоминать @everyone и все роли».</div>
+            </div>
+            <div class="form-group">
+              <label for="invAllow">Серверы-партнёры — по одному на строку</label>
+              <textarea class="textarea" id="invAllow" rows="3" spellcheck="false"
+                placeholder="https://discord.gg/partner&#10;123456789012345678"></textarea>
+              <div class="input-help">Инвайт-ссылка или ID сервера. Ссылки на эти серверы алерт не вызывают.</div>
+              <div id="invAllowErr"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3097,9 +3115,39 @@ const THREATS = [
   ['suspicious', 'подозрительные сообщения', 'Скам',          'Фейковые раздачи Nitro и Steam, крипто-схемы «удвою», ссылки с подменой букв'],
   ['spam',       'спам',                     'Спам',          'Встроенный детектор спама Discord и повтор одного и того же текста'],
   ['custom',     'свои слова',               'Свои слова',    'Слова и домены, которые запрещены именно на этом сервере — список ниже'],
+  ['invites',    null,                       'Чужие инвайты', 'Ссылки discord.gg, которые ведут не на этот сервер. Сообщение не удаляется: только алерт или пинг модераторов'],
 ];
 const MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['block', 'Блок']];
-let _threats = {}, _secData = null, _exempt = { roles: [], channels: [] };
+// Чужие инвайты не блокируются — вместо «Блок» пинг ролей
+const INVITE_MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['ping', 'Пинг']];
+let _threats = {}, _secData = null, _exempt = { roles: [], channels: [] }, _invitePing = [];
+
+function renderInvitePing() {
+  const name = id => (_roles.find(x => String(x.id) === String(id)) || {}).name;
+  document.getElementById('invPingRoles').innerHTML = _invitePing.map(id => {
+    const label = '@' + (name(id) || id);
+    return `<span class="chip-x">${escapeHtml(label)}
+      <button type="button" aria-label="Убрать ${escapeHtml(label)}" onclick="removeInvitePing('${id}')">×</button></span>`;
+  }).join('');
+  document.getElementById('invPingAdd').innerHTML = '<option value="">+ добавить роль</option>' +
+    _roles.filter(r => !_invitePing.includes(String(r.id)))
+      .map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`).join('');
+  document.getElementById('invPingAdd').disabled = _invitePing.length >= 5;
+  csSync();
+}
+
+function addInvitePing(sel) {
+  if (sel.value && !_invitePing.includes(sel.value) && _invitePing.length < 5) _invitePing.push(sel.value);
+  sel.value = '';
+  renderInvitePing();
+  renderThreats();
+}
+
+function removeInvitePing(id) {
+  _invitePing = _invitePing.filter(x => x !== String(id));
+  renderInvitePing();
+  renderThreats();
+}
 
 function renderExempt() {
   const name = (list, id) => (list.find(x => String(x.id) === String(id)) || {}).name;
@@ -3273,7 +3321,13 @@ function renderThreats() {
   document.getElementById('secThreats').innerHTML = THREATS.map(([key, rule, title, desc]) => {
     const r = rules[rule];
     let status;
-    if (r) status = `<span class="chip ok">AutoMod: ${[r.blocks ? 'блокирует' : '', r.alerts ? 'алерт' : ''].filter(Boolean).join(' + ')}</span>`;
+    if (key === 'invites') {
+      if (_threats[key] === 'off') status = '<span class="chip">выключено</span>';
+      else if (!d.message_content) status = '<span class="chip warn">нужен Message Content Intent</span>';
+      else if (_threats[key] === 'ping' && !_invitePing.length) status = '<span class="chip warn">выберите роли для пинга ниже</span>';
+      else status = '<span class="chip">проверяет сам бот</span>';
+    }
+    else if (r) status = `<span class="chip ok">AutoMod: ${[r.blocks ? 'блокирует' : '', r.alerts ? 'алерт' : ''].filter(Boolean).join(' + ')}</span>`;
     else if (key === 'spam' && d.automod.foreign_spam) status = '<span class="chip">на сервере уже есть своё правило спама</span>';
     else if (_threats[key] === 'alert' && ['suspicious', 'spam'].includes(key) && d.message_content) status = '<span class="chip">проверяет сам бот</span>';
     else if (_threats[key] === 'off') status = '<span class="chip">выключено</span>';
@@ -3287,7 +3341,7 @@ function renderThreats() {
           <div class="threat-meta">${status}</div>
         </div>
         <div class="seg" role="group" aria-label="${title}: режим" data-threat="${key}">
-          ${MODE_LABELS.map(([m, l]) => `<button type="button" data-mode="${m}" aria-pressed="${_threats[key] === m}"
+          ${(key === 'invites' ? INVITE_MODE_LABELS : MODE_LABELS).map(([m, l]) => `<button type="button" data-mode="${m}" aria-pressed="${_threats[key] === m}"
             onclick="setThreat('${key}', '${m}')">${l}</button>`).join('')}
         </div>
       </div>`;
@@ -3299,15 +3353,28 @@ async function saveThreats() {
   try {
     const words = document.getElementById('customWords').value
       .split('\n').map(w => w.trim()).filter(Boolean);
+    // «123… — Название» → берём только первое слово строки
+    const allow = document.getElementById('invAllow').value
+      .split('\n').map(w => w.trim().split(/\s+/)[0]).filter(Boolean);
     const r = await apiFetch(`/api/guild/${currentGuild.id}/threats`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ ..._threats, exempt_roles: _exempt.roles,
-                             exempt_channels: _exempt.channels, custom_words: words })
+                             exempt_channels: _exempt.channels, custom_words: words,
+                             invite_ping_roles: _invitePing, invite_allow_guilds: allow })
     });
     const errBox = document.getElementById('customWordsErr');
+    const allowErr = document.getElementById('invAllowErr');
     errBox.innerHTML = '';
+    allowErr.innerHTML = '';
     if (r.status === 400) {
       const d = await r.json().catch(() => ({}));
+      if (d.bad_guilds) {
+        allowErr.innerHTML = `<div class="notice error" style="margin-top:.75rem;">⚠️<div><b>Не удалось найти сервер:</b><ul>${
+          d.bad_guilds.map(b => `<li><span class="text-mono">${escapeHtml(b)}</span></li>`).join('')
+        }</ul>Ссылка устарела или это не инвайт. Укажите действующую ссылку или ID сервера.</div></div>`;
+        showToast('Исправьте список серверов-партнёров', 'error');
+        return false;
+      }
       if (d.bad_words) {
         errBox.innerHTML = `<div class="notice error" style="margin-top:.75rem;">⚠️<div><b>Эти слова не сохранены:</b><ul>${
           d.bad_words.map(b => `<li><span class="text-mono">${escapeHtml(b.word)}</span> — ${escapeHtml(b.reason)}</li>`).join('')
@@ -3591,10 +3658,16 @@ async function loadSecurity() {
     _exempt = { roles: (t.exempt_roles || []).map(String), channels: (t.exempt_channels || []).map(String) };
     document.getElementById('customWords').value = (t.custom_words || []).join('\n');
     document.getElementById('customWordsErr').innerHTML = '';
+    _invitePing = (t.invite_ping_roles || []).map(String);
+    const allowNames = d.invite_allow_names || {};
+    document.getElementById('invAllow').value = (t.invite_allow_guilds || [])
+      .map(id => allowNames[id] ? `${id} — ${allowNames[id]}` : id).join('\n');
+    document.getElementById('invAllowErr').innerHTML = '';
 
     const rules = d.automod.rules || [];
     document.getElementById('secRulesCount').textContent = rules.filter(x => x.enabled).length;
     document.getElementById('secAlerts7d').textContent   = d.alerts_open_7d ?? d.alerts_7d ?? 0;
+    renderInvitePing();
     renderThreats();
     renderExempt();
     resetAlertsPage();

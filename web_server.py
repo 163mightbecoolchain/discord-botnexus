@@ -21,7 +21,7 @@ Routes:
   GET  /api/guild/:id/appeals    — Appeals list
 """
 
-import os, hmac, json, time, hashlib, asyncio, aiohttp, aiofiles, aiosqlite, datetime, traceback
+import os, re, hmac, json, time, hashlib, asyncio, aiohttp, aiofiles, aiosqlite, datetime, traceback
 from pathlib import Path
 from aiohttp import web
 
@@ -763,9 +763,15 @@ async def api_security_overview(request):
     except Exception as ex:
         print(f"[SECURITY] alerts: {ex}")
 
+    threats = await get_threat_config(guild_id)
+    # Названия серверов-партнёров: из кэша бота или из ответов fetch_invite
+    from witness.foreign_invites import _resolved
+    known = {str(gid): name for _, gid, name in _resolved.values() if gid}
+    known.update({str(g.id): g.name for g in bot.guilds})
     return web.json_response({
         'automod':   automod,
-        'threats':   await get_threat_config(guild_id),
+        'threats':   threats,
+        'invite_allow_names': {i: known[i] for i in threats['invite_allow_guilds'] if i in known},
         'log_channel': str(log_ch.id) if log_ch else None,
         'message_content': intents.message_content,
         'alerts':    alerts,
@@ -775,8 +781,9 @@ async def api_security_overview(request):
 
 @require_auth
 async def api_threats_save(request):
-    """POST /api/guild/:id/threats — режимы {phishing|suspicious|spam|custom: off|alert|block},
-    exempt_roles / exempt_channels (id) и custom_words (свои слова)."""
+    """POST /api/guild/:id/threats — режимы {phishing|suspicious|spam|custom: off|alert|block,
+    invites: off|alert|ping}, exempt_roles / exempt_channels (id), custom_words (свои слова),
+    invite_ping_roles (id) и invite_allow_guilds (id или инвайт-ссылки серверов-партнёров)."""
     guild_id = int(request.match_info['guild_id'])
     s        = request['session']
     bot      = request.app['bot']
@@ -800,6 +807,29 @@ async def api_threats_save(request):
         if isinstance(data.get('exempt_channels'), list):
             data['exempt_channels'] = [str(c) for c in data['exempt_channels']
                                        if str(c).isdigit() and bg.get_channel(int(c))]
+        if isinstance(data.get('invite_ping_roles'), list):
+            data['invite_ping_roles'] = [str(r) for r in data['invite_ping_roles']
+                                         if str(r).isdigit() and bg.get_role(int(r))]
+        # Серверы-партнёры: ID или инвайт-ссылка — ссылку превращаем в ID сервера
+        if isinstance(data.get('invite_allow_guilds'), list):
+            from witness.foreign_invites import invite_codes, resolve_invite
+            ids, bad = [], []
+            for raw in data['invite_allow_guilds'][:50]:
+                item = str(raw).strip()
+                if not item:
+                    continue
+                if item.isdigit() and 15 <= len(item) <= 21:
+                    ids.append(item)
+                    continue
+                codes = invite_codes(item) or ([item] if re.fullmatch(r'[A-Za-z0-9-]{2,32}', item) else [])
+                res = await resolve_invite(codes[0]) if codes else None
+                if res and res[0]:
+                    ids.append(str(res[0]))
+                else:
+                    bad.append(item)
+            if bad:
+                return web.json_response({'error': 'bad_guilds', 'bad_guilds': bad}, status=400)
+            data['invite_allow_guilds'] = ids
         # Слова, которые задели бы обычные ссылки, не сохраняем — возвращаем список
         if isinstance(data.get('custom_words'), list):
             good, bad = check_custom_words(data['custom_words'])

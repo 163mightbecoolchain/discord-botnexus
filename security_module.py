@@ -838,6 +838,14 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                 await create_alert(gid, "duplicate_content", dup["severity"],
                                    uid, f"Дублирует контент {dup['count']} раз за час")
 
+        # Инвайты на чужие серверы — только алерт, сообщение не трогаем
+        if message.content and modes["invites"] != "off":
+            try:
+                from witness.foreign_invites import check_message
+                await check_message(message, modes)
+            except Exception as ex:
+                print(f"[INVITES] check: {ex}")
+
         # Проверка фишинга и скама
         if message.content:
             findings = [f for f in check_phishing(message.content)
