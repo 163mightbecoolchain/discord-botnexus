@@ -415,12 +415,21 @@ async def save_security(gid, log_channel, settings):
 # block — блокировать сообщение и прислать алерт. Применяются в automod.py
 # (правила AutoMod) и в security_module.py (проверка текста самим ботом).
 THREAT_MODES   = ("off", "alert", "block")
+# invites — инвайты на чужие серверы (witness/foreign_invites.py). Сообщение не
+# блокируется: alert — алерт в лог-канал, ping — алерт с пингом ролей модераторов.
+INVITE_MODES   = ("off", "alert", "ping")
 # custom — свой список слов и доменов сервера (правило «свои слова»)
-DEFAULT_THREATS = {"phishing": "block", "suspicious": "alert", "spam": "alert", "custom": "off"}
+DEFAULT_THREATS = {"phishing": "block", "suspicious": "alert", "spam": "alert", "custom": "off",
+                   "invites": "alert"}
 # Исключения и список слов хранятся рядом с режимами в том же JSON.
 # Лимиты — как у Discord AutoMod: 20 ролей, 50 каналов, 1000 слов до 60 символов.
-THREAT_LISTS = {"exempt_roles": 20, "exempt_channels": 50, "custom_words": 1000}
+# invite_ping_roles — кого пинговать в режиме ping, invite_allow_guilds — ID серверов-партнёров.
+THREAT_LISTS = {"exempt_roles": 20, "exempt_channels": 50, "custom_words": 1000,
+                "invite_ping_roles": 5, "invite_allow_guilds": 50}
 _threat_cache: dict = {}
+
+def _threat_mode_ok(key, mode):
+    return mode in (INVITE_MODES if key == "invites" else THREAT_MODES)
 
 async def get_threat_config(gid):
     """Режимы + исключения + свои слова: {"phishing": "block", …, "exempt_roles": [ids], …}."""
@@ -429,7 +438,7 @@ async def get_threat_config(gid):
             async with db.execute("SELECT settings FROM threat_settings WHERE guild_id=?", (gid,)) as c:
                 row = await c.fetchone()
         saved = json.loads(row[0] or "{}") if row else {}
-        cfg = {k: saved[k] if saved.get(k) in THREAT_MODES else v for k, v in DEFAULT_THREATS.items()}
+        cfg = {k: saved[k] if _threat_mode_ok(k, saved.get(k)) else v for k, v in DEFAULT_THREATS.items()}
         for k in THREAT_LISTS:
             cfg[k] = list(saved.get(k) or [])
         _threat_cache[gid] = cfg
@@ -446,7 +455,7 @@ async def save_threats(gid, data):
     списки обрезаются до лимитов. Проверку слов на безобидные ссылки и
     принадлежность ролей/каналов серверу делает вызывающий код."""
     clean = await get_threat_config(gid)
-    clean.update({k: v for k, v in data.items() if k in DEFAULT_THREATS and v in THREAT_MODES})
+    clean.update({k: v for k, v in data.items() if k in DEFAULT_THREATS and _threat_mode_ok(k, v)})
     for k, limit in THREAT_LISTS.items():
         if isinstance(data.get(k), list):
             items = [str(x) for x in data[k] if isinstance(x, (str, int)) and str(x).strip()]
