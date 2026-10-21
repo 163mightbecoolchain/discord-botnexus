@@ -2037,16 +2037,51 @@ async def api_punishments(request):
             WHERE guild_id=? AND unbanned=0 ORDER BY unban_at
         """, (guild_id,)) as c:
             bans = await c.fetchall()
+        # Бессрочные баны (через Discord, анти-рейд) в temp_bans не попадают —
+        # их берём из списка банов сервера, а автора — из последней записи modlog
+        temp_ids = {r[0] for r in bans}
+        perm = [e for e in await _guild_bans(bg) if e[0] not in temp_ids]
+        perm_mods = {}
+        if perm:
+            async with db.execute("""
+                SELECT user_id, mod_id FROM modlog
+                WHERE guild_id=? AND action IN ('BAN','AUTO_BAN') ORDER BY id
+            """, (guild_id,)) as c:
+                perm_mods = {u: m for u, m in await c.fetchall()}
+    perm_mods = {u: perm_mods[u] for u, _, _ in perm if u in perm_mods}
     names = await _user_names(bot, bg, [r[0] for r in mutes] + [r[0] for r in bans] +
-                                       [r[1] for r in bans])
+                                       [r[1] for r in bans] + list(perm_mods.values()))
     return web.json_response({
         'mutes': [{'user_id': str(u), 'user_name': names.get(u), 'until': until,
                    'reason': reason, 'since': since} for u, until, reason, since in mutes],
         'tempbans': [{'user_id': str(u), 'user_name': names.get(u), 'mod_id': str(m),
                       'mod_name': 'Auto' if not m else names.get(m),
                       'reason': reason, 'until': until} for u, m, reason, until in bans],
+        'permbans': [{'user_id': str(u), 'user_name': n, 'reason': reason,
+                      'mod_id': str(perm_mods[u]) if u in perm_mods else None,
+                      'mod_name': ('Auto' if not perm_mods[u] else names.get(perm_mods[u]))
+                                  if u in perm_mods else None}
+                     for u, n, reason in perm],
         'can': {'unmute': p.moderate_members, 'unban': p.ban_members},
     })
+
+
+_bans_cache: dict = {}   # guild_id → (время, [(user_id, имя, причина)])
+
+async def _guild_bans(bg) -> list:
+    """Список банов сервера из Discord. Кэш на минуту: страницу открывают часто,
+    а на больших серверах это несколько запросов по 1000 записей."""
+    hit = _bans_cache.get(bg.id)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    try:
+        rows = [(e.user.id, e.user.global_name or e.user.name, e.reason or '')
+                async for e in bg.bans(limit=None)]
+    except Exception as ex:                     # нет права Ban Members, сбой API
+        print(f"[PUNISH] Список банов недоступен: {ex}")
+        return hit[1] if hit else []
+    _bans_cache[bg.id] = (time.time(), rows)
+    return rows
 
 
 @require_auth
@@ -2100,6 +2135,7 @@ async def api_member_action(request):
         res = await mod.panel_unmute(bg, target, uid, mod_id, reason or 'Снят с панели')
     else:
         res = await mod.panel_unban(bg, uid, mod_id, reason or 'Снят с панели')
+        _bans_cache.pop(guild_id, None)
     if res.get('error'):
         return web.json_response(res, status=400)
     return web.json_response({'ok': True, **res})

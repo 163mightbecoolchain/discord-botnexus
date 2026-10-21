@@ -308,6 +308,9 @@ label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2)
 .al-count:hover { color: var(--accent); border-color: var(--accent); }
 tr.al-sub td { padding-top: .35rem; padding-bottom: .35rem; font-size: .8rem; color: var(--text-2); background: var(--bg-3); }
 .filter-bar .ml-who { width: 260px; max-width: 100%; }
+.pun-q { width: 300px; max-width: 100%; }
+button.chip { cursor: pointer; font-family: inherit; }
+button.chip:hover, button.chip.active { color: var(--accent); border-color: var(--accent); }
 .user-pop .up-foot { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .8rem; }
 .chip-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .5rem; min-height: 0; }
 .chip-x { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; padding: .25rem .3rem .25rem .65rem; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border-2); }
@@ -1754,10 +1757,16 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Активные наказания</div>
-          <div class="page-subtitle">Кто сейчас в муте или в бане, выданном ботом</div>
+          <div class="page-subtitle">Кто сейчас в муте или в бане</div>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="loadPunishments()">⟳ Обновить</button>
+        <div class="flex gap-1" style="align-items:center;">
+          <input class="input pun-q" id="punQ" type="search" autocomplete="off"
+                 placeholder="Причина, ник или ID — например 5.1" oninput="renderPunishments()"
+                 aria-label="Поиск по наказаниям">
+          <button class="btn btn-ghost btn-sm" onclick="loadPunishments()">⟳ Обновить</button>
+        </div>
       </div>
+      <div class="chip-list" id="punReasons"></div>
       <div class="card">
         <div class="card-head"><div><div class="card-title">Муты <span class="text-muted" id="punMutesCount"></span></div></div></div>
         <div class="table-wrap" style="border:0; border-radius:0;">
@@ -3955,6 +3964,9 @@ function timeLeft(iso) {
   return h < 48 ? `${h} ч ${mins % 60} мин` : `${Math.floor(h / 24)} дн ${h % 24} ч`;
 }
 
+let _pun = null;           // последний ответ /punishments — поиск фильтрует его без запросов
+const PUN_MAX_ROWS = 300;  // бессрочных банов бывают тысячи
+
 async function loadPunishments() {
   if (!currentGuild) return;
   const mt = document.getElementById('punMutes'), bt = document.getElementById('punBans');
@@ -3965,33 +3977,100 @@ async function loadPunishments() {
     if (!r.ok) throw new Error(r.status);
     d = await r.json();
   } catch(e) {
+    _pun = null;
     mt.innerHTML = bt.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
     return;
   }
-  [...d.mutes, ...d.tempbans].forEach(x => x.user_name && _nameHints.set(x.user_id, x.user_name));
+  d.permbans = d.permbans || [];
+  [...d.mutes, ...d.tempbans, ...d.permbans].forEach(x => x.user_name && _nameHints.set(x.user_id, x.user_name));
+  // В бейдже — только то, что истечёт само; бессрочные баны его бы переполнили
   const badge = document.getElementById('punishBadge');
   const total = d.mutes.length + d.tempbans.length;
   badge.textContent = total; badge.classList.toggle('hidden', !total);
-  document.getElementById('punMutesCount').textContent = d.mutes.length ? `· ${d.mutes.length}` : '';
-  document.getElementById('punBansCount').textContent = d.tempbans.length ? `· ${d.tempbans.length}` : '';
+  _pun = d;
+  renderPunReasons();
+  renderPunishments();
+}
+
+// Пункт правил ищем как номер: «5.1» — это 5.1 и его подпункты (5.1.2),
+// но не «15.1» и не «5.12»; «5» — весь раздел 5.
+// Остальное — обычный поиск подстроки по причине, нику и ID
+function punMatcher(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return null;
+  if (/^\d+(\.\d+)*$/.test(q)) {
+    const re = new RegExp(`(?<!\\d)(?<!\\d\\.)${q.replace(/\./g, '\\.')}(?!\\d)`);
+    return x => re.test((x.reason || '').toLowerCase()) || x.user_id === q;
+  }
+  return x => [x.reason, x.user_name, x.user_id].some(v => (v || '').toLowerCase().includes(q));
+}
+
+function punHighlight(text, q) {
+  const t = text || '';
+  q = q.trim();
+  const i = q ? t.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return escapeHtml(t || '—');
+  return escapeHtml(t.slice(0, i)) + '<mark>' + escapeHtml(t.slice(i, i + q.length)) + '</mark>' + escapeHtml(t.slice(i + q.length));
+}
+
+// Частые причины — кнопки над таблицами, клик подставляет причину в поиск
+function renderPunReasons() {
+  const box = document.getElementById('punReasons');
+  const counts = new Map();
+  [..._pun.mutes, ..._pun.tempbans, ..._pun.permbans].forEach(x => {
+    const r = (x.reason || '').trim();
+    if (r) counts.set(r, (counts.get(r) || 0) + 1);
+  });
+  const top = [...counts].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  box.innerHTML = top.map(([r, n]) =>
+    `<button class="chip" type="button" data-reason="${escapeHtml(r)}" title="${escapeHtml(r)}">${escapeHtml(shortText(r, 40))} · ${n}</button>`).join('');
+  box.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const q = document.getElementById('punQ');
+    q.value = q.value === b.dataset.reason ? '' : b.dataset.reason;
+    renderPunishments();
+  });
+}
+
+function renderPunishments() {
+  const d = _pun;
+  if (!d) return;
+  const q = document.getElementById('punQ').value;
+  const match = punMatcher(q);
+  const mutes = match ? d.mutes.filter(match) : d.mutes;
+  // Сначала временные (у них есть срок), потом бессрочные
+  const bans = [...d.tempbans, ...d.permbans.map(x => ({ ...x, perm: true }))];
+  const shownBans = match ? bans.filter(match) : bans;
+  document.querySelectorAll('#punReasons button').forEach(b =>
+    b.classList.toggle('active', b.dataset.reason === q));
+
+  const cnt = (n, all) => !all ? '' : match ? `· ${n} из ${all}` : `· ${all}`;
+  document.getElementById('punMutesCount').textContent = cnt(mutes.length, d.mutes.length);
+  document.getElementById('punBansCount').textContent = cnt(shownBans.length, bans.length);
+
   const empty = (n, t) => `<tr><td colspan="${n}"><div class="empty" style="padding:1.5rem;"><div class="empty-sub">${t}</div></div></td></tr>`;
-  mt.innerHTML = d.mutes.length ? d.mutes.map(x => `
+  const notFound = 'Ничего не найдено по запросу «' + escapeHtml(q.trim()) + '»';
+  const mt = document.getElementById('punMutes'), bt = document.getElementById('punBans');
+  mt.innerHTML = mutes.length ? mutes.map(x => `
     <tr>
       <td>${userChip(x.user_id, x.user_name)}</td>
-      <td>${escapeHtml(x.reason || '—')}</td>
+      <td>${punHighlight(x.reason, q)}</td>
       <td class="text-mono text-muted">${fmtUntil(x.until)}</td>
       <td class="text-mono">${timeLeft(x.until)}</td>
       <td>${d.can.unmute ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unmute')">Снять мут</button>` : ''}</td>
-    </tr>`).join('') : empty(5, 'Сейчас никто не в муте');
-  bt.innerHTML = d.tempbans.length ? d.tempbans.map(x => `
+    </tr>`).join('') : empty(5, match && d.mutes.length ? notFound : 'Сейчас никто не в муте');
+  const rows = shownBans.slice(0, PUN_MAX_ROWS).map(x => `
     <tr>
       <td>${userChip(x.user_id, x.user_name)}</td>
-      <td>${escapeHtml(x.reason || '—')}</td>
-      <td>${userChip(x.mod_id, x.mod_name)}</td>
-      <td class="text-mono text-muted">${fmtUntil(x.until)}</td>
-      <td class="text-mono">${timeLeft(x.until)}</td>
+      <td>${punHighlight(x.reason, q)}</td>
+      <td>${x.mod_id || x.mod_name ? userChip(x.mod_id, x.mod_name) : '<span class="text-muted">—</span>'}</td>
+      <td class="text-mono text-muted">${x.perm ? 'бессрочно' : fmtUntil(x.until)}</td>
+      <td class="text-mono">${x.perm ? '—' : timeLeft(x.until)}</td>
       <td>${d.can.unban ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unban')">Разбанить</button>` : ''}</td>
-    </tr>`).join('') : empty(6, 'Банов нет');
+    </tr>`).join('');
+  const more = shownBans.length - PUN_MAX_ROWS;
+  bt.innerHTML = shownBans.length
+    ? rows + (more > 0 ? empty(6, `И ещё ${more} — уточни поиск`) : '')
+    : empty(6, match && bans.length ? notFound : 'Банов нет');
 }
 
 let _currentAppealId = null;
