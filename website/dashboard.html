@@ -4038,7 +4038,8 @@ function timeLeft(iso) {
 }
 
 let _pun = null;           // последний ответ /punishments — поиск фильтрует его без запросов
-const PUN_MAX_ROWS = 300;  // бессрочных банов бывают тысячи
+const PUN_PAGE = 300;      // бессрочных банов бывают тысячи — рисуем порциями
+let _punLimit = PUN_PAGE;
 
 async function loadPunishments() {
   if (!currentGuild) return;
@@ -4104,9 +4105,11 @@ function renderPunReasons() {
   });
 }
 
-function renderPunishments() {
+// more=true — «Показать ещё»; любая другая перерисовка (поиск, загрузка) — снова первая порция
+function renderPunishments(more = false) {
   const d = _pun;
   if (!d) return;
+  _punLimit = more ? _punLimit + PUN_PAGE : PUN_PAGE;
   const q = document.getElementById('punQ').value;
   const match = punMatcher(q);
   const mutes = match ? d.mutes.filter(match) : d.mutes;
@@ -4131,7 +4134,7 @@ function renderPunishments() {
       <td class="text-mono">${timeLeft(x.until)}</td>
       <td>${d.can.unmute ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unmute')">Снять мут</button>` : ''}</td>
     </tr>`).join('') : empty(5, match && d.mutes.length ? notFound : 'Сейчас никто не в муте');
-  const rows = shownBans.slice(0, PUN_MAX_ROWS).map(x => `
+  const rows = shownBans.slice(0, _punLimit).map(x => `
     <tr>
       <td>${userChip(x.user_id, x.user_name)}</td>
       <td>${punHighlight(x.reason, q)}</td>
@@ -4140,9 +4143,12 @@ function renderPunishments() {
       <td class="text-mono">${x.perm ? '—' : timeLeft(x.until)}</td>
       <td>${d.can.unban ? `<button class="btn btn-ghost btn-sm" onclick="memberAction('${x.user_id}', 'unban')">Разбанить</button>` : ''}</td>
     </tr>`).join('');
-  const more = shownBans.length - PUN_MAX_ROWS;
+  const left = shownBans.length - _punLimit;
+  const moreRow = `<tr><td colspan="6" style="text-align:center;padding:1rem;">
+      <button class="btn btn-ghost btn-sm" onclick="renderPunishments(true)">Показать ещё ${Math.min(PUN_PAGE, left)} из ${left}</button>
+    </td></tr>`;
   bt.innerHTML = shownBans.length
-    ? rows + (more > 0 ? empty(6, `И ещё ${more} — уточни поиск`) : '')
+    ? rows + (left > 0 ? moreRow : '')
     : empty(6, match && bans.length ? notFound : 'Банов нет');
 }
 

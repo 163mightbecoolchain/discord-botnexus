@@ -2062,6 +2062,26 @@ async def api_punishments(request):
             WHERE guild_id=? AND notified=0 AND until>? ORDER BY until
         """, (guild_id, now)) as c:
             mutes = await c.fetchall()
+        # Тайм-аут, выданный пока бот был выключен (или до включения Server
+        # Members Intent), в active_mutes не попал — добираем из кэша участников.
+        # И наоборот: запись есть, а тайм-аут уже сняли, пока бот не видел — прячем
+        if bot.intents.members:
+            now_dt = datetime.datetime.now(datetime.timezone.utc)
+            timed = {m.id: m.timed_out_until for m in bg.members
+                     if m.timed_out_until and m.timed_out_until > now_dt}
+            mutes = [r for r in mutes if r[0] in timed or bg.get_member(r[0]) is None]
+            known = {r[0] for r in mutes}
+            missing = [u for u in timed if u not in known]
+            if missing:
+                async with db.execute(f"""
+                    SELECT user_id, reason FROM modlog
+                    WHERE guild_id=? AND action IN ('MUTE','AUTO_MUTE')
+                      AND user_id IN ({','.join('?' * len(missing))}) ORDER BY id
+                """, (guild_id, *missing)) as c:
+                    last_reason = {u: r for u, r in await c.fetchall()}
+                mutes += [(u, timed[u].replace(tzinfo=None).isoformat(),
+                           last_reason.get(u, ''), None) for u in missing]
+                mutes.sort(key=lambda r: r[1])
         async with db.execute("""
             SELECT user_id, mod_id, reason, unban_at FROM temp_bans
             WHERE guild_id=? AND unbanned=0 ORDER BY unban_at
