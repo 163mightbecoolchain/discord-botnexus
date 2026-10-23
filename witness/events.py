@@ -758,6 +758,56 @@ async def _send_deleted_media(ch, message, embed):
         queue_log(ch, embed)
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  КТО УДАЛИЛ СООБЩЕНИЕ
+#  Discord пишет в журнал аудита только удаление чужого сообщения;
+#  своё автор удаляет без записи. Удаления одним модератором
+#  сообщений одного автора в одном канале Discord склеивает в одну
+#  запись: растёт extra.count, а created_at остаётся от первой.
+#  Поэтому помним, сколько удалений каждой записи уже разобрали:
+#  счётчик вырос — удалил модератор, нет — автор сам.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_del_seen: "OrderedDict[int, int]" = OrderedDict()   # audit entry id → разобранный count
+_del_locks: dict = {}                                 # guild_id → Lock
+DEL_AUDIT_DELAY  = 1.5     # запись в журнале появляется чуть позже события
+DEL_AUDIT_WINDOW = 20      # новая запись старше этого — не про это удаление
+
+
+async def _message_deleter(message):
+    """
+    Возвращает удалившего (User/Member), None — если удалил сам автор,
+    False — если журнал аудита недоступен.
+    """
+    guild = message.guild
+    lock = _del_locks.setdefault(guild.id, asyncio.Lock())
+    await asyncio.sleep(DEL_AUDIT_DELAY)
+    async with lock:            # параллельные удаления делят один счётчик записи
+        try:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            found = None
+            async for entry in guild.audit_logs(limit=15, action=discord.AuditLogAction.message_delete):
+                count = getattr(entry.extra, "count", 1) or 1
+                seen = _del_seen.get(entry.id)
+                if seen is None:
+                    # Незнакомая старая запись: всё, что в ней есть, было до нас
+                    fresh = (now - entry.created_at).total_seconds() <= DEL_AUDIT_WINDOW
+                    seen = 0 if fresh else count
+                    _del_seen[entry.id] = seen
+                if (found is None and count > seen
+                        and getattr(entry.target, "id", None) == message.author.id
+                        and getattr(entry.extra.channel, "id", None) == message.channel.id):
+                    _del_seen[entry.id] = seen + 1
+                    found = entry.user or await bot.fetch_user(entry.user_id)
+            while len(_del_seen) > 2000:
+                _del_seen.popitem(last=False)
+            return found
+        except discord.Forbidden:
+            return False
+        except Exception as ex:
+            print(f"[MSG_DELETE] audit: {ex}")
+            return False
+
+
 @bot.event
 async def on_message_delete(message):
     if message.author.bot or not message.guild:
@@ -772,6 +822,14 @@ async def on_message_delete(message):
     e.set_author(name=t(gid8, "msg_deleted"))
     e.add_field(name=t(gid8, "member"),  value=message.author.mention,                                    inline=True)
     e.add_field(name=t(gid8, "channel"), value=getattr(message.channel, "mention", str(message.channel)), inline=True)
+    deleter = await _message_deleter(message)
+    if deleter is False:
+        by = t(gid8, "deleted_unknown")
+    elif deleter is None:
+        by = t(gid8, "deleted_self")
+    else:
+        by = f"{deleter.mention} (`{deleter}`)"
+    e.add_field(name=t(gid8, "deleted_by"), value=by, inline=True)
     # Без текста, но с вложениями поле не нужно: файлы идут следом
     if message.content or not message.attachments or not intents.message_content:
         no_text = "*(attachment)*" if intents.message_content else "*(текст недоступен без Message Content Intent)*"
