@@ -51,6 +51,17 @@ async def db_init():
                 guild_id INTEGER NOT NULL, invite_code TEXT NOT NULL,
                 reason TEXT DEFAULT '', flagged_at TEXT NOT NULL,
                 PRIMARY KEY (guild_id, invite_code));
+            -- Ручная пометка инвайта с сайта и что делать с зашедшими по нему
+            -- (witness/invites.py: apply_invite_rule). Пометки анти-рейда — в invite_flags.
+            CREATE TABLE IF NOT EXISTS invite_rules (
+                guild_id INTEGER NOT NULL, invite_code TEXT NOT NULL,
+                action TEXT NOT NULL DEFAULT 'alert',
+                max_age_days INTEGER DEFAULT 0, no_avatar INTEGER DEFAULT 0,
+                timeout_minutes INTEGER DEFAULT 60, delete_days INTEGER DEFAULT 0,
+                reason TEXT DEFAULT '', expires_at TEXT DEFAULT '',
+                created_by INTEGER DEFAULT 0, created_at TEXT NOT NULL,
+                hits INTEGER DEFAULT 0, last_hit TEXT DEFAULT '',
+                PRIMARY KEY (guild_id, invite_code));
             CREATE TABLE IF NOT EXISTS tier_warnings (
                 guild_id   INTEGER NOT NULL,
                 days_left  INTEGER NOT NULL,

@@ -416,6 +416,7 @@ async def invite_overview(guild, days: int = 30) -> dict:
         async with db.execute("SELECT invite_code, reason FROM invite_flags WHERE guild_id=?", (gid,)) as c:
             flags = dict(await c.fetchall())
         punished = await _punished_ids(db, gid)
+    rules = await get_invite_rules(gid)
 
     per: dict = {}
     days_map: dict = {}
@@ -444,7 +445,12 @@ async def invite_overview(guild, days: int = 30) -> dict:
         r.setdefault("note", "")
         r.setdefault("last_join", "")
         r["retention"] = round(100 * s["stayed"] / s["joins"]) if s["joins"] else None
+        rule = rules.get(code)
+        r["rule"] = None if not rule else {"action": rule["action"], "expired": rule["expired"],
+                                           "summary": describe_rule(rule), "hits": rule["hits"]}
         r["flag"] = flags.get(code, "")
+        if not r["flag"] and rule and not rule["expired"]:
+            r["flag"] = "помечена вручную: " + describe_rule(rule)
         if not r["flag"] and s["joins"] >= 3 and s["punished"] * 2 >= s["joins"]:
             r["flag"] = f"наказаны {s['punished']} из {s['joins']} зашедших"
         r["suspicious"] = bool(r["flag"])
@@ -499,8 +505,11 @@ async def invite_details(guild, code: str, limit: int = 300) -> dict:
     members = [{"id": str(uid), "name": name or str(uid), "joined_at": at,
                 "on_server": guild.get_member(uid) is not None, "punished": uid in punished}
                for uid, name, at in rows]
+    from .database import get_protection
     return {"code": code, "active": active, "inviter_id": str(iid or ""), "inviter_name": iname or "",
             "note": note or "", "flag": flag[0] if flag else "", "members": members,
+            "rule": await get_invite_rule(gid, code) if code else None,
+            "observe_mode": (await get_protection(gid))["observe_mode"],
             "joins": len(members), "stayed": sum(m["on_server"] for m in members),
             "punished": sum(m["punished"] for m in members)}
 
@@ -600,3 +609,174 @@ async def invite_search(guild, q: str, limit: int = 8) -> dict:
         "joined": [{"id": str(u), "name": name_of(u, n), "code": c or "", "inviter_name": iname or "",
                     "joined_at": at} for u, n, c, iname, at in joined],
     }
+
+
+# ── Правила для подозрительных инвайтов ──────────────────────
+# Модератор помечает код на сайте и задаёт, что делать с теми, кто по нему зашёл.
+# Проверяется в on_member_join после того, как определён инвайт.
+
+RULE_ACTIONS = ("ban", "kick", "quarantine", "timeout", "alert")
+RULE_ACTION_NAMES = {"ban": "бан", "kick": "кик", "quarantine": "карантин",
+                     "timeout": "мут", "alert": "только оповещение"}
+RULE_DELETE_DAYS = (0, 1, 7)
+RULE_FIELDS = ("action", "max_age_days", "no_avatar", "timeout_minutes", "delete_days",
+               "reason", "expires_at", "created_by", "created_at", "hits", "last_hit")
+
+
+def _rule_dict(row) -> dict:
+    r = dict(zip(RULE_FIELDS, row))
+    r["no_avatar"] = bool(r["no_avatar"])
+    r["created_by"] = str(r["created_by"] or "")
+    r["expired"] = bool(r["expires_at"]) and r["expires_at"] <= datetime.datetime.utcnow().isoformat()
+    return r
+
+
+async def get_invite_rules(gid: int) -> dict:
+    """{код: правило} для сервера — для таблицы на сайте."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT invite_code, {','.join(RULE_FIELDS)} FROM invite_rules "
+                              "WHERE guild_id=?", (gid,)) as c:
+            return {r[0]: _rule_dict(r[1:]) for r in await c.fetchall()}
+
+
+async def get_invite_rule(gid: int, code: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT {','.join(RULE_FIELDS)} FROM invite_rules "
+                              "WHERE guild_id=? AND invite_code=?", (gid, code)) as c:
+            row = await c.fetchone()
+    return _rule_dict(row) if row else None
+
+
+def clean_rule(data: dict) -> dict:
+    """Проверяет то, что пришло с сайта; числа обрезаются по допустимым пределам."""
+    def num(key, lo, hi, default):
+        try:
+            return max(lo, min(hi, int(data.get(key) if data.get(key) not in (None, "") else default)))
+        except (TypeError, ValueError):
+            return default
+    hours = num("hours", 0, 24 * 365, 0)            # срок действия правила, 0 — бессрочно
+    delete_days = num("delete_days", 0, 7, 0)
+    return {
+        "action": data.get("action") if data.get("action") in RULE_ACTIONS else "alert",
+        "max_age_days": num("max_age_days", 0, 3650, 0),
+        "no_avatar": bool(data.get("no_avatar")),
+        "timeout_minutes": num("timeout_minutes", 1, 40320, 60),
+        "delete_days": delete_days if delete_days in RULE_DELETE_DAYS else 1,
+        "reason": str(data.get("reason") or "").strip()[:200],
+        "expires_at": (datetime.datetime.utcnow() + datetime.timedelta(hours=hours)).isoformat() if hours else "",
+    }
+
+
+def describe_rule(r: dict) -> str:
+    """«бан — аккаунты младше 7 дн., без аватарки» — для лога."""
+    action = RULE_ACTION_NAMES[r["action"]]
+    if r["action"] == "timeout":
+        from .guard import _fmt_minutes
+        action += f" на {_fmt_minutes(r['timeout_minutes'])}"
+    cond = []
+    if r["max_age_days"]:
+        cond.append(f"аккаунты младше {r['max_age_days']} дн.")
+    if r["no_avatar"]:
+        cond.append("без аватарки")
+    return f"{action} — {', '.join(cond) if cond else 'все зашедшие'}"
+
+
+async def save_invite_rule(guild, code: str, data: dict, by) -> dict:
+    """Помечает инвайт или меняет правило. Счётчик срабатываний сохраняется.
+    hours="keep" — оставить прежний срок действия."""
+    r = clean_rule(data)
+    if data.get("hours") == "keep":
+        old = await get_invite_rule(guild.id, code)
+        r["expires_at"] = old["expires_at"] if old else ""
+    now = datetime.datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO invite_rules (guild_id, invite_code, action, max_age_days, no_avatar,
+                timeout_minutes, delete_days, reason, expires_at, created_by, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(guild_id, invite_code) DO UPDATE SET action=excluded.action,
+                max_age_days=excluded.max_age_days, no_avatar=excluded.no_avatar,
+                timeout_minutes=excluded.timeout_minutes, delete_days=excluded.delete_days,
+                reason=excluded.reason, expires_at=excluded.expires_at,
+                created_by=excluded.created_by, created_at=excluded.created_at""",
+            (guild.id, code, r["action"], r["max_age_days"], int(r["no_avatar"]), r["timeout_minutes"],
+             r["delete_days"], r["reason"], r["expires_at"], getattr(by, "id", 0), now))
+        await db.commit()
+    rule = await get_invite_rule(guild.id, code)
+    until = f"до {rule['expires_at'][:16].replace('T', ' ')} UTC" if rule["expires_at"] else "бессрочно"
+    await _rule_log(guild, "⚠️ Инвайт помечен подозрительным", code, by, [
+        ("Правило", describe_rule(rule), False),
+        ("Действует", until, True),
+        *([("Причина", rule["reason"], True)] if rule["reason"] else []),
+    ])
+    return rule
+
+
+async def delete_invite_rule(guild, code: str, by) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("DELETE FROM invite_rules WHERE guild_id=? AND invite_code=?", (guild.id, code))
+        await db.commit()
+    if cur.rowcount:
+        await _rule_log(guild, "✅ Пометка с инвайта снята", code, by, [])
+    return bool(cur.rowcount)
+
+
+async def _rule_log(guild, title, code, by, fields):
+    ch = await get_log_ch(guild)
+    if not ch:
+        return
+    e = build_embed(C.WARNING if fields else C.MUTED)
+    e.set_author(name=title)
+    e.add_field(name="Код", value=f"`{code}`", inline=True)
+    e.add_field(name="Кто", value=getattr(by, "mention", str(by)), inline=True)
+    for name, value, inline in fields:
+        e.add_field(name=name, value=value, inline=inline)
+    try:
+        await ch.send(embed=e)
+    except discord.HTTPException:
+        pass
+
+
+async def apply_invite_rule(member, code: str, certain: bool) -> bool:
+    """Правило для инвайта, по которому зашёл участник. True — участник удалён.
+    certain=False — бот не уверен в инвайте (несколько входов разом, разовая ссылка):
+    тогда только оповещение, чтобы не наказать человека за чужую ссылку."""
+    if not code or member.bot:
+        return False
+    guild = member.guild
+    rule = await get_invite_rule(guild.id, code)
+    if not rule or rule["expired"]:
+        return False
+    age = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
+    if rule["max_age_days"] and age >= rule["max_age_days"]:
+        return False
+    if rule["no_avatar"] and member.avatar is not None:
+        return False
+    from .database import get_protection
+    from .core import is_trusted
+    from .guard import punish, report
+    cfg = await get_protection(guild.id)
+    if await is_trusted(guild, member.id, cfg):
+        return False
+    why = [f"зашёл по ссылке `{code}`", f"аккаунту {age} дн."]
+    if rule["no_avatar"]:
+        why.append("нет аватарки")
+    reason = f"Witness, подозрительный инвайт {code}" + (f": {rule['reason']}" if rule["reason"] else "")
+    if certain:
+        done, undo = await punish(member, rule["action"], cfg, reason[:500], minutes=rule["timeout_minutes"],
+                                  delete_days=rule["delete_days"])
+    else:
+        done, undo = ("Ничего не сделано: бот не уверен, что участник зашёл именно по этой ссылке "
+                      "(несколько входов одновременно или разовая ссылка). Проверьте вручную."), ""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE invite_rules SET hits=hits+1, last_hit=? WHERE guild_id=? AND invite_code=?",
+                         (datetime.datetime.utcnow().isoformat(), guild.id, code))
+        await db.commit()
+    await report(guild, "⚠️ Вход по подозрительному инвайту", [
+        ("Участник", f"{member.mention} (`{member}`)", True),
+        ("Почему", ", ".join(why), True),
+        ("Правило", describe_rule(rule), False),
+        *([("Причина пометки", rule["reason"], False)] if rule["reason"] else []),
+        ("Что сделано", done, False),
+    ], color=0xED4245 if certain else 0xFEE75C, cfg=cfg, undo=(undo, member.id))
+    return done.startswith(("бан", "кик"))
