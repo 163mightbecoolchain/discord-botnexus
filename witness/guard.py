@@ -80,8 +80,10 @@ async def _quarantine(member, reason) -> bool:
     return True
 
 
-async def punish(member, action, cfg, reason, minutes=10, is_mod=False, dm_tips=False) -> tuple[str, str]:
+async def punish(member, action, cfg, reason, minutes=10, is_mod=False, dm_tips=False,
+                 delete_days=1) -> tuple[str, str]:
     """Применяет наказание с учётом режима наблюдения и модераторов.
+    delete_days — за сколько дней удалить сообщения при бане.
     Возвращает (что сделано — текст для лога, действие для кнопки «Отменить» или "")."""
     if is_mod and action not in ("alert", "delete"):
         action = "timeout"                    # модератора не баним — он мог быть взломан
@@ -110,8 +112,10 @@ async def punish(member, action, cfg, reason, minutes=10, is_mod=False, dm_tips=
             await guild.unban(member, reason="Witness: софтбан — сразу разбан")
             done, undo = ACTION_NAMES["softban"], ""
         elif action == "ban":
-            await guild.ban(member, reason=reason, delete_message_seconds=86400)
-            done, undo = "бан (сообщения за сутки удалены)", "ban"
+            await guild.ban(member, reason=reason, delete_message_seconds=86400 * delete_days)
+            done = {0: "бан", 1: "бан (сообщения за сутки удалены)"}.get(
+                delete_days, f"бан (сообщения за {delete_days} дн. удалены)")
+            undo = "ban"
         elif action == "kick":
             await member.kick(reason=reason)
             done, undo = "кик", ""

@@ -1103,6 +1103,38 @@ async def api_invite_note(request):
 
 
 @require_auth
+async def api_invite_rule(request):
+    """POST /api/guild/:id/invites/code/:code/rule — пометить подозрительным и задать правило
+    {"action": ban|kick|quarantine|timeout|alert, "max_age_days", "no_avatar", "timeout_minutes",
+     "delete_days": 0|1|7, "reason", "hours": срок действия, 0 — бессрочно}"""
+    bg, member, err = await _invites_guard(request, need_manage=True)
+    if err:
+        return err
+    code = _invite_code(request)
+    if not code:
+        return web.json_response({'error': 'no_code'}, status=400)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({'error': 'bad_json'}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({'error': 'bad_json'}, status=400)
+    from witness.invites import save_invite_rule
+    return web.json_response({'ok': True, 'rule': await save_invite_rule(bg, code, data, member)})
+
+
+@require_auth
+async def api_invite_rule_delete(request):
+    """POST /api/guild/:id/invites/code/:code/rule/delete — снять пометку"""
+    bg, member, err = await _invites_guard(request, need_manage=True)
+    if err:
+        return err
+    from witness.invites import delete_invite_rule
+    await delete_invite_rule(bg, _invite_code(request), member)
+    return web.json_response({'ok': True})
+
+
+@require_auth
 async def api_invite_delete(request):
     """POST /api/guild/:id/invites/code/:code/delete — удалить действующий инвайт"""
     bg, member, err = await _invites_guard(request, need_manage=True)
@@ -2264,6 +2296,8 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/invites/code/{code}',   api_invite_details),
         ('POST', '/guild/{guild_id}/invites/code/{code}/note',   api_invite_note),
         ('POST', '/guild/{guild_id}/invites/code/{code}/delete', api_invite_delete),
+        ('POST', '/guild/{guild_id}/invites/code/{code}/rule',   api_invite_rule),
+        ('POST', '/guild/{guild_id}/invites/code/{code}/rule/delete', api_invite_rule_delete),
         ('GET',  '/guild/{guild_id}/appeals',               api_appeals),
         ('GET',  '/guild/{guild_id}/appeal/{appeal_id}/messages', api_appeal_messages),
         ('POST', '/guild/{guild_id}/appeal/{appeal_id}/messages', api_appeal_messages),

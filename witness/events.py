@@ -229,6 +229,24 @@ async def on_message(message):
             except Exception: pass
     # process_commands больше не нужен — префикс-команд нет
 
+async def _invite_certain(guild, code, grown, vanished, old_snapshot) -> bool:
+    """Точно ли участник зашёл по code. Нет, если за эти секунды выросло несколько ссылок,
+    исчезла разовая или (для обычной ссылки) выросла ещё и vanity — тогда code мог быть чужим."""
+    vanity = guild.vanity_url_code
+    if code == vanity:
+        return grown == 0 and not vanished
+    if grown != 1 or vanished:
+        return False
+    key = f"{guild.id}:{vanity}"
+    if vanity and key in old_snapshot:
+        try:
+            vi = await guild.vanity_invite()
+            return not (vi and (vi.uses or 0) > old_snapshot[key])
+        except discord.HTTPException:
+            return False
+    return True
+
+
 @bot.event
 async def on_member_join(member):
     gid = member.guild.id
@@ -244,6 +262,12 @@ async def on_member_join(member):
     used_code = None
     inviter_name = "неизвестно"
     inviter_id = 0
+    vanity = member.guild.vanity_url_code
+    vanity_key = f"{gid}:{vanity}" if vanity else None
+    # Для правил подозрительных инвайтов: наказываем, только если инвайт определён
+    # однозначно — выросла ровно одна ссылка и ни одна разовая не исчезла
+    grown = 0
+    vanished = True
 
     # Ждём пока Discord обновит счётчик инвайта
     await asyncio.sleep(3)
@@ -256,12 +280,21 @@ async def on_member_join(member):
             old_uses = old_snapshot.get(cache_key, 0)
             new_uses = inv.uses or 0
             if new_uses > old_uses:
+                grown += 1
+                if used_code:
+                    continue
                 used_code = inv.code
                 if inv.inviter:
                     inviter_name = inv.inviter.name
                     inviter_id = inv.inviter.id
                 _invite_cache[cache_key] = new_uses
-                break
+        fresh_keys = {f"{gid}:{inv.code}" for inv in fresh_invites}
+        gone = [k for k in old_snapshot if k not in fresh_keys and k != vanity_key]
+        vanished = bool(gone)
+        # Истёкшие ссылки убираем из кэша, иначе каждый следующий вход считался бы спорным
+        for k in gone:
+            if k != f"{gid}:{used_code}":
+                _invite_cache.pop(k, None)
 
         # Синхронизируем весь кэш
         for inv in fresh_invites:
@@ -273,8 +306,6 @@ async def on_member_join(member):
         print(f"[INVITE] {member.guild.name}: {ex}")
 
     # Vanity-ссылка сервера (discord.gg/имя) в guild.invites() не входит — проверяем отдельно
-    vanity = member.guild.vanity_url_code
-    vanity_key = f"{gid}:{vanity}" if vanity else None
     if not used_code and vanity:
         try:
             vi = await member.guild.vanity_invite()
@@ -324,6 +355,17 @@ async def on_member_join(member):
         e.add_field(name="Возраст", value=f"{age} дней", inline=True)
         e.add_field(name="Инвайт", value=f"`{used_code}`" if used_code else "неизвестно", inline=True)
         await ch2.send(embed=e)
+
+    # Подозрительный инвайт, помеченный на сайте (witness/invites.py)
+    if used_code:
+        try:
+            from .invites import apply_invite_rule, get_invite_rule
+            if await get_invite_rule(gid, used_code):
+                certain = await _invite_certain(member.guild, used_code, grown, vanished, old_snapshot)
+                if await apply_invite_rule(member, used_code, certain):
+                    return
+        except Exception as ex:
+            print(f"[INVITE_RULE] {member.guild.name}: {ex}")
 
     # Карантинная роль для новых аккаунтов (auto-quarantine)
     async with aiosqlite.connect(DB_PATH) as _qdb:

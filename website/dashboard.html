@@ -390,6 +390,11 @@ tr.resolved td { opacity: .55; }
 .inv-sub { font-size: .7rem; color: var(--muted); }
 mark { background: rgba(var(--accent-rgb), .22); color: inherit; border-radius: 3px; padding: 0 1px; }
 .inv-modal { max-width: 680px; }
+.inv-rule-on { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .9rem; border-radius: 8px; background: rgba(255,84,112,.08); border: 1px solid rgba(255,84,112,.25); font-size: .85rem; }
+.inv-rule-on.expired { background: var(--bg-3); border-color: var(--border); opacity: .75; }
+.inv-rule-form { border: 1px solid var(--border); border-radius: 8px; padding: 0 .9rem; margin-bottom: .5rem; }
+.inv-rule-form .rule[hidden] { display: none; }
+.inv-rule-form .seg { flex-wrap: wrap; }
 .inv-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .8rem 1rem; }
 .inv-facts label { display: block; font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .2rem; }
 .inv-members { max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
@@ -5623,6 +5628,7 @@ async function openInvite(code, focusUid = null) {
           <button class="btn btn-ghost btn-sm" onclick="btnBusy(this, saveInvNote)">Сохранить</button></div>`
         : `<div>${escapeHtml(c.note || '—')}</div>`}
     </div>` : ''}
+    ${c.code ? '<div class="form-group" id="invRule" style="margin-top:1rem;"></div>' : ''}
     <div class="form-group" style="margin-top:1rem;">
       <label>Кто зашёл${c.joins >= 300 ? ' (последние 300)' : ''}</label>
       ${c.members.length ? `<div class="inv-members">${c.members.map(m => `
@@ -5637,7 +5643,137 @@ async function openInvite(code, focusUid = null) {
       ${c.can_manage && a && !a.vanity ? `<button class="btn btn-danger btn-sm" onclick="deleteInvite('${escapeHtml(c.code)}')">Удалить инвайт</button>` : '<span></span>'}
       <button class="btn btn-ghost btn-sm" onclick="closeInvModal()">Закрыть</button>
     </div>`;
+  if (c.code) renderInvRule(false);
   document.getElementById('invFocus')?.scrollIntoView({ block: 'center' });
+}
+
+// ── Подозрительная ссылка: что делать с теми, кто по ней зайдёт ──
+// Массивы, а не объекты: в объекте числовые ключи сортируются и «Бессрочно» (0) встало бы первым
+const INV_RULE_ACTIONS = [['alert', 'Уведомить'], ['timeout', 'Мут'], ['quarantine', 'Карантин'], ['kick', 'Кикнуть'], ['ban', 'Забанить']];
+const INV_RULE_MUTES = [[10, '10 мин'], [60, '1 ч'], [360, '6 ч'], [1440, '1 дн'], [10080, '7 дн'], [40320, '28 дн']];
+const INV_RULE_HOURS = [[1, '1 ч'], [24, '24 ч'], [168, '7 дн'], [720, '30 дн'], [0, 'Бессрочно']];
+const invOpt = (list, k) => (list.find(o => String(o[0]) === String(k)) || [])[1];
+const invDateTime = s => s ? new Date(s + 'Z').toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—';
+
+function invRuleSummary(r) {
+  const act = invOpt(INV_RULE_ACTIONS, r.action)
+    + (r.action === 'timeout' ? ' на ' + (invOpt(INV_RULE_MUTES, r.timeout_minutes) || r.timeout_minutes + ' мин') : '');
+  const cond = [r.max_age_days ? `аккаунты младше ${r.max_age_days} дн.` : '', r.no_avatar ? 'без аватарки' : ''].filter(Boolean);
+  return `${act} — ${cond.length ? cond.join(', ') : 'все зашедшие'}`;
+}
+
+function renderInvRule(editing) {
+  const box = document.getElementById('invRule'), c = _invCard;
+  if (!box || !c) return;
+  const r = c.rule;
+  if (!editing) {
+    box.innerHTML = `<label>Подозрительная ссылка</label>` + (r ? `
+      <div class="inv-rule-on${r.expired ? ' expired' : ''}">
+        <div>
+          <div><b>${r.expired ? 'Правило истекло' : '⚠️ Помечена'}:</b> ${escapeHtml(invRuleSummary(r))}</div>
+          <div class="inv-sub">Сработало: ${r.hits}${r.last_hit ? ' · последний раз ' + invDateTime(r.last_hit) : ''}
+            · ${r.expires_at ? (r.expired ? 'истекло ' : 'до ') + invDateTime(r.expires_at) : 'бессрочно'}${r.reason ? ' · ' + escapeHtml(r.reason) : ''}</div>
+        </div>
+        ${c.can_manage ? '<button class="btn btn-ghost btn-sm" onclick="renderInvRule(true)">Изменить</button>' : ''}
+      </div>`
+      : c.can_manage ? `<div style="display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" onclick="renderInvRule(true)">⚠️ Пометить подозрительной</button>
+          <span class="input-help" style="margin:0;">и выбрать, что делать с теми, кто зайдёт по ней</span></div>`
+      : '<div class="text-muted">Не помечена</div>');
+    return;
+  }
+  const seg = (name, opts) => `<div class="seg" role="group" data-seg="${name}" onclick="setTimeout(invRuleSync)">
+    ${opts.map(([k, v]) => `<button type="button" data-mode="${k}">${v}</button>`).join('')}</div>`;
+  const keep = r && r.expires_at && !r.expired;
+  box.innerHTML = `
+    <label>Подозрительная ссылка</label>
+    ${c.observe_mode ? '<div class="notice">👁<div>Включён режим наблюдения: бот только напишет в лог, что сделал бы, и никого не тронет</div></div>' : ''}
+    <div class="inv-rule-form">
+      <div class="rule" style="border-top:0;">
+        <span>Всех, кто зайдёт по ссылке</span><span class="rule-arrow" aria-hidden="true">→</span>
+        ${seg('ir-action', INV_RULE_ACTIONS)}
+      </div>
+      <div class="rule" id="irMuteRow"><span>Мут на</span>${seg('ir-mute', INV_RULE_MUTES)}</div>
+      <div class="rule" id="irDelRow"><span>Удалить их сообщения</span>${seg('ir-del', [[0, 'Не удалять'], [1, 'За сутки'], [7, 'За 7 дней']])}</div>
+      <div class="rule" data-rule="ir-age">
+        <div class="toggle" role="switch" tabindex="0" aria-label="Только новые аккаунты" onclick="toggleRule(this)"></div>
+        <span>Только если аккаунту меньше</span>
+        <span class="stepper" data-step="irAge" data-min="1" data-max="3650"></span><span>дн.</span>
+      </div>
+      <div class="rule" data-rule="ir-noavatar">
+        <div class="toggle" role="switch" tabindex="0" aria-label="Только без аватарки" onclick="toggleRule(this)"></div>
+        <span>Только если у него нет аватарки</span>
+      </div>
+      <div class="rule"><span>Правило действует</span>
+        ${seg('ir-hours', keep ? [['keep', 'до ' + invDateTime(r.expires_at)], ...INV_RULE_HOURS] : INV_RULE_HOURS)}</div>
+      <div class="rule" style="display:block;">
+        <input class="input" id="irReason" maxlength="200" placeholder="Причина — попадёт в журнал аудита и в «Наказания»">
+      </div>
+    </div>
+    <div class="input-help">Срабатывает на новых входах, тех, кто уже зашёл, не трогает. Наказывает, только если бот уверен,
+      что человек зашёл именно по этой ссылке; при нескольких входах одновременно он лишь сообщит в лог.
+      Владелец и доверенные роли анти-нюка не трогаются.</div>
+    <div style="display:flex; gap:.5rem; justify-content:flex-end; flex-wrap:wrap; margin-top:.75rem;">
+      ${r ? '<button class="btn btn-ghost btn-sm" style="margin-right:auto; color:var(--danger);" onclick="deleteInvRule()">Снять пометку</button>' : ''}
+      <button class="btn btn-ghost btn-sm" onclick="renderInvRule(false)">Отмена</button>
+      <button class="btn btn-primary btn-sm" onclick="btnBusy(this, saveInvRule)">Сохранить</button>
+    </div>`;
+  initSteppers(box);
+  setSegValue('ir-action', r ? r.action : 'ban');
+  setSegValue('ir-mute', String(r && invOpt(INV_RULE_MUTES, r.timeout_minutes) ? r.timeout_minutes : 60));
+  setSegValue('ir-del', String(r ? r.delete_days : 1));
+  setSegValue('ir-hours', keep ? 'keep' : r && !r.expires_at ? '0' : '24');
+  setStep('irAge', r && r.max_age_days ? r.max_age_days : 7);
+  setRule('ir-age', r ? !!r.max_age_days : true);
+  setRule('ir-noavatar', r ? r.no_avatar : false);
+  document.getElementById('irReason').value = r ? r.reason : '';
+  invRuleSync();
+}
+
+function invRuleSync() {
+  const act = getSegValue('ir-action', 'ban');
+  document.getElementById('irMuteRow').hidden = act !== 'timeout';
+  document.getElementById('irDelRow').hidden = act !== 'ban';
+}
+
+async function saveInvRule() {
+  if (!_invCard) return false;
+  const hours = getSegValue('ir-hours', '24');
+  const body = {
+    action: getSegValue('ir-action', 'ban'),
+    timeout_minutes: +getSegValue('ir-mute', '60'),
+    delete_days: +getSegValue('ir-del', '1'),
+    max_age_days: ruleOn('ir-age') ? getStep('irAge', 7) : 0,
+    no_avatar: ruleOn('ir-noavatar'),
+    hours: hours === 'keep' ? 'keep' : +hours,
+    reason: document.getElementById('irReason').value.trim(),
+  };
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites/code/${invCodeUrl(_invCard.code)}/rule`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    if (!r.ok) { showToast('Не удалось сохранить', 'error'); return false; }
+    _invCard.rule = (await r.json()).rule;
+  } catch(e) { showToast('Ошибка соединения', 'error'); return false; }
+  showToast('✓ Ссылка помечена подозрительной', 'success');
+  setTimeout(() => renderInvRule(false), 600);
+  loadInvites();
+  return true;
+}
+
+async function deleteInvRule() {
+  if (!_invCard) return;
+  const ok = await askAction({ title: 'Снять пометку?', okText: 'Снять', reason: null,
+    sub: 'Бот перестанет трогать тех, кто заходит по этой ссылке. Уже выданные наказания останутся.' });
+  if (!ok) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites/code/${invCodeUrl(_invCard.code)}/rule/delete`, { method: 'POST' });
+    if (!r.ok) { showToast('Не удалось снять пометку', 'error'); return; }
+  } catch(e) { showToast('Ошибка соединения', 'error'); return; }
+  _invCard.rule = null;
+  renderInvRule(false);
+  showToast('✓ Пометка снята', 'success');
+  loadInvites();
 }
 
 function closeInvModal() {
