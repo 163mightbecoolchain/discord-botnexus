@@ -205,8 +205,8 @@ async def sechelp(interaction: discord.Interaction):
         e.add_field(name=f"`{cmd}`", value=desc, inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
-
-
+@bot.tree.command(name="subinfo", description="Статус подписки")
+async def subinfo(interaction: discord.Interaction):
     tier = await get_tier(interaction.guild_id)
     e = discord.Embed(title="📋 Подписка", color=TIER_COLORS[tier])
     e.add_field(name="Тир", value=TIER_NAMES[tier], inline=True)
