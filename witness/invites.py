@@ -778,5 +778,5 @@ async def apply_invite_rule(member, code: str, certain: bool) -> bool:
         ("Правило", describe_rule(rule), False),
         *([("Причина пометки", rule["reason"], False)] if rule["reason"] else []),
         ("Что сделано", done, False),
-    ], color=0xED4245 if certain else 0xFEE75C, cfg=cfg, undo=(undo, member.id))
+    ], color=0xED4245 if certain and not cfg["observe_mode"] else 0xFEE75C, cfg=cfg, undo=(undo, member.id))
     return done.startswith(("бан", "кик"))

@@ -529,7 +529,9 @@ async def on_raid(guild, cfg) -> list[str]:
 
 async def _delete_raid_invites(guild, cfg):
     """Ищет инвайт, по которому шла волна: рост счётчика против кэша и журнал инвайтов."""
-    await asyncio.sleep(4)                    # даём on_member_join записать использованные инвайты
+    # Даём on_member_join записать использованные инвайты в invite_log: он ждёт 3–6 с
+    # (повторная проверка счётчиков) и обновляет кэш — тогда весь рост виден только по журналу
+    await asyncio.sleep(10)
     counts: dict = {}
     try:
         invites = await guild.invites()
