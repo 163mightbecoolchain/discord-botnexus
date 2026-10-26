@@ -385,13 +385,33 @@ async def ask_ai(prompt, system="You are Witness, a helpful Discord assistant. B
 # Ключ: "guild_id:invite_code" → uses (int)
 # Это гарантирует что cache существует до on_ready
 _invite_cache: dict = {}
+# "guild_id:invite_code" → (max_uses, expires_at) — чтобы при входе отличать
+# израсходованную разовую ссылку от просто истёкшей (о ней Discord не сообщает)
+_invite_meta: dict = {}
+
+
+def remember_invite(guild_id, inv):
+    _invite_cache[f"{guild_id}:{inv.code}"] = inv.uses or 0
+    _invite_meta[f"{guild_id}:{inv.code}"] = (inv.max_uses or 0, inv.expires_at)
+
+
+def invite_maybe_used_up(key, old_uses) -> bool:
+    """Могла ли пропавшая ссылка исчезнуть из-за этого входа. Нет — если она истекла
+    по времени или до лимита использований было больше одного входа."""
+    meta = _invite_meta.get(key)
+    if not meta:
+        return True
+    max_uses, expires_at = meta
+    if expires_at and expires_at <= datetime.datetime.now(datetime.timezone.utc):
+        return False
+    return bool(max_uses) and old_uses + 1 >= max_uses
 
 async def refresh_invite_cache(guild) -> bool:
     """Загружает инвайты гильдии в кэш. Возвращает True если успешно."""
     try:
         invites = await guild.invites()
         for inv in invites:
-            _invite_cache[f"{guild.id}:{inv.code}"] = inv.uses or 0
+            remember_invite(guild.id, inv)
         # Vanity-ссылка в guild.invites() не входит — без неё входы по ней не определить
         if guild.vanity_url_code:
             try:

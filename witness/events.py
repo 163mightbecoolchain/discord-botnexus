@@ -37,6 +37,9 @@ from .core import (
     get_tier,
     intents,
     _invite_cache,
+    _invite_meta,
+    invite_maybe_used_up,
+    remember_invite,
     notify_mute_over,
     queue_log,
     refresh_invite_cache,
@@ -229,111 +232,92 @@ async def on_message(message):
             except Exception: pass
     # process_commands больше не нужен — префикс-команд нет
 
-async def _invite_certain(guild, code, grown, vanished, old_snapshot) -> bool:
-    """Точно ли участник зашёл по code. Нет, если за эти секунды выросло несколько ссылок,
-    исчезла разовая или (для обычной ссылки) выросла ещё и vanity — тогда code мог быть чужим."""
+async def _track_invite(member, old_snapshot) -> dict:
+    """По какой ссылке зашёл участник. Discord ботам этого не сообщает — сравниваем счётчики
+    со снимком кэша (old_snapshot, снят до обработки входа). Синхронизирует кэш и пишет вход
+    в invite_log — и для выкинутых локдауном/анти-рейдом: по журналу анти-рейд ищет ссылку волны.
+    certain — инвайт определён однозначно: вырос ровно один счётчик и ни одна разовая ссылка
+    не могла израсходоваться этим входом. Только тогда правила инвайтов наказывают."""
+    guild = member.guild
+    gid = guild.id
     vanity = guild.vanity_url_code
-    if code == vanity:
-        return grown == 0 and not vanished
-    if grown != 1 or vanished:
-        return False
-    key = f"{guild.id}:{vanity}"
-    if vanity and key in old_snapshot:
+    vanity_key = f"{gid}:{vanity}" if vanity else None
+    fresh_invites, vi = None, None
+    grown, gone, used_up, vanity_grown = [], [], [], False
+
+    # Ждём, пока Discord обновит счётчик; не успел за 3 с — проверяем ещё раз
+    for _ in range(2):
+        await asyncio.sleep(3)
         try:
-            vi = await guild.vanity_invite()
-            return not (vi and (vi.uses or 0) > old_snapshot[key])
-        except discord.HTTPException:
-            return False
-    return True
+            fresh_invites = await guild.invites()
+        except discord.Forbidden:
+            print(f"[INVITE] {guild.name}: нет права Manage Server — инвайт не определён")
+            break
+        except Exception as ex:
+            print(f"[INVITE] {guild.name}: {ex}")
+            break
+        grown = [inv for inv in fresh_invites
+                 if (inv.uses or 0) > old_snapshot.get(f"{gid}:{inv.code}", 0)]
+        fresh_keys = {f"{gid}:{inv.code}" for inv in fresh_invites}
+        gone = [k for k in old_snapshot if k not in fresh_keys and k != vanity_key]
+        # Истёкшие по времени и удалённые пропадают молча — спорным вход делает
+        # только ссылка, которую этот вход мог израсходовать
+        used_up = [k for k in gone if invite_maybe_used_up(k, old_snapshot[k])]
+        # Vanity-ссылка (discord.gg/имя) в guild.invites() не входит — проверяем отдельно
+        # и при каждом входе, иначе её счётчик в кэше отстаёт и все входы выглядят спорными
+        if vanity:
+            try:
+                vi = await guild.vanity_invite()
+            except discord.HTTPException:
+                vi = None
+        vanity_grown = bool(vi and vanity_key in old_snapshot and (vi.uses or 0) > old_snapshot[vanity_key])
+        if grown or vanity_grown or used_up:
+            break
+
+    if fresh_invites is not None:
+        # Пропавшие убираем из кэша, иначе каждый следующий вход считался бы спорным
+        for k in gone:
+            _invite_cache.pop(k, None)
+            _invite_meta.pop(k, None)
+        for inv in fresh_invites:
+            remember_invite(gid, inv)
+    if vi:
+        _invite_cache[vanity_key] = vi.uses or 0
+
+    info = {"code": None, "inviter_name": "неизвестно", "inviter_id": 0,
+            "certain": len(grown) + vanity_grown == 1 and not used_up}
+    if grown:
+        info["code"] = grown[0].code
+        if grown[0].inviter:
+            info["inviter_name"] = grown[0].inviter.name
+            info["inviter_id"] = grown[0].inviter.id
+    elif vanity_grown:
+        info["code"], info["inviter_name"] = vanity, "vanity-ссылка сервера"
+    elif used_up:
+        info["code"], info["inviter_name"] = used_up[0].split(":", 1)[1], "неизвестно (разовый инвайт)"
+
+    # Пишем в БД всегда — и когда инвайт не определён (пустой код): на сайте это
+    # «источник не определён»
+    await log_invite_use(gid, info["code"] or "", info["inviter_id"],
+                         info["inviter_name"] if info["code"] else "", member.id, member.name)
+    return info
 
 
 @bot.event
 async def on_member_join(member):
     gid = member.guild.id
+    # Снимок кэша инвайтов ДО того как Discord обновит счётчики
+    old_snapshot = {k: v for k, v in _invite_cache.items() if k.startswith(f"{gid}:")}
     # Локдаун и анти-рейд (пороги и действия — в дашборде, witness/protection.py)
     from .protection import handle_join
     if await handle_join(member):
+        # Инвайт всё равно определяем: кэш остаётся точным, а анти-рейд видит ссылку волны
+        asyncio.create_task(_track_invite(member, old_snapshot))
         return
 
     # ── Invite tracking ────────────────────────────────────────
-    # Снимок кэша ДО того как Discord обновит счётчики
-    old_snapshot = {k: v for k, v in _invite_cache.items() if k.startswith(f"{gid}:")}
-
-    used_code = None
-    inviter_name = "неизвестно"
-    inviter_id = 0
-    vanity = member.guild.vanity_url_code
-    vanity_key = f"{gid}:{vanity}" if vanity else None
-    # Для правил подозрительных инвайтов: наказываем, только если инвайт определён
-    # однозначно — выросла ровно одна ссылка и ни одна разовая не исчезла
-    grown = 0
-    vanished = True
-
-    # Ждём пока Discord обновит счётчик инвайта
-    await asyncio.sleep(3)
-
-    try:
-        fresh_invites = await member.guild.invites()
-
-        for inv in fresh_invites:
-            cache_key = f"{gid}:{inv.code}"
-            old_uses = old_snapshot.get(cache_key, 0)
-            new_uses = inv.uses or 0
-            if new_uses > old_uses:
-                grown += 1
-                if used_code:
-                    continue
-                used_code = inv.code
-                if inv.inviter:
-                    inviter_name = inv.inviter.name
-                    inviter_id = inv.inviter.id
-                _invite_cache[cache_key] = new_uses
-        fresh_keys = {f"{gid}:{inv.code}" for inv in fresh_invites}
-        gone = [k for k in old_snapshot if k not in fresh_keys and k != vanity_key]
-        vanished = bool(gone)
-        # Истёкшие ссылки убираем из кэша, иначе каждый следующий вход считался бы спорным
-        for k in gone:
-            if k != f"{gid}:{used_code}":
-                _invite_cache.pop(k, None)
-
-        # Синхронизируем весь кэш
-        for inv in fresh_invites:
-            _invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
-
-    except discord.Forbidden:
-        print(f"[INVITE] {member.guild.name}: нет права Manage Server — инвайт не определён")
-    except Exception as ex:
-        print(f"[INVITE] {member.guild.name}: {ex}")
-
-    # Vanity-ссылка сервера (discord.gg/имя) в guild.invites() не входит — проверяем отдельно
-    if not used_code and vanity:
-        try:
-            vi = await member.guild.vanity_invite()
-            if vi and vanity_key in old_snapshot and (vi.uses or 0) > old_snapshot[vanity_key]:
-                used_code, inviter_name = vanity, "vanity-ссылка сервера"
-            if vi:
-                _invite_cache[vanity_key] = vi.uses or 0
-        except Exception:
-            pass
-
-    # Разовые инвайты — исчезли из списка после использования
-    if not used_code:
-        try:
-            fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.invites()}
-            for cache_key in list(old_snapshot.keys()):
-                if cache_key not in fresh_codes and cache_key != vanity_key:
-                    used_code = cache_key.split(":", 1)[1]
-                    inviter_name = "неизвестно (разовый инвайт)"
-                    _invite_cache.pop(cache_key, None)
-                    break
-        except Exception:
-            pass
-
-
-    # Пишем в БД всегда — и когда инвайт не определён (пустой код): на сайте это
-    # «источник не определён». Раньше такие входы и разовые инвайты не записывались.
-    await log_invite_use(gid, used_code or "", inviter_id or 0, inviter_name if used_code else "",
-                         member.id, member.name)
+    info = await _track_invite(member, old_snapshot)
+    used_code, inviter_name, inviter_id = info["code"], info["inviter_name"], info["inviter_id"]
 
     age = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
     ch = await sec_check(member.guild, "joins")
@@ -361,8 +345,7 @@ async def on_member_join(member):
         try:
             from .invites import apply_invite_rule, get_invite_rule
             if await get_invite_rule(gid, used_code):
-                certain = await _invite_certain(member.guild, used_code, grown, vanished, old_snapshot)
-                if await apply_invite_rule(member, used_code, certain):
+                if await apply_invite_rule(member, used_code, info["certain"]):
                     return
         except Exception as ex:
             print(f"[INVITE_RULE] {member.guild.name}: {ex}")
@@ -984,7 +967,7 @@ async def on_message_edit(before, after):
 
 @bot.event
 async def on_invite_create(invite):
-    _invite_cache[f"{invite.guild.id}:{invite.code}"] = invite.uses or 0
+    remember_invite(invite.guild.id, invite)
     print(f"[INVITE] Created: {invite.code} by {invite.inviter}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
@@ -1000,6 +983,7 @@ async def on_invite_create(invite):
 @bot.event
 async def on_invite_delete(invite):
     _invite_cache.pop(f"{invite.guild.id}:{invite.code}", None)
+    _invite_meta.pop(f"{invite.guild.id}:{invite.code}", None)
     print(f"[INVITE] Deleted: {invite.code}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
