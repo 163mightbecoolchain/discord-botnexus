@@ -37,6 +37,9 @@ from .core import (
     get_tier,
     intents,
     _invite_cache,
+    _invite_meta,
+    invite_maybe_used_up,
+    remember_invite,
     notify_mute_over,
     queue_log,
     refresh_invite_cache,
@@ -290,15 +293,18 @@ async def on_member_join(member):
                 _invite_cache[cache_key] = new_uses
         fresh_keys = {f"{gid}:{inv.code}" for inv in fresh_invites}
         gone = [k for k in old_snapshot if k not in fresh_keys and k != vanity_key]
-        vanished = bool(gone)
-        # Истёкшие ссылки убираем из кэша, иначе каждый следующий вход считался бы спорным
+        # Спорным вход делает только ссылка, которую этот вход мог израсходовать.
+        # Истёкшие по времени и удалённые пропадают молча — они не в счёт.
+        used_up = [k for k in gone if invite_maybe_used_up(k, old_snapshot[k])]
+        vanished = bool(used_up)
+        # Пропавшие убираем из кэша, иначе каждый следующий вход считался бы спорным
         for k in gone:
-            if k != f"{gid}:{used_code}":
-                _invite_cache.pop(k, None)
+            _invite_cache.pop(k, None)
+            _invite_meta.pop(k, None)
 
         # Синхронизируем весь кэш
         for inv in fresh_invites:
-            _invite_cache[f"{gid}:{inv.code}"] = inv.uses or 0
+            remember_invite(gid, inv)
 
     except discord.Forbidden:
         print(f"[INVITE] {member.guild.name}: нет права Manage Server — инвайт не определён")
@@ -321,10 +327,12 @@ async def on_member_join(member):
         try:
             fresh_codes = {f"{gid}:{inv.code}" for inv in await member.guild.invites()}
             for cache_key in list(old_snapshot.keys()):
-                if cache_key not in fresh_codes and cache_key != vanity_key:
+                if (cache_key not in fresh_codes and cache_key != vanity_key
+                        and invite_maybe_used_up(cache_key, old_snapshot[cache_key])):
                     used_code = cache_key.split(":", 1)[1]
                     inviter_name = "неизвестно (разовый инвайт)"
                     _invite_cache.pop(cache_key, None)
+                    _invite_meta.pop(cache_key, None)
                     break
         except Exception:
             pass
@@ -984,7 +992,7 @@ async def on_message_edit(before, after):
 
 @bot.event
 async def on_invite_create(invite):
-    _invite_cache[f"{invite.guild.id}:{invite.code}"] = invite.uses or 0
+    remember_invite(invite.guild.id, invite)
     print(f"[INVITE] Created: {invite.code} by {invite.inviter}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
@@ -1000,6 +1008,7 @@ async def on_invite_create(invite):
 @bot.event
 async def on_invite_delete(invite):
     _invite_cache.pop(f"{invite.guild.id}:{invite.code}", None)
+    _invite_meta.pop(f"{invite.guild.id}:{invite.code}", None)
     print(f"[INVITE] Deleted: {invite.code}")
     ch = await sec_check(invite.guild, "invites")
     if not ch: return
