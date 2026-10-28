@@ -134,7 +134,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
                 ("Авто-защита", "`anti_raid` · `anti_spam` · `/lockdown` · `/slowmode`\n`/quarantine` — карантин для новых аккаунтов"),
                 ("Модерация", "`/warn` `/unmute` `/tempban` `/warnings` `/clearwarn`\n`/purge` `/report` `/modlog` `/punishments` `/case` `/note`"),
                 ("Инвайты", "`/invcheck` `/invuser` `/invdel` `/invnote` `/invnotes` `/invstats`"),
-                ("Reaction Roles", "`/reactionrole add/remove/list/clear`"),
+                ("Роли", "`/roles panel create/add/remove/edit/delete/list` — кнопки и меню (включается в дашборде)\n`/reactionrole add/remove/list/clear`"),
                 ("🔐 Advanced Security — префикс `/q` (Security plan)",
                  "`/q scan` · `/q threat`\n"
                  "`/q nlp` · `/q forensics` · `/q sig` · `/q alert`\n"
