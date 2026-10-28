@@ -138,13 +138,71 @@ def _parse_color(value: str | None) -> int | None:
     return int(m.group(1), 16) if m else None
 
 
+_CUSTOM_EMOJI = re.compile(r"<a?:[A-Za-z0-9_~]{2,32}:(\d{15,21})>")
+_EMOJI_JOINERS = {0x200D, 0xFE0E, 0xFE0F, 0x20E3}       # ZWJ, вариации, рамка цифры 1️⃣
+# Блоки Unicode, где лежат эмодзи (обычные стрелки и значки вроде → туда не входят)
+_EMOJI_RANGES = ((0xA9, 0xA9), (0xAE, 0xAE), (0x203C, 0x203C), (0x2049, 0x2049), (0x2122, 0x2122),
+                 (0x2139, 0x2139), (0x2194, 0x2199), (0x21A9, 0x21AA), (0x231A, 0x23FF), (0x24C2, 0x24C2),
+                 (0x25AA, 0x25FE), (0x2600, 0x27BF), (0x2934, 0x2935), (0x2B05, 0x2B55), (0x3030, 0x3030),
+                 (0x303D, 0x303D), (0x3297, 0x3299), (0x1F000, 0x1FAFF), (0xE0020, 0xE007F))
+
+
+def _is_unicode_emoji(s: str) -> bool:
+    """Грубая проверка, что строка — эмодзи, а не текст. Discord на текст
+    в поле emoji отвечает «Invalid emoji» и отклоняет всё сообщение панели."""
+    if not s or len(s) > 16 or any(ch.isspace() for ch in s):
+        return False
+    keycap = "⃣" in s
+    seen = False
+    for ch in s:
+        o = ord(ch)
+        if o in _EMOJI_JOINERS or 0x1F3FB <= o <= 0x1F3FF:  # тон кожи
+            continue
+        if any(lo <= o <= hi for lo, hi in _EMOJI_RANGES):
+            seen = True
+        elif keycap and ch in "0123456789#*":
+            seen = True
+        else:
+            return False                # буквы, цифры, :shortcode: и прочий текст
+    return seen
+
+
+def normalize_emoji(guild: discord.Guild, value: str | None) -> tuple[str, str | None]:
+    """(эмодзи для сохранения, ошибка). Понимает обычный эмодзи, <:name:id>
+    и имя серверного эмодзи (name или :name:)."""
+    value = (value or "").strip()
+    if not value:
+        return "", None
+    m = _CUSTOM_EMOJI.fullmatch(value)
+    if m:
+        if bot.get_emoji(int(m.group(1))) is None:
+            return "", "Бот не видит этот эмодзи: он должен быть с сервера, где есть Witness."
+        return value, None
+    name = value.strip(":")
+    if re.fullmatch(r"[A-Za-z0-9_~]{2,32}", name):
+        e = discord.utils.get(guild.emojis, name=name) or \
+            next((x for x in guild.emojis if x.name.lower() == name.lower()), None)
+        if e is None:
+            return "", (f"Эмодзи «{value}» не нашёл на сервере. Вставь сам эмодзи "
+                        f"(на Windows — Win + .) или имя серверного эмодзи.")
+        if not e.is_usable():
+            return "", f"Эмодзи «{value}» сейчас недоступен боту (например, выключен из-за бустов)."
+        return str(e), None
+    if _is_unicode_emoji(value):
+        return value, None
+    return "", "Это не похоже на эмодзи. Вставь один эмодзи, например ⚔️, или серверный в виде <:name:id>."
+
+
 def _parse_emoji(value: str | None):
+    """Эмодзи для кнопки или опции меню. Недоступный или кривой — None,
+    чтобы одна роль не ломала отправку всей панели."""
+    value = (value or "").strip()
     if not value:
         return None
-    try:
-        return discord.PartialEmoji.from_str(value.strip())
-    except Exception:
-        return None
+    m = _CUSTOM_EMOJI.fullmatch(value)
+    if m:
+        return discord.PartialEmoji.from_str(value) if bot.get_emoji(int(m.group(1))) else None
+    return discord.PartialEmoji(name=value) if _is_unicode_emoji(value) else None
 
 
 def _text(value: str | None) -> str:
@@ -261,14 +319,15 @@ async def add_role(guild, actor, pid, role, label=None, emoji=None, description=
         return f"{role.mention} уже есть в этой панели."
     if len(roles) >= MAX_ROLES:
         return f"В панели уже {MAX_ROLES} ролей — это предел Discord."
-    if emoji and _parse_emoji(emoji) is None:
-        return "Не понял эмодзи. Укажи обычный эмодзи или серверный в виде <:name:id>."
+    emoji, bad = normalize_emoji(guild, emoji)
+    if bad:
+        return bad
     label = (label or role.name).strip()[:80]
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO role_panel_roles (panel_id, guild_id, role_id, label, emoji, description, position) "
             "VALUES (?,?,?,?,?,?,?)",
-            (pid, guild.id, role.id, label, (emoji or "").strip(), (description or "").strip()[:100], len(roles)))
+            (pid, guild.id, role.id, label, emoji, (description or "").strip()[:100], len(roles)))
         await db.commit()
     err = await refresh_panel(guild, pid)
     if err and await get_panel(guild.id, pid):
