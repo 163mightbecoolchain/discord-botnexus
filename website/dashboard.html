@@ -4541,6 +4541,11 @@ function removePanelRole(pid, rid) {
   return srPost(`/panel/${pid}/remove`, {role_id: rid}, '✓ Роль убрана');
 }
 
+function editRolePanel(pid, field, value) {
+  return srPost(`/panel/${pid}/edit`, {[field]: value},
+    field === 'enabled' ? (value ? '✓ Панель включена' : '✓ Панель выключена') : '✓ Сохранено');
+}
+
 function deleteRolePanel(btn, pid) {
   // Без модалки: первое нажатие спрашивает, второе удаляет
   if (!btn.dataset.armed) {
@@ -4555,10 +4560,12 @@ function deleteRolePanel(btn, pid) {
 function srPreview(p) {
   const e = escapeHtml;
   const em = r => (r.emoji && !r.emoji.startsWith('<')) ? e(r.emoji) + ' ' : '';
-  const foot = p.single ? 'Можно выбрать только одну роль' :
+  const foot = !p.enabled ? 'Панель временно выключена' : p.single ? 'Можно выбрать только одну роль' :
     p.mode === 'select' ? 'Выбранное заменяет твои роли из этого списка' : 'Нажми ещё раз, чтобы снять роль';
   let comps = '';
-  if (p.roles.length && p.mode === 'select') {
+  if (!p.enabled) {
+    comps = '';
+  } else if (p.roles.length && p.mode === 'select') {
     comps = `<div class="sr-select"><span>${p.single ? 'Выбери роль' : 'Выбери роли'}</span><span>▾</span></div>
       <div class="sr-options">${p.roles.map(r => `<div class="sr-option">${em(r)}${e(r.label)}
         ${r.description ? `<small>${e(r.description)}</small>` : ''}</div>`).join('')}</div>
@@ -4616,10 +4623,20 @@ function renderSelfRoles() {
               ${p.mode === 'select' ? 'выпадающее меню' : 'кнопки'}${p.single ? ' · одна роль' : ''} ·
               <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" style="color:var(--accent);">открыть в Discord</a></div>
           </div>
-          <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteRolePanel(this, ${p.id})">Удалить панель</button>
+          <div style="display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; justify-content:flex-end;">
+            <span class="chip ${p.enabled ? 'ok' : ''}">${p.enabled ? 'Включена' : 'Выключена'}</span>
+            <div class="toggle ${p.enabled ? 'on' : ''}" title="Включить или выключить панель"
+                 onclick="editRolePanel(${p.id}, 'enabled', !this.classList.contains('on'))"></div>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteRolePanel(this, ${p.id})">Удалить панель</button>
+          </div>
         </div>
         <div class="card-body sr-grid">
           <div>
+            <div class="toggle-row" style="padding-top:0; margin-bottom:.4rem;">
+              <div class="toggle-info"><div class="toggle-label">Только одна роль</div>
+                <div class="toggle-desc">Новая роль из этой панели снимает прежнюю</div></div>
+              <div class="toggle ${p.single ? 'on' : ''}" onclick="editRolePanel(${p.id}, 'single', !this.classList.contains('on'))"></div>
+            </div>
             ${rows}
             ${full ? '<div class="input-help">В панели 25 ролей — это предел Discord.</div>' : `
             <div style="border-top:1px solid var(--border); margin-top:.5rem; padding-top:1rem;">
@@ -4640,8 +4657,8 @@ function renderSelfRoles() {
               <div class="input-help">В списке только роли, которые можно раздавать: ниже роли бота, не интеграции и без опасных прав.</div>
             </div>`}
           </div>
-          <div>
-            <label>Предпросмотр</label>
+          <div style="${p.enabled ? '' : 'opacity:.55;'}">
+            <label>Предпросмотр${p.enabled ? '' : ' · панель выключена, кнопок в канале нет'}</label>
             ${srPreview(p)}
           </div>
         </div>

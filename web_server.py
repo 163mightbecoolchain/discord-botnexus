@@ -1381,6 +1381,7 @@ async def _selfroles_payload(bg, me) -> dict:
                           'problem': (sr.role_problem(bg, role) if role else 'Роль удалена')})
         panels.append({'id': p['id'], 'channel_id': str(p['channel_id']),
                        'channel': ch.name if ch else '', 'mode': p['mode'], 'single': bool(p['single']),
+                       'enabled': bool(p['enabled']),
                        'title': p['title'], 'description': p['description'],
                        'color': f"#{(p['color'] or sr.DEFAULT_COLOR):06x}",
                        'url': f"https://discord.com/channels/{bg.id}/{p['channel_id']}/{p['message_id']}",
@@ -1451,7 +1452,8 @@ async def api_selfroles_panel(request):
 @require_auth
 async def api_selfroles_panel_action(request):
     """POST /api/guild/:id/selfroles/panel/:pid/:action
-    add — {"role_id", "label", "emoji", "description"}; remove — {"role_id"}; delete"""
+    add — {"role_id", "label", "emoji", "description"}; remove — {"role_id"};
+    edit — {"enabled", "single"}; delete"""
     bg, me, err = await _selfroles_guard(request)
     if err:
         return err
@@ -1478,6 +1480,8 @@ async def api_selfroles_panel_action(request):
             msg = await sr.remove_role(bg, pid, int(rid))
         elif action == 'delete':
             msg = await sr.delete_panel(bg, pid)
+        elif action == 'edit':
+            msg = await sr.edit_panel(bg, pid, **{k: int(bool(data[k])) for k in ('enabled', 'single') if k in data})
         else:
             return web.json_response({'error': 'Bad request'}, status=400)
         # Текст ошибки — для админа (права, эмодзи, удалённое сообщение), без внутренностей

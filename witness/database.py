@@ -301,6 +301,7 @@ async def db_init():
                 description TEXT NOT NULL DEFAULT '',
                 color       INTEGER DEFAULT 0,
                 single      INTEGER DEFAULT 0,
+                enabled     INTEGER DEFAULT 1,
                 created_by  INTEGER DEFAULT 0,
                 created_at  TEXT DEFAULT '');
             CREATE INDEX IF NOT EXISTS idx_role_panels_guild   ON role_panels(guild_id, channel_id);

@@ -163,9 +163,10 @@ def build_panel(panel: dict, roles: list[dict]) -> tuple[discord.Embed, discord.
     if panel["mode"] == "select":
         hint = "Можно выбрать только одну роль" if panel["single"] else \
                "Выбранное заменяет твои роли из этого списка"
-    e.set_footer(text=hint)
+    enabled = panel.get("enabled", 1)
+    e.set_footer(text=hint if enabled else "Панель временно выключена")
     view = discord.ui.View(timeout=None)
-    if not roles:
+    if not roles or not enabled:
         return e, view
     if panel["mode"] == "select":
         view.add_item(RoleSelect(panel["id"], panel["single"], roles))
@@ -335,6 +336,8 @@ async def _apply(interaction: discord.Interaction, pid: int, wanted: set[int], s
     panel = await get_panel(guild.id, pid)
     if not panel:
         return await interaction.response.send_message("❌ Эта панель больше не работает.", ephemeral=True)
+    if not panel["enabled"]:
+        return await interaction.response.send_message("ℹ️ Эта панель сейчас выключена.", ephemeral=True)
     await interaction.response.defer(ephemeral=True, thinking=True)
 
     rows = await get_panel_roles(pid)
@@ -570,12 +573,13 @@ async def panel_remove(interaction: discord.Interaction, panel: int, role: disco
 
 @panel_grp.command(name="edit", description="Изменить заголовок, описание, цвет или режим одной роли")
 @app_commands.describe(panel="Панель", title="Новый заголовок", description="Новое описание (\\n — перенос, - — очистить)",
-                       color="Цвет в HEX", single="Только одна роль из панели")
+                       color="Цвет в HEX", single="Только одна роль из панели",
+                       enabled="Включить или выключить панель (выключенная остаётся в канале без кнопок)")
 @app_commands.autocomplete(panel=_panel_autocomplete)
 async def panel_edit(interaction: discord.Interaction, panel: int,
                      title: app_commands.Range[str, 1, 256] = None,
                      description: app_commands.Range[str, 1, 2000] = None,
-                     color: str = None, single: bool = None):
+                     color: str = None, single: bool = None, enabled: bool = None):
     if not await _guard(interaction):
         return
     if color and _parse_color(color) is None:
@@ -583,7 +587,8 @@ async def panel_edit(interaction: discord.Interaction, panel: int,
     await interaction.response.defer(ephemeral=True)
     desc = None if description is None else ("" if description.strip() == "-" else _text(description))
     err = await edit_panel(interaction.guild, panel, title=title and title.strip(), description=desc,
-                           color=_parse_color(color), single=None if single is None else int(single))
+                           color=_parse_color(color), single=None if single is None else int(single),
+                           enabled=None if enabled is None else int(enabled))
     await _done(interaction, f"✅ Панель #{panel} обновлена.", err)
 
 
@@ -609,7 +614,8 @@ async def panel_list(interaction: discord.Interaction):
     for p in panels[:25]:
         roles = await get_panel_roles(p["id"])
         link = f"https://discord.com/channels/{p['guild_id']}/{p['channel_id']}/{p['message_id']}"
-        mode = ("меню" if p["mode"] == "select" else "кнопки") + (", одна роль" if p["single"] else "")
+        mode = ("меню" if p["mode"] == "select" else "кнопки") + (", одна роль" if p["single"] else "") + \
+               ("" if p["enabled"] else ", **выключена**")
         names = ", ".join(f"<@&{r['role_id']}>" for r in roles) or "—"
         e.add_field(name=f"#{p['id']} · {p['title'][:80]}",
                     value=f"<#{p['channel_id']}> · {mode} · [сообщение]({link})\n{names}"[:1024], inline=False)
