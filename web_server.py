@@ -1352,6 +1352,141 @@ async def api_automation_post(request):
         return _server_error(request, e)
 
 
+# ── API: самовыдача ролей (witness/selfroles.py) ──────────────
+
+async def _selfroles_guard(request):
+    """(guild, member, None) или (None, None, ответ с ошибкой). Нужен Manage Server."""
+    bg = request.app['bot'].get_guild(int(request.match_info['guild_id']))
+    if not bg:
+        return None, None, web.json_response({'error': 'Not found'}, status=404)
+    me = await _get_member(bg, request['session']['user_id'])
+    if not me or not (me.guild_permissions.manage_guild or me.guild_permissions.administrator):
+        return None, None, web.json_response({'error': 'Forbidden'}, status=403)
+    return bg, me, None
+
+
+async def _selfroles_payload(bg, me) -> dict:
+    from witness import selfroles as sr
+    from witness.database import get_guild_settings
+    gs = await get_guild_settings(bg.id)
+    panels = []
+    for p in await sr.get_panels(bg.id):
+        ch = bg.get_channel(p['channel_id'])
+        roles = []
+        for r in await sr.get_panel_roles(p['id']):
+            role = bg.get_role(r['role_id'])
+            roles.append({'role_id': str(r['role_id']), 'name': role.name if role else '(удалена)',
+                          'color': f"#{role.color.value:06x}" if role and role.color.value else '',
+                          'label': r['label'], 'emoji': r['emoji'], 'description': r['description'],
+                          'problem': (sr.role_problem(bg, role) if role else 'Роль удалена')})
+        panels.append({'id': p['id'], 'channel_id': str(p['channel_id']),
+                       'channel': ch.name if ch else '', 'mode': p['mode'], 'single': bool(p['single']),
+                       'title': p['title'], 'description': p['description'],
+                       'color': f"#{(p['color'] or sr.DEFAULT_COLOR):06x}",
+                       'url': f"https://discord.com/channels/{bg.id}/{p['channel_id']}/{p['message_id']}",
+                       'roles': roles})
+    # Роли, которые можно добавить в панель, и почему остальные нельзя
+    roles = [{'id': str(r.id), 'name': r.name, 'problem': sr.role_problem(bg, r, me)}
+             for r in reversed(bg.roles) if not r.is_default()]
+    return {'enabled': bool(gs.get('selfroles_enabled')),
+            'manager_role': str(gs.get('selfroles_manager_role') or ''),
+            'panels': panels, 'roles': roles}
+
+
+@require_auth
+async def api_selfroles(request):
+    """GET /api/guild/:id/selfroles — тумблер, роль-менеджер, панели.
+    POST — {"enabled": bool, "manager_role": id|""}"""
+    bg, me, err = await _selfroles_guard(request)
+    if err:
+        return err
+    try:
+        if request.method == 'POST':
+            data = await request.json()
+            if not isinstance(data, dict):
+                return web.json_response({'error': 'Bad request'}, status=400)
+            from witness.database import set_guild_setting, invalidate_settings_cache
+            if 'enabled' in data:
+                await set_guild_setting(bg.id, 'selfroles_enabled', int(bool(data['enabled'])))
+            if 'manager_role' in data:
+                rid = str(data['manager_role'] or '')
+                role = bg.get_role(int(rid)) if rid.isdigit() else None
+                await set_guild_setting(bg.id, 'selfroles_manager_role', role.id if role else 0)
+            invalidate_settings_cache(bg.id)
+        return web.json_response(await _selfroles_payload(bg, me))
+    except Exception as e:
+        return _server_error(request, e)
+
+
+@require_auth
+async def api_selfroles_panel(request):
+    """POST /api/guild/:id/selfroles/panel — создать панель
+    {"channel_id", "title", "description", "mode": "buttons"|"select", "single", "color": "#rrggbb"}"""
+    bg, me, err = await _selfroles_guard(request)
+    if err:
+        return err
+    import discord
+    from witness import selfroles as sr
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return web.json_response({'error': 'Bad request'}, status=400)
+        if not await sr.is_enabled(bg.id):
+            return web.json_response({'error': 'Сначала включи функцию'}, status=400)
+        ch_id = str(data.get('channel_id') or '')
+        ch = bg.get_channel(int(ch_id)) if ch_id.isdigit() else None
+        title = str(data.get('title') or '').strip()[:256]
+        if not isinstance(ch, discord.TextChannel) or not title:
+            return web.json_response({'error': 'Нужны канал и заголовок'}, status=400)
+        mode = 'select' if data.get('mode') == 'select' else 'buttons'
+        pid, msg = await sr.create_panel(bg, ch, me.id, title, str(data.get('description') or '').strip()[:2000],
+                                         mode, bool(data.get('single')), sr._parse_color(data.get('color')))
+        if msg:
+            return web.json_response({'error': msg}, status=400)
+        return web.json_response({'ok': True, 'id': pid, **(await _selfroles_payload(bg, me))})
+    except Exception as e:
+        return _server_error(request, e)
+
+
+@require_auth
+async def api_selfroles_panel_action(request):
+    """POST /api/guild/:id/selfroles/panel/:pid/:action
+    add — {"role_id", "label", "emoji", "description"}; remove — {"role_id"}; delete"""
+    bg, me, err = await _selfroles_guard(request)
+    if err:
+        return err
+    from witness import selfroles as sr
+    pid    = int(request.match_info['pid'])
+    action = request.match_info['action']
+    try:
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        if action != 'delete' and not await sr.is_enabled(bg.id):
+            return web.json_response({'error': 'Сначала включи функцию'}, status=400)
+        rid = str(data.get('role_id') or '')
+        if action == 'add':
+            role = bg.get_role(int(rid)) if rid.isdigit() else None
+            if not role:
+                return web.json_response({'error': 'Роль не найдена'}, status=400)
+            msg = await sr.add_role(bg, me, pid, role, str(data.get('label') or '').strip() or None,
+                                    str(data.get('emoji') or '').strip() or None,
+                                    str(data.get('description') or '').strip() or None)
+        elif action == 'remove' and rid.isdigit():
+            msg = await sr.remove_role(bg, pid, int(rid))
+        elif action == 'delete':
+            msg = await sr.delete_panel(bg, pid)
+        else:
+            return web.json_response({'error': 'Bad request'}, status=400)
+        # Текст ошибки — для админа (права, эмодзи, удалённое сообщение), без внутренностей
+        return web.json_response({'ok': not msg, 'error': msg or None, **(await _selfroles_payload(bg, me))},
+                                 status=400 if msg else 200)
+    except Exception as e:
+        return _server_error(request, e)
+
+
 # ── API: поиск по участнику ───────────────────────────────────
 
 def _role_kind(role) -> str:
@@ -2304,6 +2439,10 @@ def create_app(bot) -> web.Application:
         ('POST', '/guild/{guild_id}/appeal/{appeal_id}/{action}', api_appeal_action),
         ('GET',  '/guild/{guild_id}/automation',            api_automation_get),
         ('POST', '/guild/{guild_id}/automation',            api_automation_post),
+        ('GET',  '/guild/{guild_id}/selfroles',             api_selfroles),
+        ('POST', '/guild/{guild_id}/selfroles',             api_selfroles),
+        ('POST', '/guild/{guild_id}/selfroles/panel',       api_selfroles_panel),
+        ('POST', '/guild/{guild_id}/selfroles/panel/{pid}/{action}', api_selfroles_panel_action),
         ('GET',  '/guild/{guild_id}/members/search',        api_member_search),
         ('GET',  '/guild/{guild_id}/member/{uid}',          api_member_lookup),
         ('POST', '/guild/{guild_id}/member/{uid}/action',   api_member_action),

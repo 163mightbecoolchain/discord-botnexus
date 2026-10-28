@@ -637,6 +637,26 @@ html.theme-anim *::before, html.theme-anim *::after {
 .flex { display: flex; }
 .gap-1 { gap: .5rem; }
 
+/* Роли: панель + предпросмотр сообщения в Discord */
+.sr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; }
+@media (max-width: 900px) { .sr-grid { grid-template-columns: 1fr; } }
+.sr-preview { background: #313338; border-radius: 8px; padding: .9rem 1rem; color: #dbdee1; font-size: .85rem; }
+.sr-embed { border-left: 4px solid var(--sr-color, #5865f2); background: #2b2d31; border-radius: 4px; padding: .7rem .9rem; }
+.sr-embed-title { font-weight: 700; color: #f2f3f5; margin-bottom: .3rem; }
+.sr-embed-desc { white-space: pre-wrap; line-height: 1.4; word-break: break-word; }
+.sr-embed-foot { font-size: .72rem; color: #949ba4; margin-top: .55rem; }
+.sr-buttons { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+.sr-btn { background: #4e5058; color: #fff; border-radius: 4px; padding: .35rem .8rem; font-size: .82rem; font-weight: 500; }
+.sr-select { margin-top: .55rem; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 4px; padding: .5rem .7rem; color: #949ba4; display: flex; justify-content: space-between; }
+.sr-options { background: #2b2d31; border-radius: 4px; margin-top: .25rem; padding: .25rem 0; }
+.sr-option { padding: .35rem .7rem; }
+.sr-option small { display: block; color: #949ba4; font-size: .72rem; }
+.sr-role { display: flex; align-items: center; gap: .6rem; padding: .55rem 0; border-top: 1px solid var(--border); }
+.sr-role:first-child { border-top: 0; }
+.sr-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.sr-role-main { flex: 1; min-width: 0; }
+.sr-role-main .sub { font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
@@ -721,6 +741,9 @@ html.theme-anim *::before, html.theme-anim *::after {
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="automation" onclick="showPage('automation')">
         <span class="icon">🤖</span> Автоматизация
+      </div>
+      <div class="nav-item" data-perm="manage_guild" data-page="roles" onclick="showPage('roles')">
+        <span class="icon">🏷️</span> Роли
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="security" onclick="showPage('security')">
         <span class="icon">🛡️</span> Безопасность
@@ -1266,6 +1289,85 @@ html.theme-anim *::before, html.theme-anim *::after {
             <select class="select" id="auto-bdaych"><option value="">— выключено —</option></select>
           </div>
         </div>
+      </div>
+    </div></div>
+
+    <!-- ROLES -->
+    <div id="content-roles" class="page"><div class="page-inner">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Роли</div>
+          <div class="page-subtitle">Самовыдача ролей кнопками и выпадающим меню</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Включено</div>
+              <div class="toggle-desc">Пока выключено, команды <span class="text-mono">/roles</span> и кнопки панелей не работают</div>
+            </div>
+            <div class="toggle" id="tog-selfroles" onclick="this.classList.toggle('on'); saveSelfRoles({enabled: getToggle('tog-selfroles')})"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Кто ещё управляет панелями</div>
+              <div class="toggle-desc">Кроме тех, у кого есть «Управлять сервером»</div>
+            </div>
+            <div style="min-width:220px;">
+              <select class="select" id="sr-manager" onchange="saveSelfRoles({manager_role: this.value})"><option value="">— только админы —</option></select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="sr-body">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Новая панель</div>
+              <div class="card-desc">Бот отправит сообщение в канал; роли добавляются ниже или командой <span class="text-mono">/roles panel add</span></div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group" style="margin:0;">
+                <label>Канал</label>
+                <select class="select" id="sr-new-ch"><option value="">— выбери канал —</option></select>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label>Вид</label>
+                <select class="select" id="sr-new-mode">
+                  <option value="buttons">Кнопки</option>
+                  <option value="select">Выпадающее меню</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Заголовок</label>
+              <input class="input" id="sr-new-title" maxlength="256" placeholder="Выбери регион">
+            </div>
+            <div class="form-group">
+              <label>Описание</label>
+              <textarea class="textarea" id="sr-new-desc" rows="3" maxlength="2000" placeholder="Нажми на кнопку, чтобы получить роль"></textarea>
+            </div>
+            <div class="form-row" style="align-items:end;">
+              <div class="form-group" style="margin:0;">
+                <label>Цвет</label>
+                <input type="color" class="input" id="sr-new-color" value="#5865f2" style="height:38px; padding:.2rem;">
+              </div>
+              <div class="toggle-row" style="border:0; padding:0;">
+                <div class="toggle-info"><div class="toggle-label">Только одна роль</div>
+                  <div class="toggle-desc">Новая роль из панели снимает прежнюю</div></div>
+                <div class="toggle" id="tog-sr-single" onclick="this.classList.toggle('on')"></div>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="btnBusy(this, createRolePanel)">Создать панель</button>
+          </div>
+        </div>
+
+        <div id="sr-panels"></div>
       </div>
     </div></div>
 
@@ -2700,6 +2802,7 @@ async function showPage(name) {
   if (name === 'appeals') { await loadAppeals(); }
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation') await loadAutomation();
+  if (name === 'roles') await loadSelfRoles();
   if (name === 'security') await Promise.all([loadSecurity(), loadProtection()]);
   if (name === 'moderation') await loadProtection();
   if (name === 'banreq') await loadBanRequests();
@@ -4377,6 +4480,176 @@ function saveAutomation() {
     starboard_threshold: parseInt(getVal('auto-starthr')) || 3,
     birthday_channel:    getVal('auto-bdaych') || 0,
   });
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  РОЛИ — панели самовыдачи (witness/selfroles.py)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _sr = null;
+
+async function loadSelfRoles() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/selfroles`);
+    if (!r.ok) return;
+    _sr = await r.json();
+    renderSelfRoles();
+  } catch(e) {}
+}
+
+// Общий вызов: ответ всегда содержит свежее состояние страницы
+async function srPost(path, payload, okText) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/selfroles${path}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {})
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.panels) { _sr = d; renderSelfRoles(); }
+    if (r.ok) { showToast(okText || '✓ Сохранено', 'success'); return true; }
+    showToast(d.error === 'Forbidden' ? 'Нет прав' : (d.error || 'Ошибка ' + r.status), 'error');
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+  return false;
+}
+
+function saveSelfRoles(payload) { return srPost('', payload); }
+
+function createRolePanel() {
+  return srPost('/panel', {
+    channel_id:  getVal('sr-new-ch'),
+    mode:        getVal('sr-new-mode'),
+    title:       getVal('sr-new-title'),
+    description: getVal('sr-new-desc'),
+    color:       getVal('sr-new-color'),
+    single:      getToggle('tog-sr-single'),
+  }, '✓ Панель создана').then(ok => {
+    if (ok) { setVal('sr-new-title', ''); setVal('sr-new-desc', ''); }
+    return ok;
+  });
+}
+
+function addPanelRole(pid) {
+  return srPost(`/panel/${pid}/add`, {
+    role_id:     getVal(`sr-add-role-${pid}`),
+    label:       getVal(`sr-add-label-${pid}`),
+    emoji:       getVal(`sr-add-emoji-${pid}`),
+    description: getVal(`sr-add-desc-${pid}`),
+  }, '✓ Роль добавлена');
+}
+
+function removePanelRole(pid, rid) {
+  return srPost(`/panel/${pid}/remove`, {role_id: rid}, '✓ Роль убрана');
+}
+
+function deleteRolePanel(btn, pid) {
+  // Без модалки: первое нажатие спрашивает, второе удаляет
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Точно удалить?';
+    setTimeout(() => { delete btn.dataset.armed; btn.textContent = 'Удалить панель'; }, 3000);
+    return;
+  }
+  return srPost(`/panel/${pid}/delete`, {}, '✓ Панель удалена');
+}
+
+function srPreview(p) {
+  const e = escapeHtml;
+  const em = r => (r.emoji && !r.emoji.startsWith('<')) ? e(r.emoji) + ' ' : '';
+  const foot = p.single ? 'Можно выбрать только одну роль' :
+    p.mode === 'select' ? 'Выбранное заменяет твои роли из этого списка' : 'Нажми ещё раз, чтобы снять роль';
+  let comps = '';
+  if (p.roles.length && p.mode === 'select') {
+    comps = `<div class="sr-select"><span>${p.single ? 'Выбери роль' : 'Выбери роли'}</span><span>▾</span></div>
+      <div class="sr-options">${p.roles.map(r => `<div class="sr-option">${em(r)}${e(r.label)}
+        ${r.description ? `<small>${e(r.description)}</small>` : ''}</div>`).join('')}</div>
+      <div class="sr-buttons"><span class="sr-btn">Снять роли из списка</span></div>`;
+  } else if (p.roles.length) {
+    comps = `<div class="sr-buttons">${p.roles.map(r => `<span class="sr-btn">${em(r)}${e(r.label)}</span>`).join('')}</div>`;
+  }
+  return `<div class="sr-preview">
+    <div class="sr-embed" style="--sr-color:${e(p.color)}">
+      <div class="sr-embed-title">${e(p.title)}</div>
+      ${p.description ? `<div class="sr-embed-desc">${e(p.description)}</div>` : ''}
+      ${p.roles.length ? '' : '<div class="sr-embed-desc"><i>Роли ещё не добавлены.</i></div>'}
+      <div class="sr-embed-foot">${foot}</div>
+    </div>${comps}</div>`;
+}
+
+function renderSelfRoles() {
+  if (!_sr) return;
+  setToggle('tog-selfroles', _sr.enabled);
+  const mgr = document.getElementById('sr-manager');
+  mgr.innerHTML = '<option value="">— только админы —</option>' +
+    _sr.roles.map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`).join('');
+  mgr.value = _sr.manager_role || '';
+  const chSel = document.getElementById('sr-new-ch');
+  const chCur = chSel.value;
+  chSel.innerHTML = '<option value="">— выбери канал —</option>' +
+    _channels.filter(c => c.type === 'text').map(c => `<option value="${c.id}">#${escapeHtml(c.name)}</option>`).join('');
+  if (chCur) chSel.value = chCur;
+  document.getElementById('sr-body').style.display = _sr.enabled ? '' : 'none';
+
+  const free = _sr.roles.filter(r => !r.problem);
+  const box = document.getElementById('sr-panels');
+  if (!_sr.panels.length) {
+    box.innerHTML = `<div class="card"><div class="empty"><div class="empty-icon">🏷️</div>
+      <div class="empty-title">Панелей пока нет</div><div class="empty-sub">Создай первую выше или командой /roles panel create</div></div></div>`;
+  } else {
+    box.innerHTML = _sr.panels.map(p => {
+      const used = new Set(p.roles.map(r => r.role_id));
+      const opts = free.filter(r => !used.has(r.id));
+      const rows = p.roles.map(r => `<div class="sr-role">
+          <span class="sr-dot" style="${r.color ? 'background:' + escapeHtml(r.color) : ''}"></span>
+          <div class="sr-role-main"><div>${r.emoji && !r.emoji.startsWith('<') ? escapeHtml(r.emoji) + ' ' : ''}${escapeHtml(r.label)}
+            ${r.label !== r.name ? `<span class="text-muted" style="font-size:.78rem;">@${escapeHtml(r.name)}</span>` : ''}</div>
+            ${r.problem ? `<div class="sub" style="color:var(--warning);" title="${escapeHtml(r.problem)}">⚠ ${escapeHtml(r.problem.replace(/<@&\d+>/g, 'роль'))}</div>`
+                        : (r.description ? `<div class="sub">${escapeHtml(r.description)}</div>` : '')}
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="btnBusy(this, () => removePanelRole(${p.id}, '${r.role_id}'))">Убрать</button>
+        </div>`).join('') || '<div class="text-muted" style="font-size:.85rem;">Ролей нет — добавь ниже.</div>';
+      const full = p.roles.length >= 25;
+      return `<div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">#${p.id} · ${escapeHtml(p.title)}</div>
+            <div class="card-desc">${p.channel ? '#' + escapeHtml(p.channel) : 'канал удалён'} ·
+              ${p.mode === 'select' ? 'выпадающее меню' : 'кнопки'}${p.single ? ' · одна роль' : ''} ·
+              <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" style="color:var(--accent);">открыть в Discord</a></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteRolePanel(this, ${p.id})">Удалить панель</button>
+        </div>
+        <div class="card-body sr-grid">
+          <div>
+            ${rows}
+            ${full ? '<div class="input-help">В панели 25 ролей — это предел Discord.</div>' : `
+            <div style="border-top:1px solid var(--border); margin-top:.5rem; padding-top:1rem;">
+              <div class="form-row" style="margin-bottom:.75rem;">
+                <div class="form-group" style="margin:0;"><label>Роль</label>
+                  <select class="select" id="sr-add-role-${p.id}"><option value="">— выбери роль —</option>
+                    ${opts.map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`).join('')}</select></div>
+                <div class="form-group" style="margin:0;"><label>Подпись</label>
+                  <input class="input" id="sr-add-label-${p.id}" maxlength="80" placeholder="по умолчанию — имя роли"></div>
+              </div>
+              <div class="form-row" style="margin-bottom:.75rem;">
+                <div class="form-group" style="margin:0;"><label>Эмодзи</label>
+                  <input class="input" id="sr-add-emoji-${p.id}" placeholder="🇪🇺 или <:name:id>"></div>
+                ${p.mode === 'select' ? `<div class="form-group" style="margin:0;"><label>Пояснение в меню</label>
+                  <input class="input" id="sr-add-desc-${p.id}" maxlength="100"></div>` : '<div></div>'}
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="btnBusy(this, () => addPanelRole(${p.id}))">Добавить роль</button>
+              <div class="input-help">В списке только роли, которые можно раздавать: ниже роли бота, не интеграции и без опасных прав.</div>
+            </div>`}
+          </div>
+          <div>
+            <label>Предпросмотр</label>
+            ${srPreview(p)}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  csInit();
+  csSync();
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

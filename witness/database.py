@@ -290,6 +290,32 @@ async def db_init():
                 joined_at     TEXT DEFAULT '',
                 PRIMARY KEY (guild_id, user_id));
 
+            -- Панели самовыдачи ролей (кнопки / выпадающее меню), witness/selfroles.py
+            CREATE TABLE IF NOT EXISTS role_panels (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id    INTEGER NOT NULL,
+                channel_id  INTEGER NOT NULL,
+                message_id  INTEGER NOT NULL DEFAULT 0,
+                mode        TEXT NOT NULL DEFAULT 'buttons',
+                title       TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                color       INTEGER DEFAULT 0,
+                single      INTEGER DEFAULT 0,
+                created_by  INTEGER DEFAULT 0,
+                created_at  TEXT DEFAULT '');
+            CREATE INDEX IF NOT EXISTS idx_role_panels_guild   ON role_panels(guild_id, channel_id);
+            CREATE INDEX IF NOT EXISTS idx_role_panels_message ON role_panels(message_id);
+            CREATE TABLE IF NOT EXISTS role_panel_roles (
+                panel_id    INTEGER NOT NULL,
+                guild_id    INTEGER NOT NULL,
+                role_id     INTEGER NOT NULL,
+                label       TEXT NOT NULL DEFAULT '',
+                emoji       TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                position    INTEGER DEFAULT 0,
+                PRIMARY KEY (panel_id, role_id));
+            CREATE INDEX IF NOT EXISTS idx_role_panel_roles_role ON role_panel_roles(guild_id, role_id);
+
             -- Лог таймаутов для лидерборда
             CREATE TABLE IF NOT EXISTS mute_log (
                 guild_id    INTEGER NOT NULL,
@@ -331,6 +357,9 @@ async def db_init():
             # когда заявку решили на сайте
             "ALTER TABLE ban_requests ADD COLUMN channel_id INTEGER DEFAULT 0",
             "ALTER TABLE ban_requests ADD COLUMN message_id INTEGER DEFAULT 0",
+            # Самовыдача ролей: по умолчанию выключена, включается тумблером в дашборде
+            "ALTER TABLE guild_settings ADD COLUMN selfroles_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE guild_settings ADD COLUMN selfroles_manager_role INTEGER DEFAULT 0",
             # Индексы на таблицах с частыми выборками. Без них SQLite
             # сканирует таблицу целиком, и время растёт вместе с историей.
             "CREATE INDEX IF NOT EXISTS idx_invite_member ON invite_log(guild_id, member_id)",

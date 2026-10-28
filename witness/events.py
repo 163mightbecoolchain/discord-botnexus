@@ -148,7 +148,9 @@ async def on_ready():
         bot._dynamic_items_added = True
         from .guard import UndoButton
         from .moderation import AppealReplyButton
-        bot.add_dynamic_items(AppealButton, BanApproveButton, BanRejectButton, UndoButton, AppealReplyButton)
+        from .selfroles import RoleButton, RoleSelect, RoleClearButton
+        bot.add_dynamic_items(AppealButton, BanApproveButton, BanRejectButton, UndoButton, AppealReplyButton,
+                              RoleButton, RoleSelect, RoleClearButton)
 
     # ── Запуск фоновых задач ─────────────────────────────────
     if not hasattr(bot, "_tasks_started"):
