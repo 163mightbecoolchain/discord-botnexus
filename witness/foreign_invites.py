@@ -67,6 +67,21 @@ async def find_foreign(guild: discord.Guild, text: str, allow_guilds=()) -> list
     return out
 
 
+async def only_allowed_invites(text: str, allow_guilds) -> bool:
+    """True, если в тексте есть инвайты и все они ведут на серверы из allow_guilds.
+    Нужна логу удалений: такие сообщения из белого списка логов не пишем.
+    Мёртвая или не проверенная ссылка — не из списка."""
+    allow = {str(g) for g in allow_guilds or []}
+    codes = invite_codes(text)
+    if not allow or not codes:
+        return False
+    for code in codes:
+        res = await resolve_invite(code)
+        if not res or not res[0] or str(res[0]) not in allow:
+            return False
+    return True
+
+
 async def check_message(message: discord.Message, modes: dict):
     """Вызывается из security_module.on_message после исключений."""
     mode = modes.get("invites", "off")

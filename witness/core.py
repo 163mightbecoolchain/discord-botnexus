@@ -20,7 +20,7 @@ from .config import (
     TIER_NAMES,
     TIER_PREMIUM,
 )
-from .database import get_log_ch, is_enabled
+from .database import get_log_ch, get_security, is_enabled, log_whitelisted
 from .ui import build_embed, C, make_embed
 
 _cooldowns: dict = {}
@@ -221,10 +221,17 @@ async def notify_tier_expired(gid: int, old_tier: int):
     except Exception as ex:
         print(f"[TIER] notify error: {ex}")
 
-async def sec_check(guild, key):
+async def sec_check(guild, key, user=None):
+    """
+    Лог-канал, если событие key надо логировать, иначе None.
+    user — участник (или его ID), чьё это действие: участников из белого
+    списка логов (страница «Безопасность» на сайте) не логируем.
+    """
     if not EVENT_LOGS: return None
     if await get_tier(guild.id) < TIER_PREMIUM: return None
-    if not await is_enabled(guild.id, key): return None
+    _, sec = await get_security(guild.id)
+    if not sec.get(key, False): return None
+    if user is not None and log_whitelisted(sec, user): return None
     return await get_log_ch(guild)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
