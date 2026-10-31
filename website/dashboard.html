@@ -1469,6 +1469,25 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="card">
         <div class="card-head">
           <div>
+            <div class="card-title">Белый список логов</div>
+            <div class="card-desc">Действия этих участников не попадают в лог-канал: сообщения, правки, удаления, голосовые, роли, ник, входы и выходы, инвайты, реакции, команды. Баны и таймауты в лог всё равно идут</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="chip-list" id="lwList"></div>
+          <div class="form-group" style="margin:0; position:relative;">
+            <label for="lwSearch">Добавить участника</label>
+            <input type="text" class="input" id="lwSearch" autocomplete="off"
+                   placeholder="Ник или ID участника..." oninput="lwDebounce()">
+            <div id="lwResults" style="margin-top:.4rem;"></div>
+            <div class="input-help">До 50 участников. Изменения сохраняются сразу.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
             <div class="card-title">Анти-нюк</div>
             <div class="card-desc">Защита от взломанного или недобросовестного модератора. Собери правила: что считать атакой и что делать</div>
           </div>
@@ -2803,7 +2822,7 @@ async function showPage(name) {
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation') await loadAutomation();
   if (name === 'roles') await loadSelfRoles();
-  if (name === 'security') await Promise.all([loadSecurity(), loadProtection()]);
+  if (name === 'security') await Promise.all([loadSecurity(), loadProtection(), loadLogWhitelist()]);
   if (name === 'moderation') await loadProtection();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') { invStateFromUrl(); await loadInvites(); }
@@ -3749,6 +3768,102 @@ async function saveProtection() {
     renderLogToggles();
   }
   return ok;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  БЕЛЫЙ СПИСОК ЛОГОВ — участники, чьи действия бот не логирует
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _logWl = [];
+let _lwTimer = null;
+
+function renderLogWhitelist() {
+  const box = document.getElementById('lwList');
+  if (!box) return;
+  if (!_logWl.length) {
+    box.innerHTML = '<div class="input-help" style="margin:0 0 .25rem;">Список пуст — логируются все участники</div>';
+    return;
+  }
+  box.innerHTML = _logWl.map(m => `
+    <span class="chip-x" title="${escapeHtml(m.tag || m.id)}${m.left ? ' · не на сервере' : ''}">
+      ${m.avatar ? `<img src="${escapeHtml(m.avatar)}" alt="" style="width:18px;height:18px;border-radius:50%;margin-left:-.35rem;">` : ''}
+      ${escapeHtml(m.name)}${m.left ? ' <span style="color:var(--muted);">(ушёл)</span>' : ''}
+      <button type="button" aria-label="Убрать ${escapeHtml(m.name)}" onclick="lwRemove('${m.id}')">×</button>
+    </span>`).join('');
+}
+
+async function loadLogWhitelist() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/log-whitelist`);
+    if (!r.ok) throw new Error(r.status);
+    _logWl = await r.json();
+  } catch(e) { _logWl = []; }
+  renderLogWhitelist();
+}
+
+async function lwSave(ids) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/log-whitelist`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids})
+    });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) { showToast('Ошибка: ' + ((d && d.error) || r.status), 'error'); return false; }
+    _logWl = d || [];
+    renderLogWhitelist();
+    showToast('✓ Сохранено', 'success');
+    return true;
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+    return false;
+  }
+}
+
+function lwRemove(id) {
+  return lwSave(_logWl.map(m => m.id).filter(x => x !== String(id)));
+}
+
+async function lwAdd(id) {
+  const res = document.getElementById('lwResults');
+  const inp = document.getElementById('lwSearch');
+  if (_logWl.some(m => m.id === String(id))) {
+    showToast('Участник уже в списке', 'error');
+    return;
+  }
+  if (await lwSave([..._logWl.map(m => m.id), String(id)])) {
+    if (res) res.innerHTML = '';
+    if (inp) inp.value = '';
+  }
+}
+
+function lwDebounce() {
+  clearTimeout(_lwTimer);
+  _lwTimer = setTimeout(lwSearch, 350);
+}
+
+async function lwSearch() {
+  const q = (document.getElementById('lwSearch')?.value || '').trim();
+  const box = document.getElementById('lwResults');
+  if (!box || !currentGuild) return;
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/members/search?q=${encodeURIComponent(q)}`);
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length) { box.innerHTML = '<div class="input-help">Никого не найдено</div>'; return; }
+    box.innerHTML = rows.slice(0, 8).map(m => {
+      const inList = _logWl.some(x => x.id === m.id);
+      return `
+      <div class="search-result" onclick="lwAdd('${m.id}')" style="${inList ? 'opacity:.5;' : ''}">
+        <img src="${escapeHtml(m.avatar)}" alt="">
+        <div style="flex:1;">
+          <div style="font-weight:600; font-size:.88rem;">${escapeHtml(m.name)}</div>
+          <div style="font-size:.75rem; color:var(--muted);" class="text-mono">${escapeHtml(m.tag)}</div>
+        </div>
+        <span class="chip ${inList ? '' : 'ok'}">${inList ? 'уже в списке' : '+ добавить'}</span>
+      </div>`;
+    }).join('');
+  } catch(e) {}
 }
 
 async function loadSecurity() {

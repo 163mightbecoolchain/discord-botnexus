@@ -24,9 +24,11 @@ from .database import (
     get_guild_settings,
     get_guild_settings_cached,
     get_log_ch,
+    get_security,
     get_xp,
     is_enabled,
     log_invite_use,
+    log_whitelisted,
 )
 from .i18n import _guild_lang, t
 from .ui import build_embed, C
@@ -322,7 +324,7 @@ async def on_member_join(member):
     used_code, inviter_name, inviter_id = info["code"], info["inviter_name"], info["inviter_id"]
 
     age = (datetime.datetime.utcnow() - member.created_at.replace(tzinfo=None)).days
-    ch = await sec_check(member.guild, "joins")
+    ch = await sec_check(member.guild, "joins", member)
     if ch:
         sus = "🔴 Подозрительный (<7д)" if age<7 else "🟡 Новый (<30д)" if age<30 else "🟢 Обычный"
         e = discord.Embed(title="📥 Вход", color=discord.Color.green(), timestamp=datetime.datetime.utcnow())
@@ -333,7 +335,7 @@ async def on_member_join(member):
         e.add_field(name="Пригласил", value=f"{inviter_name} (`{inviter_id}`)" if inviter_id else "неизвестно", inline=True)
         queue_log(ch, e)
 
-    ch2 = await sec_check(member.guild, "suspicious")
+    ch2 = await sec_check(member.guild, "suspicious", member)
     if ch2 and age < 7:
         e = discord.Embed(title="🚨 Подозрительный аккаунт", color=discord.Color.red(), timestamp=datetime.datetime.utcnow())
         e.set_thumbnail(url=member.display_avatar.url)
@@ -388,7 +390,7 @@ async def on_member_remove(member):
     except Exception as ex:
         print(f"[KICK_LOG] {ex}")
 
-    ch = await sec_check(member.guild, "leaves")
+    ch = await sec_check(member.guild, "leaves", member)
     if not ch: return
     roles = [r.mention for r in member.roles if r.name != "@everyone"]
     gid2 = member.guild.id
@@ -468,7 +470,7 @@ async def on_member_unban(guild, user):
 @bot.event
 async def on_member_update(before, after):
     if before.nick != after.nick:
-        ch = await sec_check(after.guild, "nick_change")
+        ch = await sec_check(after.guild, "nick_change", after)
         if ch:
             gid5 = after.guild.id
             e = build_embed(C.INFO)
@@ -479,7 +481,7 @@ async def on_member_update(before, after):
             await ch.send(embed=e)
     added = set(after.roles)-set(before.roles); removed = set(before.roles)-set(after.roles)
     if added or removed:
-        ch = await sec_check(after.guild, "role_change")
+        ch = await sec_check(after.guild, "role_change", after)
         if ch:
             gid6 = after.guild.id
             e = build_embed(C.PRIMARY)
@@ -702,7 +704,7 @@ MEDIA_FILE_MAX    = 25 * 1024 * 1024    # больше бот всё равно 
 async def _cache_attachments(message):
     global _media_cache_bytes
     try:
-        if not await sec_check(message.guild, "msg_delete"):
+        if not await sec_check(message.guild, "msg_delete", message.author):
             return
         limit = min(MEDIA_FILE_MAX, message.guild.filesize_limit)
         files = {}
@@ -840,7 +842,7 @@ async def on_message_delete(message):
     if message.author.bot or not message.guild:
         _pop_cached_media(message.id)
         return
-    ch = await sec_check(message.guild, "msg_delete")
+    ch = await sec_check(message.guild, "msg_delete", message.author)
     if not ch:
         _pop_cached_media(message.id)
         return
@@ -954,7 +956,7 @@ def _edit_diff(old: str, new: str, ctx: int = 250, max_len: int = 3500) -> str:
 @bot.event
 async def on_message_edit(before, after):
     if before.author.bot or not before.guild or before.content == after.content: return
-    ch = await sec_check(before.guild, "msg_edit")
+    ch = await sec_check(before.guild, "msg_edit", before.author)
     if not ch: return
     gid9 = before.guild.id
     delta = len(after.content) - len(before.content)
@@ -971,7 +973,7 @@ async def on_message_edit(before, after):
 async def on_invite_create(invite):
     remember_invite(invite.guild.id, invite)
     print(f"[INVITE] Created: {invite.code} by {invite.inviter}")
-    ch = await sec_check(invite.guild, "invites")
+    ch = await sec_check(invite.guild, "invites", invite.inviter)
     if not ch: return
     gid10 = invite.guild.id
     e = build_embed(C.INFO)
@@ -1032,7 +1034,7 @@ async def on_guild_join(guild):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    ch = await sec_check(member.guild, "voice")
+    ch = await sec_check(member.guild, "voice", member)
     if not ch or before.channel == after.channel: return
     if before.channel is None: desc, color = f"вошёл в **{after.channel.name}**", discord.Color.green()
     elif after.channel is None: desc, color = f"вышел из **{before.channel.name}**", discord.Color.red()
@@ -1099,7 +1101,7 @@ async def on_user_update(before, after):
     for guild in bot.guilds:
         member = guild.get_member(after.id)
         if not member: continue
-        ch = await sec_check(guild, "avatar_change")
+        ch = await sec_check(guild, "avatar_change", member)
         if not ch: continue
         e = build_embed(C.INFO)
         e.set_author(name="Avatar changed")
@@ -1110,7 +1112,7 @@ async def on_user_update(before, after):
 
 @bot.event
 async def on_thread_create(thread):
-    ch = await sec_check(thread.guild, "threads")
+    ch = await sec_check(thread.guild, "threads", thread.owner_id)
     if not ch: return
     e = build_embed(C.SUCCESS)
     e.set_author(name="Thread created")
@@ -1121,8 +1123,11 @@ async def on_thread_create(thread):
 @bot.event
 async def on_interaction(interaction):
     if not EVENT_LOGS: return
-    if not await is_enabled(interaction.guild_id, "slash_commands"): return
+    if not interaction.guild: return
     if interaction.type != discord.InteractionType.application_command: return
+    _, sec = await get_security(interaction.guild_id)
+    if not sec.get("slash_commands", False): return
+    if log_whitelisted(sec, interaction.user): return
     ch = await get_log_ch(interaction.guild)
     if not ch: return
     e = build_embed(C.PRIMARY)
@@ -1167,7 +1172,7 @@ async def on_reaction_add(reaction, user):
 
     # Security reaction log (из существующего кода)
     if not reaction.message.guild: return
-    ch = await sec_check(reaction.message.guild, "reactions")
+    ch = await sec_check(reaction.message.guild, "reactions", user)
     if not ch: return
     e = build_embed(C.SUCCESS)
     e.set_author(name="Reaction added")

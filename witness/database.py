@@ -660,6 +660,16 @@ async def get_active_warnings(gid, uid):
 async def is_enabled(gid, key):
     _, s = await get_security(gid); return s.get(key, False)
 
+# Белый список логов: действия этих участников не пишутся в лог-канал.
+# ID хранятся строками в JSON настроек безопасности (ключ log_whitelist).
+LOG_WHITELIST_MAX = 50
+
+def log_whitelisted(settings, user) -> bool:
+    uid = getattr(user, "id", user)
+    if not uid:
+        return False
+    return str(uid) in {str(x) for x in (settings.get("log_whitelist") or [])}
+
 async def get_log_ch(guild):
     ch_id, _ = await get_security(guild.id)
     if ch_id: return guild.get_channel(ch_id)

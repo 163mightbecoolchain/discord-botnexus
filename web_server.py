@@ -15,6 +15,7 @@ Routes:
   GET  /api/guild/:id/settings   — All guild settings
   POST /api/guild/:id/settings   — Save guild settings (all fields)
   POST /api/guild/:id/security   — Save security toggles
+  GET|POST /api/guild/:id/log-whitelist — участники вне логов
   GET  /api/guild/:id/channels   — Channels + roles
   GET  /api/guild/:id/modlog     — Mod log
   GET  /api/guild/:id/invites    — Invite stats + search
@@ -686,6 +687,57 @@ async def api_security_save(request):
                 sec[k] = bool(v)
         await save_security(guild_id, log_ch, sec)
         return web.json_response({'ok': True, 'security': sec})
+    except Exception as e:
+        return _server_error(request, e)
+
+@require_auth
+async def api_log_whitelist(request):
+    """
+    GET  /api/guild/:id/log-whitelist — участники, чьи действия не пишутся в лог
+    POST /api/guild/:id/log-whitelist {"ids": ["…"]} — заменить список целиком
+    """
+    guild_id = int(request.match_info['guild_id'])
+    s        = request['session']
+    bot      = request.app['bot']
+
+    bg = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    from witness.database import get_security, save_security, LOG_WHITELIST_MAX
+    try:
+        log_ch, sec = await get_security(guild_id)
+        if request.method == 'POST':
+            data = await request.json()
+            ids = data.get('ids') if isinstance(data, dict) else None
+            if not isinstance(ids, list):
+                return web.json_response({'error': 'Bad request'}, status=400)
+            clean = []
+            for x in ids:
+                x = str(x).strip()
+                if x.isdigit() and 15 <= len(x) <= 21 and x not in clean:
+                    clean.append(x)
+            if len(clean) > LOG_WHITELIST_MAX:
+                return web.json_response(
+                    {'error': f'Не больше {LOG_WHITELIST_MAX} участников'}, status=400)
+            sec['log_whitelist'] = clean
+            await save_security(guild_id, log_ch, sec)
+
+        out = []
+        for uid in sec.get('log_whitelist') or []:
+            m = await _get_member(bg, int(uid))
+            u = m or bot.get_user(int(uid))
+            out.append({
+                'id':     str(uid),
+                'name':   (m.display_name if m else (u.name if u else str(uid))),
+                'tag':    str(u) if u else '',
+                'avatar': u.display_avatar.url if u else '',
+                'left':   m is None,
+            })
+        return web.json_response(out)
     except Exception as e:
         return _server_error(request, e)
 
@@ -2424,6 +2476,8 @@ def create_app(bot) -> web.Application:
         ('POST', '/guild/{guild_id}/settings',              api_guild_settings_post),
         ('POST', '/guild/{guild_id}/security',              api_security_save),
         ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
+        ('GET',  '/guild/{guild_id}/log-whitelist',         api_log_whitelist),
+        ('POST', '/guild/{guild_id}/log-whitelist',         api_log_whitelist),
         ('POST', '/guild/{guild_id}/threats',               api_threats_save),
         ('POST', '/guild/{guild_id}/alert/{alert_id}/resolve', api_alert_resolve),
         ('GET',  '/guild/{guild_id}/protection',            api_protection),
