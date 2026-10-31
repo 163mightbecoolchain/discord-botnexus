@@ -395,6 +395,10 @@ mark { background: rgba(var(--accent-rgb), .22); color: inherit; border-radius: 
 .inv-rule-form { border: 1px solid var(--border); border-radius: 8px; padding: 0 .9rem; margin-bottom: .5rem; }
 .inv-rule-form .rule[hidden] { display: none; }
 .inv-rule-form .seg { flex-wrap: wrap; }
+.inv-head-tools { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.inv-updated { font-size: .75rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.inv-updated.stale { color: var(--warning); }
+#invRefreshBtn[aria-busy="true"] { opacity: .6; pointer-events: none; }
 .inv-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .8rem 1rem; }
 .inv-facts label { display: block; font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: .2rem; }
 .inv-members { max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
@@ -2014,10 +2018,14 @@ html.theme-anim *::before, html.theme-anim *::after {
           <div class="page-title">Инвайты</div>
           <div class="page-subtitle">Откуда приходят участники и сколько из них остаётся</div>
         </div>
-        <div class="seg" role="group" aria-label="Период" data-seg="inv-days">
-          <button type="button" data-mode="7" onclick="setInvDays(7)">7 дней</button>
-          <button type="button" data-mode="30" onclick="setInvDays(30)">30 дней</button>
-          <button type="button" data-mode="90" onclick="setInvDays(90)">90 дней</button>
+        <div class="inv-head-tools">
+          <span class="inv-updated" id="invUpdated" title="Страница сама обновляется раз в минуту, пока вкладка открыта"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="invRefreshBtn" onclick="loadInvites(true)" title="Обновить">⟳ Обновить</button>
+          <div class="seg" role="group" aria-label="Период" data-seg="inv-days">
+            <button type="button" data-mode="7" onclick="setInvDays(7)">7 дней</button>
+            <button type="button" data-mode="30" onclick="setInvDays(30)">30 дней</button>
+            <button type="button" data-mode="90" onclick="setInvDays(90)">90 дней</button>
+          </div>
         </div>
       </div>
 
@@ -5586,6 +5594,7 @@ function bumpBadge(id) {
 
 async function livePoll() {
   if (!currentGuild || document.hidden) return;
+  refreshInvitesIfStale();
 
   // ── Апелляции ──
   if (hasPerm(APPEALS_PERM)) {
@@ -5811,24 +5820,58 @@ function setInvDays(d) {
   loadInvites();
 }
 
-async function loadInvites() {
+// silent — фоновое обновление: без скелетона, при ошибке остаются прежние данные
+let _invLoadSeq = 0;
+async function loadInvites(silent = false) {
   if (!currentGuild) return;
-  setSegValue('inv-days', String(_inv.days));
-  document.getElementById('invitesTable').innerHTML = skeletonRows(5, 8);
+  const seq = ++_invLoadSeq, gid = currentGuild.id, days = _inv.days;
+  setSegValue('inv-days', String(days));
+  const btn = document.getElementById('invRefreshBtn');
+  if (btn) btn.setAttribute('aria-busy', 'true');
+  if (!silent || !_inv.data) document.getElementById('invitesTable').innerHTML = skeletonRows(5, 8);
+  let data;
   try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/invites?days=${_inv.days}`);
+    const r = await apiFetch(`/api/guild/${gid}/invites?days=${days}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
-    _inv.data = await r.json();
+    data = await r.json();
   } catch(e) {
+    if (seq !== _invLoadSeq) return;
+    if (btn) btn.removeAttribute('aria-busy');
+    if (silent && _inv.data) { renderInvUpdated(true); return; }
     document.getElementById('invitesTable').innerHTML =
       '<tr><td colspan="8"><div class="empty"><div class="empty-title">Не удалось загрузить</div></div></td></tr>';
     return;
   }
+  // Пока шёл запрос, сменили сервер, период или запустили новую загрузку — ответ устарел
+  if (seq !== _invLoadSeq) return;
+  if (btn) btn.removeAttribute('aria-busy');
+  if (!currentGuild || currentGuild.id !== gid || _inv.days !== days) return;
+  _inv.data = data;
+  _inv.loadedAt = Date.now();
+  renderInvUpdated(false);
   renderInvStats();
   renderInvChart();
   renderInvTable();
   renderInvTop();
   invStateToUrl();
+}
+
+// «обновлено ЧЧ:ММ»; failed — фоновое обновление не прошло, показаны прежние данные
+function renderInvUpdated(failed) {
+  const el = document.getElementById('invUpdated');
+  if (!el || !_inv.loadedAt) return;
+  const t = new Date(_inv.loadedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  el.textContent = failed ? `не удалось обновить · данные на ${t}` : `обновлено ${t}`;
+  el.classList.toggle('stale', !!failed);
+}
+
+// Открытая страница «Инвайты» обновляется из livePoll (раз в минуту и при возврате на вкладку)
+const INV_REFRESH_MS = 55000;
+function refreshInvitesIfStale() {
+  const p = document.querySelector('.page.active');
+  if (!p || p.id !== 'content-invites' || !_inv.data) return;
+  if (Date.now() - (_inv.loadedAt || 0) < INV_REFRESH_MS) return;
+  loadInvites(true);
 }
 
 function renderInvStats() {
