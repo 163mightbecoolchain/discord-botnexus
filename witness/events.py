@@ -843,6 +843,12 @@ async def on_message_delete(message):
         _pop_cached_media(message.id)
         return
     ch = await sec_check(message.guild, "msg_delete", message.author)
+    if ch and message.content:
+        # Белый список логов: ссылки на разрешённые серверы при удалении не логируем
+        _, sec = await get_security(message.guild.id)
+        from .foreign_invites import only_allowed_invites
+        if await only_allowed_invites(message.content, sec.get("log_whitelist_guilds")):
+            ch = None
     if not ch:
         _pop_cached_media(message.id)
         return

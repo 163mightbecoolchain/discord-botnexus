@@ -690,11 +690,44 @@ async def api_security_save(request):
     except Exception as e:
         return _server_error(request, e)
 
+async def _parse_guild_refs(items, limit=50):
+    """Серверы по ID или инвайт-ссылке → (список ID строками, нераспознанные строки)."""
+    from witness.foreign_invites import invite_codes, resolve_invite
+    ids, bad = [], []
+    for raw in list(items)[:limit]:
+        item = str(raw).strip()
+        if not item:
+            continue
+        if item.isdigit() and 15 <= len(item) <= 21:
+            gid = item
+        else:
+            codes = invite_codes(item) or ([item] if re.fullmatch(r'[A-Za-z0-9-]{2,32}', item) else [])
+            res = await resolve_invite(codes[0]) if codes else None
+            if not (res and res[0]):
+                bad.append(item)
+                continue
+            gid = str(res[0])
+        if gid not in ids:
+            ids.append(gid)
+    return ids, bad
+
+
+def _guild_names(bot) -> dict:
+    """Известные боту названия серверов: его серверы и ответы fetch_invite."""
+    from witness.foreign_invites import _resolved
+    known = {str(gid): name for _, gid, name in _resolved.values() if gid}
+    known.update({str(g.id): g.name for g in bot.guilds})
+    return known
+
+
 @require_auth
 async def api_log_whitelist(request):
     """
-    GET  /api/guild/:id/log-whitelist — участники, чьи действия не пишутся в лог
-    POST /api/guild/:id/log-whitelist {"ids": ["…"]} — заменить список целиком
+    GET  /api/guild/:id/log-whitelist — белый список логов:
+         {members: [...], guilds: [{id, name}]}
+    POST /api/guild/:id/log-whitelist {"ids": [...]} и/или {"guilds": ["ID или инвайт"]}
+         — заменить список целиком. members — участники, чьи действия не логируем,
+         guilds — серверы, ссылки на которые не логируем при удалении сообщения.
     """
     guild_id = int(request.match_info['guild_id'])
     s        = request['session']
@@ -712,32 +745,48 @@ async def api_log_whitelist(request):
         log_ch, sec = await get_security(guild_id)
         if request.method == 'POST':
             data = await request.json()
-            ids = data.get('ids') if isinstance(data, dict) else None
-            if not isinstance(ids, list):
+            if not isinstance(data, dict):
                 return web.json_response({'error': 'Bad request'}, status=400)
-            clean = []
-            for x in ids:
-                x = str(x).strip()
-                if x.isdigit() and 15 <= len(x) <= 21 and x not in clean:
-                    clean.append(x)
-            if len(clean) > LOG_WHITELIST_MAX:
-                return web.json_response(
-                    {'error': f'Не больше {LOG_WHITELIST_MAX} участников'}, status=400)
-            sec['log_whitelist'] = clean
+            if 'ids' in data:
+                if not isinstance(data['ids'], list):
+                    return web.json_response({'error': 'Bad request'}, status=400)
+                clean = []
+                for x in data['ids']:
+                    x = str(x).strip()
+                    if x.isdigit() and 15 <= len(x) <= 21 and x not in clean:
+                        clean.append(x)
+                if len(clean) > LOG_WHITELIST_MAX:
+                    return web.json_response(
+                        {'error': f'Не больше {LOG_WHITELIST_MAX} участников'}, status=400)
+                sec['log_whitelist'] = clean
+            if 'guilds' in data:
+                if not isinstance(data['guilds'], list):
+                    return web.json_response({'error': 'Bad request'}, status=400)
+                if len(data['guilds']) > LOG_WHITELIST_MAX:
+                    return web.json_response(
+                        {'error': f'Не больше {LOG_WHITELIST_MAX} серверов'}, status=400)
+                ids, bad = await _parse_guild_refs(data['guilds'])
+                if bad:
+                    return web.json_response(
+                        {'error': 'Не удалось распознать: ' + ', '.join(bad)[:200]}, status=400)
+                sec['log_whitelist_guilds'] = ids
             await save_security(guild_id, log_ch, sec)
 
-        out = []
+        members = []
         for uid in sec.get('log_whitelist') or []:
             m = await _get_member(bg, int(uid))
             u = m or bot.get_user(int(uid))
-            out.append({
+            members.append({
                 'id':     str(uid),
                 'name':   (m.display_name if m else (u.name if u else str(uid))),
                 'tag':    str(u) if u else '',
                 'avatar': u.display_avatar.url if u else '',
                 'left':   m is None,
             })
-        return web.json_response(out)
+        known = _guild_names(bot)
+        guilds = [{'id': str(g), 'name': known.get(str(g), '')}
+                  for g in sec.get('log_whitelist_guilds') or []]
+        return web.json_response({'members': members, 'guilds': guilds})
     except Exception as e:
         return _server_error(request, e)
 
@@ -817,9 +866,7 @@ async def api_security_overview(request):
 
     threats = await get_threat_config(guild_id)
     # Названия серверов-партнёров: из кэша бота или из ответов fetch_invite
-    from witness.foreign_invites import _resolved
-    known = {str(gid): name for _, gid, name in _resolved.values() if gid}
-    known.update({str(g.id): g.name for g in bot.guilds})
+    known = _guild_names(bot)
     return web.json_response({
         'automod':   automod,
         'threats':   threats,
@@ -864,21 +911,7 @@ async def api_threats_save(request):
                                          if str(r).isdigit() and bg.get_role(int(r))]
         # Серверы-партнёры: ID или инвайт-ссылка — ссылку превращаем в ID сервера
         if isinstance(data.get('invite_allow_guilds'), list):
-            from witness.foreign_invites import invite_codes, resolve_invite
-            ids, bad = [], []
-            for raw in data['invite_allow_guilds'][:50]:
-                item = str(raw).strip()
-                if not item:
-                    continue
-                if item.isdigit() and 15 <= len(item) <= 21:
-                    ids.append(item)
-                    continue
-                codes = invite_codes(item) or ([item] if re.fullmatch(r'[A-Za-z0-9-]{2,32}', item) else [])
-                res = await resolve_invite(codes[0]) if codes else None
-                if res and res[0]:
-                    ids.append(str(res[0]))
-                else:
-                    bad.append(item)
+            ids, bad = await _parse_guild_refs(data['invite_allow_guilds'])
             if bad:
                 return web.json_response({'error': 'bad_guilds', 'bad_guilds': bad}, status=400)
             data['invite_allow_guilds'] = ids

@@ -1470,17 +1470,34 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Белый список логов</div>
-            <div class="card-desc">Действия этих участников не попадают в лог-канал: сообщения, правки, удаления, голосовые, роли, ник, входы и выходы, инвайты, реакции, команды. Баны и таймауты в лог всё равно идут</div>
+            <div class="card-desc">Что не попадает в лог-канал. Изменения сохраняются сразу</div>
           </div>
         </div>
         <div class="card-body">
+          <div class="rule-group-title">Участники</div>
+          <div class="input-help" style="margin:0 0 .5rem;">Их действия не логируются: сообщения, правки, удаления, голосовые, роли, ник, входы и выходы, инвайты, реакции, команды. Баны и таймауты в лог всё равно идут</div>
           <div class="chip-list" id="lwList"></div>
-          <div class="form-group" style="margin:0; position:relative;">
+          <div class="form-group" style="margin:0;">
             <label for="lwSearch">Добавить участника</label>
             <input type="text" class="input" id="lwSearch" autocomplete="off"
                    placeholder="Ник или ID участника..." oninput="lwDebounce()">
             <div id="lwResults" style="margin-top:.4rem;"></div>
-            <div class="input-help">До 50 участников. Изменения сохраняются сразу.</div>
+            <div class="input-help">До 50 участников.</div>
+          </div>
+
+          <div class="rule-group-title" style="margin-top:1.25rem;">Серверы</div>
+          <div class="input-help" style="margin:0 0 .5rem;">Удалённые сообщения со ссылками-приглашениями на эти серверы не логируются. Если в сообщении есть ссылка на сервер не из списка, удаление логируется как обычно</div>
+          <div class="chip-list" id="lwGuilds"></div>
+          <div class="form-group" style="margin:0;">
+            <label for="lwGuildInput">Добавить сервер</label>
+            <div style="display:flex; gap:.5rem;">
+              <input type="text" class="input" id="lwGuildInput" autocomplete="off" spellcheck="false"
+                     placeholder="https://discord.gg/partner или ID сервера"
+                     onkeydown="if (event.key === 'Enter') { event.preventDefault(); lwAddGuild(); }">
+              <button type="button" class="btn btn-ghost" onclick="btnBusy(this, lwAddGuild)">Добавить</button>
+            </div>
+            <div class="input-help">До 50 серверов.
+              <a href="#" onclick="event.preventDefault(); lwCopyPartners();">Скопировать серверы-партнёры</a> из правил защиты выше.</div>
           </div>
         </div>
       </div>
@@ -3791,27 +3808,49 @@ function renderLogWhitelist() {
     </span>`).join('');
 }
 
-async function loadLogWhitelist() {
-  if (!currentGuild) return;
-  try {
-    const r = await apiFetch(`/api/guild/${currentGuild.id}/log-whitelist`);
-    if (!r.ok) throw new Error(r.status);
-    _logWl = await r.json();
-  } catch(e) { _logWl = []; }
-  renderLogWhitelist();
+let _logWlGuilds = [];
+
+function renderLogWhitelistGuilds() {
+  const box = document.getElementById('lwGuilds');
+  if (!box) return;
+  if (!_logWlGuilds.length) {
+    box.innerHTML = '<div class="input-help" style="margin:0 0 .25rem;">Список пуст</div>';
+    return;
+  }
+  box.innerHTML = _logWlGuilds.map(g => `
+    <span class="chip-x" title="${g.id}">
+      ${g.name ? escapeHtml(g.name) : `<span class="text-mono">${g.id}</span>`}
+      <button type="button" aria-label="Убрать сервер" onclick="lwRemoveGuild('${g.id}')">×</button>
+    </span>`).join('');
 }
 
-async function lwSave(ids) {
+function lwApply(d) {
+  _logWl = (d && d.members) || [];
+  _logWlGuilds = (d && d.guilds) || [];
+  renderLogWhitelist();
+  renderLogWhitelistGuilds();
+}
+
+async function loadLogWhitelist() {
+  if (!currentGuild) return;
+  let d = null;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/log-whitelist`);
+    if (r.ok) d = await r.json();
+  } catch(e) {}
+  lwApply(d);
+}
+
+async function lwPost(body) {
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/log-whitelist`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ids})
+      body: JSON.stringify(body)
     });
     const d = await r.json().catch(() => null);
     if (!r.ok) { showToast('Ошибка: ' + ((d && d.error) || r.status), 'error'); return false; }
-    _logWl = d || [];
-    renderLogWhitelist();
+    lwApply(d);
     showToast('✓ Сохранено', 'success');
     return true;
   } catch(e) {
@@ -3820,8 +3859,32 @@ async function lwSave(ids) {
   }
 }
 
+function lwSave(ids) { return lwPost({ids}); }
+
 function lwRemove(id) {
   return lwSave(_logWl.map(m => m.id).filter(x => x !== String(id)));
+}
+
+function lwRemoveGuild(id) {
+  return lwPost({guilds: _logWlGuilds.map(g => g.id).filter(x => x !== String(id))});
+}
+
+async function lwAddGuild() {
+  const inp = document.getElementById('lwGuildInput');
+  const v = (inp?.value || '').trim();
+  if (!v) return;
+  if (await lwPost({guilds: [..._logWlGuilds.map(g => g.id), v]})) inp.value = '';
+}
+
+function lwCopyPartners() {
+  // Строки поля «Серверы-партнёры» вида «ID — Название» или ссылки
+  const raw = (document.getElementById('invAllow')?.value || '').split('\n')
+    .map(l => l.split(' — ')[0].trim()).filter(Boolean);
+  if (!raw.length) { showToast('Список серверов-партнёров пуст', 'error'); return; }
+  const have = new Set(_logWlGuilds.map(g => g.id));
+  const add = raw.filter(x => !have.has(x));
+  if (!add.length) { showToast('Все партнёры уже в списке', 'success'); return; }
+  return lwPost({guilds: [..._logWlGuilds.map(g => g.id), ...add]});
 }
 
 async function lwAdd(id) {
