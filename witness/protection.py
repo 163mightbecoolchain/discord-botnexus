@@ -3,7 +3,8 @@
 
 Все пороги и ответные действия — из настроек сервера (database.get_protection),
 их меняют в дашборде. Здесь:
-  • handle_join — локдаун (кик слишком новых аккаунтов), анти-рейд и фильтр входа
+  • handle_join — предбан (бан UID из списка при входе), локдаун (кик слишком
+    новых аккаунтов), анти-рейд и фильтр входа
     (guard.join_filter). При волне входов действие применяется ко всем участникам
     волны, а не только к последним, на заданное время включается авто-локдаун,
     а guard.on_raid по желанию приостанавливает инвайты и удаляет инвайт волны;
@@ -19,12 +20,14 @@ import aiosqlite
 from .config import DB_PATH, TIER_PREMIUM
 from .core import bot, antinuke_check, get_tier, is_trusted, queue_log, resolve_member
 from .database import (
+    add_modlog,
     get_guild_settings,
     get_log_ch,
     get_protection,
     get_security,
     is_enabled,
     save_protection,
+    save_security,
 )
 from .ui import build_embed, C
 
@@ -75,6 +78,9 @@ async def handle_join(member) -> bool:
     gid = guild.id
     age_days = (_utcnow() - member.created_at.replace(tzinfo=None)).days
 
+    if await _preban_check(member):
+        return True
+
     if await lockdown_active(guild):
         _, sec = await get_security(gid)
         min_age = int(sec.get("lockdown_min_age", 7) or 7)
@@ -99,6 +105,56 @@ async def handle_join(member) -> bool:
         return False
     from .guard import join_filter
     return await join_filter(member)
+
+
+async def _preban_check(member) -> bool:
+    """
+    Предбан: UID из списка на странице «Безопасность» банится сразу при входе.
+    После бана запись убирается из списка — дальше это обычный бан Discord,
+    и разбан работает как всегда. Если забанить не вышло (нет прав), запись
+    остаётся, а в лог уходит предупреждение.
+    """
+    guild = member.guild
+    _, sec = await get_security(guild.id)
+    entry = next((p for p in sec.get("prebans") or [] if str(p.get("id")) == str(member.id)), None)
+    if not entry:
+        return False
+    reason = (entry.get("reason") or "").strip()
+    try:
+        await member.ban(reason=f"Witness предбан{': ' + reason if reason else ''}"[:512],
+                         delete_message_seconds=0)
+    except discord.HTTPException as ex:
+        e = build_embed(C.WARNING)
+        e.set_author(name="⚠️ Предбан: не удалось забанить")
+        e.add_field(name="Участник", value=f"{member.mention} (`{member.id}`)", inline=True)
+        e.add_field(name="Ошибка", value="Нет права «Банить участников» или роль бота ниже"
+                    if isinstance(ex, discord.Forbidden) else str(ex)[:200], inline=False)
+        ch = await get_log_ch(guild)
+        if ch:
+            queue_log(ch, e)
+        return False
+
+    # Убираем из списка (настройки перечитываем: их могли поменять, пока шёл бан)
+    log_ch, sec = await get_security(guild.id)
+    sec["prebans"] = [p for p in sec.get("prebans") or [] if str(p.get("id")) != str(member.id)]
+    await save_security(guild.id, log_ch, sec)
+
+    added_by = str(entry.get("by") or "")
+    try:
+        await add_modlog(guild.id, member.id, int(added_by) if added_by.isdigit() else bot.user.id,
+                         "ban", f"Предбан{': ' + reason if reason else ''}")
+    except Exception as ex:
+        print(f"[PREBAN] modlog: {ex}")
+    e = build_embed(C.DANGER)
+    e.set_author(name="⛔ Предбан: забанен при входе")
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.add_field(name="Участник", value=f"{member.mention} (`{member.name}` · `{member.id}`)", inline=False)
+    e.add_field(name="Причина", value=reason or "не указана", inline=True)
+    if added_by.isdigit():
+        e.add_field(name="Добавил", value=f"<@{added_by}>", inline=True)
+    await _notify(guild, e, "preban", "high", member.id,
+                  f"Предбан: {member} забанен при входе", {"reason": reason})
+    return True
 
 
 async def _raid_check(member) -> bool:

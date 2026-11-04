@@ -16,6 +16,7 @@ Routes:
   POST /api/guild/:id/settings   — Save guild settings (all fields)
   POST /api/guild/:id/security   — Save security toggles
   GET|POST /api/guild/:id/log-whitelist — участники вне логов
+  GET|POST /api/guild/:id/prebans — предбан: UID, которых бот забанит при входе
   GET  /api/guild/:id/channels   — Channels + roles
   GET  /api/guild/:id/modlog     — Mod log
   GET  /api/guild/:id/invites    — Invite stats + search
@@ -787,6 +788,85 @@ async def api_log_whitelist(request):
         guilds = [{'id': str(g), 'name': known.get(str(g), '')}
                   for g in sec.get('log_whitelist_guilds') or []]
         return web.json_response({'members': members, 'guilds': guilds})
+    except Exception as e:
+        return _server_error(request, e)
+
+PREBAN_MAX = 100
+
+@require_auth
+async def api_prebans(request):
+    """
+    GET  /api/guild/:id/prebans — список предбанов: {prebans: [{id, name, avatar, reason, by, by_name, at}]}
+    POST /api/guild/:id/prebans {"add": {"id": "UID", "reason": "..."}} или {"remove": "UID"}
+         — UID того, кого нет на сервере; бот забанит его при входе (witness/protection.py).
+    """
+    guild_id = int(request.match_info['guild_id'])
+    s        = request['session']
+    bot      = request.app['bot']
+
+    bg = bot.get_guild(guild_id)
+    if not bg:
+        return web.json_response({'error': 'Not found'}, status=404)
+    member = await _get_member(bg, s['user_id'])
+    if not member or not member.guild_permissions.manage_guild:
+        return web.json_response({'error': 'Forbidden'}, status=403)
+
+    import discord
+    from witness.database import get_security, save_security
+
+    def err(text):
+        return web.json_response({'error': text}, status=400)
+
+    try:
+        log_ch, sec = await get_security(guild_id)
+        prebans = [p for p in sec.get('prebans') or [] if isinstance(p, dict) and p.get('id')]
+        if request.method == 'POST':
+            data = await request.json()
+            if not isinstance(data, dict):
+                return err('Bad request')
+            if 'remove' in data:
+                rid = str(data['remove']).strip()
+                prebans = [p for p in prebans if str(p['id']) != rid]
+            elif isinstance(data.get('add'), dict):
+                uid = str(data['add'].get('id', '')).strip()
+                reason = str(data['add'].get('reason') or '').strip()[:300]
+                if not (uid.isdigit() and 15 <= len(uid) <= 21):
+                    return err('UID — это число из 17–20 цифр')
+                if any(str(p['id']) == uid for p in prebans):
+                    return err('Этот UID уже в списке')
+                if len(prebans) >= PREBAN_MAX:
+                    return err(f'Не больше {PREBAN_MAX} предбанов')
+                if (bot.user and int(uid) == bot.user.id) or int(uid) == bg.owner_id:
+                    return err('Этого пользователя забанить нельзя')
+                try:
+                    user = await bot.fetch_user(int(uid))
+                except discord.NotFound:
+                    return err('Пользователь с таким UID не найден')
+                if await _get_member(bg, int(uid)):
+                    return err(f'{user} уже на сервере — забаньте его обычным баном')
+                try:
+                    await bg.fetch_ban(user)
+                    return err(f'{user} уже забанен на сервере')
+                except discord.NotFound:
+                    pass
+                except discord.Forbidden:
+                    pass   # нет права смотреть баны — проверим при входе
+                prebans.append({
+                    'id':      uid,
+                    'name':    str(user),
+                    'avatar':  user.display_avatar.url,
+                    'reason':  reason,
+                    'by':      str(s['user_id']),
+                    'by_name': member.display_name,
+                    'at':      datetime.datetime.utcnow().isoformat(timespec='seconds'),
+                })
+            else:
+                return err('Bad request')
+            sec['prebans'] = prebans
+            await save_security(guild_id, log_ch, sec)
+
+        can_ban = bg.me.guild_permissions.ban_members if bg.me else False
+        return web.json_response({'prebans': prebans, 'can_ban': can_ban})
     except Exception as e:
         return _server_error(request, e)
 
@@ -2511,6 +2591,8 @@ def create_app(bot) -> web.Application:
         ('GET',  '/guild/{guild_id}/security/overview',     api_security_overview),
         ('GET',  '/guild/{guild_id}/log-whitelist',         api_log_whitelist),
         ('POST', '/guild/{guild_id}/log-whitelist',         api_log_whitelist),
+        ('GET',  '/guild/{guild_id}/prebans',               api_prebans),
+        ('POST', '/guild/{guild_id}/prebans',               api_prebans),
         ('POST', '/guild/{guild_id}/threats',               api_threats_save),
         ('POST', '/guild/{guild_id}/alert/{alert_id}/resolve', api_alert_resolve),
         ('GET',  '/guild/{guild_id}/protection',            api_protection),
