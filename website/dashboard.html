@@ -349,6 +349,13 @@ tr.resolved td { opacity: .55; }
 .search-result { padding: .6rem .75rem; border-radius: 7px; cursor: pointer; display: flex; align-items: center; gap: .7rem; border: 1px solid transparent; }
 .search-result:hover { background: var(--panel-2); border-color: var(--border-2); }
 .search-result img { width: 30px; height: 30px; border-radius: 50%; }
+.pb-row { display: flex; align-items: center; gap: .7rem; padding: .55rem 0; border-top: 1px solid var(--border); }
+.pb-row:first-child { border-top: 0; }
+.pb-row img, .pb-row .av-empty { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; background: var(--bg-3); }
+.pb-row .pb-main { flex: 1; min-width: 0; }
+.pb-row .pb-sub { font-size: .75rem; color: var(--muted); overflow-wrap: anywhere; }
+.pb-form { display: flex; gap: .5rem; flex-wrap: wrap; }
+.pb-form .input { flex: 1 1 180px; min-width: 0; }
 .search-result .av-empty { width: 30px; height: 30px; border-radius: 50%; background: var(--bg-3); flex-shrink: 0; }
 /* Инвайты */
 .stat-sub { font-size: .9rem; color: var(--muted); font-weight: 600; }
@@ -1503,6 +1510,31 @@ html.theme-anim *::before, html.theme-anim *::after {
             <div class="input-help">До 50 серверов.
               <a href="#" onclick="event.preventDefault(); lwCopyPartners();">Скопировать серверы-партнёры</a> из правил защиты выше.</div>
           </div>
+        </div>
+      </div>
+
+      <div class="card" data-admin-only>
+        <div class="card-head">
+          <div>
+            <div class="card-title">Предбан</div>
+            <div class="card-desc">Пользователи, которых нет на сервере: если зайдут — бот сразу забанит. Можно и забанить сразу, не дожидаясь входа. Раздел видят только администраторы</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="pbWarn" class="input-help" style="display:none; margin:0 0 .6rem; color:var(--danger);">У бота нет права «Банить участников» — предбан не сработает</div>
+          <div id="pbList" style="margin-bottom:.6rem;"></div>
+          <label for="pbUid">Добавить по UID</label>
+          <div class="pb-form">
+            <input type="text" class="input text-mono" id="pbUid" autocomplete="off" spellcheck="false" inputmode="numeric"
+                   placeholder="UID, например 123456789012345678" style="flex:0 1 230px;"
+                   onkeydown="if (event.key === 'Enter') { event.preventDefault(); pbAdd(); }">
+            <input type="text" class="input" id="pbReason" autocomplete="off" maxlength="300"
+                   placeholder="Причина (необязательно)"
+                   onkeydown="if (event.key === 'Enter') { event.preventDefault(); pbAdd(); }">
+            <button type="button" class="btn btn-ghost" onclick="btnBusy(this, pbAdd)">Добавить</button>
+            <button type="button" class="btn btn-danger" onclick="pbBanNow()">Забанить сразу</button>
+          </div>
+          <div class="input-help">«Добавить» — бан при входе. «Забанить сразу» — бан прямо сейчас, человеку не нужно заходить. После бана запись уходит из списка, дальше это обычный бан Discord. До 100 записей.</div>
         </div>
       </div>
 
@@ -2777,6 +2809,10 @@ function applyPermsToUI() {
   document.querySelectorAll('[data-perm]').forEach(el => {
     el.style.display = hasPerm(el.dataset.perm) ? '' : 'none';
   });
+  // Только право «Администратор» (Manage Server не хватает) — как проверяет сервер
+  document.querySelectorAll('[data-admin-only]').forEach(el => {
+    el.style.display = userPerms.administrator ? '' : 'none';
+  });
   const roleEl = document.querySelector('.user-info .role');
   if (roleEl) {
     roleEl.textContent =
@@ -2847,7 +2883,7 @@ async function showPage(name) {
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation') await loadAutomation();
   if (name === 'roles') await loadSelfRoles();
-  if (name === 'security') await Promise.all([loadSecurity(), loadProtection(), loadLogWhitelist()]);
+  if (name === 'security') await Promise.all([loadSecurity(), loadProtection(), loadLogWhitelist(), loadPrebans()]);
   if (name === 'moderation') await loadProtection();
   if (name === 'banreq') await loadBanRequests();
   if (name === 'invites') { invStateFromUrl(); await loadInvites(); }
@@ -3935,6 +3971,107 @@ async function lwSearch() {
       </div>`;
     }).join('');
   } catch(e) {}
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ПРЕДБАН — UID, которых бот забанит при входе на сервер
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _prebans = [];
+
+function pbApply(d) {
+  _prebans = (d && d.prebans) || [];
+  const warn = document.getElementById('pbWarn');
+  if (warn) warn.style.display = (d && d.can_ban === false) ? '' : 'none';
+  const box = document.getElementById('pbList');
+  if (!box) return;
+  if (!_prebans.length) {
+    box.innerHTML = '<div class="input-help" style="margin:0;">Список пуст</div>';
+    return;
+  }
+  box.innerHTML = _prebans.map(p => {
+    const when = p.at ? new Date(p.at + 'Z').toLocaleDateString('ru-RU') : '';
+    const meta = [p.reason ? escapeHtml(p.reason) : 'без причины',
+                  p.by_name ? 'добавил ' + escapeHtml(p.by_name) : '', when].filter(Boolean).join(' · ');
+    return `
+    <div class="pb-row">
+      ${p.avatar ? `<img src="${escapeHtml(p.avatar)}" alt="">` : '<span class="av-empty"></span>'}
+      <div class="pb-main">
+        <div style="font-weight:600; font-size:.88rem;">${escapeHtml(p.name || p.id)} <span class="text-mono" style="font-weight:400; font-size:.75rem; color:var(--muted);">${escapeHtml(p.id)}</span></div>
+        <div class="pb-sub">${meta}</div>
+      </div>
+      <button type="button" class="btn btn-danger" style="padding:.3rem .6rem;" aria-label="Забанить ${escapeHtml(p.name || p.id)} сейчас" onclick="pbBanNow('${escapeHtml(p.id)}')">Забанить</button>
+      <button type="button" class="btn btn-ghost" style="padding:.3rem .6rem;" aria-label="Убрать ${escapeHtml(p.name || p.id)} из предбана" onclick="btnBusy(this, () => pbPost({remove: '${escapeHtml(p.id)}'}))">Убрать</button>
+    </div>`;
+  }).join('');
+}
+
+async function loadPrebans() {
+  if (!currentGuild || !userPerms.administrator) return;
+  let d = null;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/prebans`);
+    if (r.ok) d = await r.json();
+  } catch(e) {}
+  pbApply(d);
+}
+
+async function pbPost(body) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/prebans`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) { showToast('Ошибка: ' + ((d && d.error) || r.status), 'error'); return false; }
+    pbApply(d);
+    showToast('✓ Сохранено', 'success');
+    return true;
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+    return false;
+  }
+}
+
+// Забанить сразу: из строки списка (id) или по UID из формы
+async function pbBanNow(id) {
+  const uidEl = document.getElementById('pbUid');
+  const whyEl = document.getElementById('pbReason');
+  const fromForm = !id;
+  if (fromForm) id = (uidEl?.value || '').replace(/[^0-9]/g, '');
+  if (!id) { showToast('Введите UID пользователя', 'error'); return; }
+  const entry = _prebans.find(p => p.id === id);
+  const who = entry ? `${entry.name} (${id})` : `UID ${id}`;
+  const wait = askAction({ title: 'Забанить сейчас?', okText: 'Забанить', danger: true,
+    sub: `${who} будет забанен на сервере, не дожидаясь входа.` });
+  const reasonEl = document.getElementById('actReason');
+  if (reasonEl) reasonEl.value = fromForm ? (whyEl?.value || '').trim() : (entry?.reason || '');
+  const ans = await wait;
+  if (!ans) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/prebans`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ban: {id, reason: ans.reason}})
+    });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) { showToast('Ошибка: ' + ((d && d.error) || r.status), 'error'); loadPrebans(); return; }
+    pbApply(d);
+    showToast(`✓ ${d.banned || 'Пользователь'} забанен`, 'success');
+    if (fromForm) { uidEl.value = ''; whyEl.value = ''; }
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
+  }
+}
+
+async function pbAdd() {
+  const uid = document.getElementById('pbUid');
+  const why = document.getElementById('pbReason');
+  const id = (uid?.value || '').replace(/[^0-9]/g, '');
+  if (!id) { showToast('Введите UID пользователя', 'error'); return; }
+  if (await pbPost({add: {id, reason: (why?.value || '').trim()}})) {
+    uid.value = ''; why.value = '';
+  }
 }
 
 async function loadSecurity() {
