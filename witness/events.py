@@ -693,12 +693,19 @@ async def on_audit_log_entry_create(entry):
 #  к его файлам на CDN, поэтому скачивать их в on_message_delete
 #  уже поздно. Файлы скачиваются заранее, когда сообщение пришло
 #  (только на серверах с включённым логом удалений), и лежат в
-#  памяти. Общий объём ограничен, старые файлы вытесняются первыми.
+#  памяти. Общий объём ограничен, старые файлы вытесняются первыми,
+#  а файлы старше MEDIA_CACHE_TTL выбрасываются (memory_cleanup_loop):
+#  RAM на Railway платная, а удаляют сообщения обычно вскоре после отправки.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-_media_cache: "OrderedDict[int, list]" = OrderedDict()   # message_id → {attachment_id: bytes}
+# message_id → (время скачивания, {attachment_id: bytes}); порядок — по времени
+_media_cache: "OrderedDict[int, tuple]" = OrderedDict()
 _media_cache_bytes = 0
-MEDIA_CACHE_MAX   = int(os.getenv("DELETED_MEDIA_CACHE_MB", "200")) * 1024 * 1024
+MEDIA_CACHE_MAX   = int(os.getenv("DELETED_MEDIA_CACHE_MB", "64")) * 1024 * 1024
+MEDIA_CACHE_TTL   = float(os.getenv("DELETED_MEDIA_TTL_HOURS", "6")) * 3600
 MEDIA_FILE_MAX    = 25 * 1024 * 1024    # больше бот всё равно не загрузит
+# Крупнее не кэшируем (обычно это видео — они и съедали RAM). При удалении
+# такой файл попадёт в лог названием и размером
+MEDIA_CACHE_FILE_MAX = int(os.getenv("DELETED_MEDIA_FILE_MB", "8")) * 1024 * 1024
 
 
 async def _cache_attachments(message):
@@ -706,7 +713,7 @@ async def _cache_attachments(message):
     try:
         if not await sec_check(message.guild, "msg_delete", message.author):
             return
-        limit = min(MEDIA_FILE_MAX, message.guild.filesize_limit)
+        limit = min(MEDIA_CACHE_FILE_MAX, MEDIA_FILE_MAX, message.guild.filesize_limit)
         files = {}
         for att in message.attachments:
             if att.size > limit:
@@ -717,18 +724,28 @@ async def _cache_attachments(message):
                 pass
         if not files:
             return
-        _media_cache[message.id] = files
+        _media_cache[message.id] = (time.time(), files)
         _media_cache_bytes += sum(map(len, files.values()))
-        while _media_cache_bytes > MEDIA_CACHE_MAX and _media_cache:
-            _, old = _media_cache.popitem(last=False)
-            _media_cache_bytes -= sum(map(len, old.values()))
+        prune_media_cache()
     except Exception as ex:
         print(f"[MEDIA_CACHE] {ex}")
 
 
+def prune_media_cache():
+    """Выкидывает самые старые файлы: сверх лимита объёма и старше MEDIA_CACHE_TTL."""
+    global _media_cache_bytes
+    expire = time.time() - MEDIA_CACHE_TTL
+    while _media_cache:
+        ts, old = next(iter(_media_cache.values()))
+        if _media_cache_bytes <= MEDIA_CACHE_MAX and ts >= expire:
+            break
+        _media_cache.popitem(last=False)
+        _media_cache_bytes -= sum(map(len, old.values()))
+
+
 def _pop_cached_media(message_id):
     global _media_cache_bytes
-    files = _media_cache.pop(message_id, None) or {}
+    _, files = _media_cache.pop(message_id, None) or (0, {})
     _media_cache_bytes -= sum(map(len, files.values()))
     return files
 

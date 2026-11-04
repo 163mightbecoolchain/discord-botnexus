@@ -112,6 +112,9 @@ async def memory_cleanup_loop(bot_instance):
             # Счётчики дубликатов и «нагрева» (witness/guard.py)
             from .guard import cleanup_memory
             cleanup_memory()
+            # Кэш вложений для лога удалений: файлы старше срока (witness/events.py)
+            from .events import prune_media_cache
+            prune_media_cache()
             # ── Очистка старых данных (раз в сутки) ─────────────
             if not hasattr(bot, '_last_db_cleanup') or                time.time() - bot._last_db_cleanup > 86400:
                 bot._last_db_cleanup = time.time()
