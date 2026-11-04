@@ -703,6 +703,9 @@ _media_cache_bytes = 0
 MEDIA_CACHE_MAX   = int(os.getenv("DELETED_MEDIA_CACHE_MB", "64")) * 1024 * 1024
 MEDIA_CACHE_TTL   = float(os.getenv("DELETED_MEDIA_TTL_HOURS", "6")) * 3600
 MEDIA_FILE_MAX    = 25 * 1024 * 1024    # больше бот всё равно не загрузит
+# Крупнее не кэшируем (обычно это видео — они и съедали RAM). При удалении
+# такой файл попадёт в лог названием и размером
+MEDIA_CACHE_FILE_MAX = int(os.getenv("DELETED_MEDIA_FILE_MB", "8")) * 1024 * 1024
 
 
 async def _cache_attachments(message):
@@ -710,7 +713,7 @@ async def _cache_attachments(message):
     try:
         if not await sec_check(message.guild, "msg_delete", message.author):
             return
-        limit = min(MEDIA_FILE_MAX, message.guild.filesize_limit)
+        limit = min(MEDIA_CACHE_FILE_MAX, MEDIA_FILE_MAX, message.guild.filesize_limit)
         files = {}
         for att in message.attachments:
             if att.size > limit:
