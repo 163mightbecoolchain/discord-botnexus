@@ -1513,11 +1513,11 @@ html.theme-anim *::before, html.theme-anim *::after {
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" data-admin-only>
         <div class="card-head">
           <div>
             <div class="card-title">Предбан</div>
-            <div class="card-desc">Пользователи, которых нет на сервере: если зайдут — бот сразу забанит. Изменения сохраняются сразу</div>
+            <div class="card-desc">Пользователи, которых нет на сервере: если зайдут — бот сразу забанит. Можно и забанить сразу, не дожидаясь входа. Раздел видят только администраторы</div>
           </div>
         </div>
         <div class="card-body">
@@ -1532,8 +1532,9 @@ html.theme-anim *::before, html.theme-anim *::after {
                    placeholder="Причина (необязательно)"
                    onkeydown="if (event.key === 'Enter') { event.preventDefault(); pbAdd(); }">
             <button type="button" class="btn btn-ghost" onclick="btnBusy(this, pbAdd)">Добавить</button>
+            <button type="button" class="btn btn-danger" onclick="pbBanNow()">Забанить сразу</button>
           </div>
-          <div class="input-help">После бана запись уходит из списка, дальше это обычный бан Discord. До 100 записей.</div>
+          <div class="input-help">«Добавить» — бан при входе. «Забанить сразу» — бан прямо сейчас, человеку не нужно заходить. После бана запись уходит из списка, дальше это обычный бан Discord. До 100 записей.</div>
         </div>
       </div>
 
@@ -2808,6 +2809,10 @@ function applyPermsToUI() {
   document.querySelectorAll('[data-perm]').forEach(el => {
     el.style.display = hasPerm(el.dataset.perm) ? '' : 'none';
   });
+  // Только право «Администратор» (Manage Server не хватает) — как проверяет сервер
+  document.querySelectorAll('[data-admin-only]').forEach(el => {
+    el.style.display = userPerms.administrator ? '' : 'none';
+  });
   const roleEl = document.querySelector('.user-info .role');
   if (roleEl) {
     roleEl.textContent =
@@ -3994,13 +3999,14 @@ function pbApply(d) {
         <div style="font-weight:600; font-size:.88rem;">${escapeHtml(p.name || p.id)} <span class="text-mono" style="font-weight:400; font-size:.75rem; color:var(--muted);">${escapeHtml(p.id)}</span></div>
         <div class="pb-sub">${meta}</div>
       </div>
+      <button type="button" class="btn btn-danger" style="padding:.3rem .6rem;" aria-label="Забанить ${escapeHtml(p.name || p.id)} сейчас" onclick="pbBanNow('${escapeHtml(p.id)}')">Забанить</button>
       <button type="button" class="btn btn-ghost" style="padding:.3rem .6rem;" aria-label="Убрать ${escapeHtml(p.name || p.id)} из предбана" onclick="btnBusy(this, () => pbPost({remove: '${escapeHtml(p.id)}'}))">Убрать</button>
     </div>`;
   }).join('');
 }
 
 async function loadPrebans() {
-  if (!currentGuild) return;
+  if (!currentGuild || !userPerms.administrator) return;
   let d = null;
   try {
     const r = await apiFetch(`/api/guild/${currentGuild.id}/prebans`);
@@ -4024,6 +4030,37 @@ async function pbPost(body) {
   } catch(e) {
     showToast('Ошибка соединения', 'error');
     return false;
+  }
+}
+
+// Забанить сразу: из строки списка (id) или по UID из формы
+async function pbBanNow(id) {
+  const uidEl = document.getElementById('pbUid');
+  const whyEl = document.getElementById('pbReason');
+  const fromForm = !id;
+  if (fromForm) id = (uidEl?.value || '').replace(/[^0-9]/g, '');
+  if (!id) { showToast('Введите UID пользователя', 'error'); return; }
+  const entry = _prebans.find(p => p.id === id);
+  const who = entry ? `${entry.name} (${id})` : `UID ${id}`;
+  const wait = askAction({ title: 'Забанить сейчас?', okText: 'Забанить', danger: true,
+    sub: `${who} будет забанен на сервере, не дожидаясь входа.` });
+  const reasonEl = document.getElementById('actReason');
+  if (reasonEl) reasonEl.value = fromForm ? (whyEl?.value || '').trim() : (entry?.reason || '');
+  const ans = await wait;
+  if (!ans) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/prebans`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ban: {id, reason: ans.reason}})
+    });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) { showToast('Ошибка: ' + ((d && d.error) || r.status), 'error'); loadPrebans(); return; }
+    pbApply(d);
+    showToast(`✓ ${d.banned || 'Пользователь'} забанен`, 'success');
+    if (fromForm) { uidEl.value = ''; whyEl.value = ''; }
+  } catch(e) {
+    showToast('Ошибка соединения', 'error');
   }
 }
 
