@@ -25,13 +25,10 @@ INVITE_RE = re.compile(
 MAX_CODES = 5                 # больше кодов в одном сообщении не проверяем
 RESOLVE_TTL = 60 * 60
 ALERT_COOLDOWN = 10 * 60      # один участник + один чужой сервер — не чаще раза в 10 минут
-NOTICE_COOLDOWN = 30          # предупреждение в канале после удаления — не чаще раза в 30 с
-NOTICE_TTL = 8                # через сколько секунд предупреждение само исчезает
 
 # код → (время, id сервера или 0 для мёртвой ссылки, название сервера)
 _resolved: dict = {}
 _last_alert: dict = {}
-_last_notice: dict = {}
 # id сообщений, которые удалил этот модуль, → время. Лог удалений (events.py) их
 # пропускает: в лог-канал уже ушла карточка про инвайт.
 _deleted_by_us: dict = {}
@@ -62,17 +59,6 @@ async def _delete(message: discord.Message):
     except discord.HTTPException as ex:
         _deleted_by_us.pop(message.id, None)
         return False, f"Discord не дал удалить: {ex.status}"
-    key = (message.guild.id, message.author.id)
-    if now - _last_notice.get(key, 0) >= NOTICE_COOLDOWN:
-        _last_notice[key] = now
-        if len(_last_notice) > 5000:
-            _last_notice.clear()
-        try:
-            await message.channel.send(
-                f"{message.author.mention}, ссылки-приглашения на другие серверы здесь запрещены.",
-                delete_after=NOTICE_TTL, allowed_mentions=discord.AllowedMentions(users=[message.author]))
-        except discord.HTTPException:
-            pass
     return True, None
 
 
