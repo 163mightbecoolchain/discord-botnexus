@@ -1002,6 +1002,7 @@ async def api_security_overview(request):
         'invite_allow_names': {i: known[i] for i in threats['invite_allow_guilds'] if i in known},
         'log_channel': str(log_ch.id) if log_ch else None,
         'message_content': intents.message_content,
+        'can_delete_messages': bg.me.guild_permissions.manage_messages,
         'alerts':    alerts,
         'alerts_7d': week,
         'alerts_open_7d': open_count,
@@ -1010,7 +1011,7 @@ async def api_security_overview(request):
 @require_auth
 async def api_threats_save(request):
     """POST /api/guild/:id/threats — режимы {phishing|suspicious|spam|custom: off|alert|block,
-    invites: off|alert|ping}, exempt_roles / exempt_channels (id), custom_words (свои слова),
+    invites: off|alert|ping|delete}, exempt_roles / exempt_channels (id), custom_words (свои слова),
     invite_ping_roles (id) и invite_allow_guilds (id или инвайт-ссылки серверов-партнёров)."""
     guild_id = int(request.match_info['guild_id'])
     s        = request['session']

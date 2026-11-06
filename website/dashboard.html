@@ -1442,7 +1442,7 @@ html.theme-anim *::before, html.theme-anim *::after {
               <label for="invAllow">Серверы-партнёры — по одному на строку</label>
               <textarea class="textarea" id="invAllow" rows="3" spellcheck="false"
                 placeholder="https://discord.gg/partner&#10;123456789012345678"></textarea>
-              <div class="input-help">Инвайт-ссылка или ID сервера. Ссылки на эти серверы алерт не вызывают.</div>
+              <div class="input-help">Инвайт-ссылка или ID сервера. Ссылки на эти серверы не вызывают алерт и не удаляются.</div>
               <div id="invAllowErr"></div>
             </div>
           </div>
@@ -3303,11 +3303,11 @@ const THREATS = [
   ['suspicious', 'подозрительные сообщения', 'Скам',          'Фейковые раздачи Nitro и Steam, крипто-схемы «удвою», ссылки с подменой букв'],
   ['spam',       'спам',                     'Спам',          'Встроенный детектор спама Discord и повтор одного и того же текста'],
   ['custom',     'свои слова',               'Свои слова',    'Слова и домены, которые запрещены именно на этом сервере — список ниже'],
-  ['invites',    null,                       'Чужие инвайты', 'Ссылки discord.gg, которые ведут не на этот сервер. Сообщение не удаляется: только алерт или пинг модераторов'],
+  ['invites',    null,                       'Чужие инвайты', 'Ссылки discord.gg, которые ведут не на этот сервер: алерт, пинг модераторов или автоудаление сообщения. Сообщения модераторов не удаляются'],
 ];
 const MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['block', 'Блок']];
-// Чужие инвайты не блокируются — вместо «Блок» пинг ролей
-const INVITE_MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['ping', 'Пинг']];
+// Чужие инвайты: вместо «Блок» — пинг ролей или удаление сообщения ботом
+const INVITE_MODE_LABELS = [['off', 'Выкл'], ['alert', 'Алерт'], ['ping', 'Пинг'], ['delete', 'Удалять']];
 let _threats = {}, _secData = null, _exempt = { roles: [], channels: [] }, _invitePing = [];
 
 function renderInvitePing() {
@@ -3513,6 +3513,8 @@ function renderThreats() {
       if (_threats[key] === 'off') status = '<span class="chip">выключено</span>';
       else if (!d.message_content) status = '<span class="chip warn">нужен Message Content Intent</span>';
       else if (_threats[key] === 'ping' && !_invitePing.length) status = '<span class="chip warn">выберите роли для пинга ниже</span>';
+      else if (_threats[key] === 'delete' && !d.can_delete_messages) status = '<span class="chip warn">у бота нет права «Управлять сообщениями»</span>';
+      else if (_threats[key] === 'delete') status = '<span class="chip ok">бот удаляет сообщения</span>';
       else status = '<span class="chip">проверяет сам бот</span>';
     }
     else if (r) status = `<span class="chip ok">AutoMod: ${[r.blocks ? 'блокирует' : '', r.alerts ? 'алерт' : ''].filter(Boolean).join(' + ')}</span>`;
