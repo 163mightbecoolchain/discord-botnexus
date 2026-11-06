@@ -856,7 +856,9 @@ async def _message_deleter(message):
 
 @bot.event
 async def on_message_delete(message):
-    if message.author.bot or not message.guild:
+    from .foreign_invites import deleted_by_witness
+    if message.author.bot or not message.guild or deleted_by_witness(message.id):
+        # Инвайт на чужой сервер, удалённый ботом, уже залогирован карточкой инвайта
         _pop_cached_media(message.id)
         return
     ch = await sec_check(message.guild, "msg_delete", message.author)

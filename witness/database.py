@@ -456,9 +456,10 @@ async def save_security(gid, log_channel, settings):
 # block — блокировать сообщение и прислать алерт. Применяются в automod.py
 # (правила AutoMod) и в security_module.py (проверка текста самим ботом).
 THREAT_MODES   = ("off", "alert", "block")
-# invites — инвайты на чужие серверы (witness/foreign_invites.py). Сообщение не
-# блокируется: alert — алерт в лог-канал, ping — алерт с пингом ролей модераторов.
-INVITE_MODES   = ("off", "alert", "ping")
+# invites — инвайты на чужие серверы (witness/foreign_invites.py): alert — алерт
+# в лог-канал, ping — алерт с пингом ролей модераторов, delete — удалить сообщение и
+# написать в лог-канал (сообщения модераторов не удаляются, по ним только алерт).
+INVITE_MODES   = ("off", "alert", "ping", "delete")
 # custom — свой список слов и доменов сервера (правило «свои слова»)
 DEFAULT_THREATS = {"phishing": "block", "suspicious": "alert", "spam": "alert", "custom": "off",
                    "invites": "alert"}

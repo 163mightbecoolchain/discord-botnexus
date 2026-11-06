@@ -6,8 +6,10 @@ AutoMod так не умеет: он ищет текст, а не смотрит
   1) достаёт из сообщения коды discord.gg/…, discord.com/invite/…;
   2) код из кэша инвайтов сервера или его vanity — свой, дальше не смотрим;
   3) остальное спрашивает у Discord (fetch_invite) и запоминает ответ на час.
-Сообщение не удаляется: режим alert — алерт в лог-канал, ping — то же с пингом
-ролей модераторов. Мёртвые ссылки и серверы-партнёры из списка пропускаются.
+Режим alert — алерт в лог-канал, ping — то же с пингом ролей модераторов,
+delete — бот удаляет сообщение (нужно право «Управлять сообщениями») и пишет в
+лог-канал. Сообщения модераторов (Manage Messages / Administrator) не удаляются —
+по ним только алерт. Мёртвые ссылки и серверы-партнёры из списка пропускаются.
 """
 
 import re
@@ -23,10 +25,55 @@ INVITE_RE = re.compile(
 MAX_CODES = 5                 # больше кодов в одном сообщении не проверяем
 RESOLVE_TTL = 60 * 60
 ALERT_COOLDOWN = 10 * 60      # один участник + один чужой сервер — не чаще раза в 10 минут
+NOTICE_COOLDOWN = 30          # предупреждение в канале после удаления — не чаще раза в 30 с
+NOTICE_TTL = 8                # через сколько секунд предупреждение само исчезает
 
 # код → (время, id сервера или 0 для мёртвой ссылки, название сервера)
 _resolved: dict = {}
 _last_alert: dict = {}
+_last_notice: dict = {}
+# id сообщений, которые удалил этот модуль, → время. Лог удалений (events.py) их
+# пропускает: в лог-канал уже ушла карточка про инвайт.
+_deleted_by_us: dict = {}
+
+
+def deleted_by_witness(message_id: int) -> bool:
+    return _deleted_by_us.pop(message_id, None) is not None
+
+
+def _is_moderator(member) -> bool:
+    p = getattr(member, "guild_permissions", None)
+    return bool(p and (p.administrator or p.manage_messages))
+
+
+async def _delete(message: discord.Message):
+    """(удалено ли, причина, если нет)."""
+    if not message.channel.permissions_for(message.guild.me).manage_messages:
+        return False, "у бота нет права «Управлять сообщениями» в этом канале"
+    now = time.time()
+    if len(_deleted_by_us) > 500:
+        for k in [k for k, t in _deleted_by_us.items() if now - t > 60]:
+            _deleted_by_us.pop(k, None)
+    _deleted_by_us[message.id] = now
+    try:
+        await message.delete()
+    except discord.NotFound:
+        pass                        # уже удалили — считаем удалённым
+    except discord.HTTPException as ex:
+        _deleted_by_us.pop(message.id, None)
+        return False, f"Discord не дал удалить: {ex.status}"
+    key = (message.guild.id, message.author.id)
+    if now - _last_notice.get(key, 0) >= NOTICE_COOLDOWN:
+        _last_notice[key] = now
+        if len(_last_notice) > 5000:
+            _last_notice.clear()
+        try:
+            await message.channel.send(
+                f"{message.author.mention}, ссылки-приглашения на другие серверы здесь запрещены.",
+                delete_after=NOTICE_TTL, allowed_mentions=discord.AllowedMentions(users=[message.author]))
+        except discord.HTTPException:
+            pass
+    return True, None
 
 
 def invite_codes(text: str) -> list:
@@ -88,6 +135,14 @@ async def check_message(message: discord.Message, modes: dict):
     if mode == "off" or not message.content:
         return
     found = await find_foreign(message.guild, message.content, set(modes.get("invite_allow_guilds") or []))
+    if not found:
+        return
+    deleted, why_not = False, None
+    if mode == "delete":
+        if _is_moderator(message.author):
+            why_not = "автор — модератор"
+        else:
+            deleted, why_not = await _delete(message)
     now = time.time()
     fresh = []
     for f in found:
@@ -105,10 +160,11 @@ async def check_message(message: discord.Message, modes: dict):
     try:
         from security_module import create_alert
         await create_alert(message.guild.id, "foreign_invite", "MEDIUM", message.author.id,
-                           f"Инвайт на чужой сервер: {first['guild_name'] or first['guild_id']}",
+                           f"Инвайт на чужой сервер: {first['guild_name'] or first['guild_id']}"
+                           + (" — удалено" if deleted else ""),
                            {"source": "bot", "matched": " ".join(f"discord.gg/{f['code']}" for f in fresh),
                             "servers": fresh, "channel_id": message.channel.id,
-                            "message_id": message.id})
+                            "message_id": message.id, "deleted": deleted})
     except Exception as ex:
         print(f"[INVITES] alert: {ex}")
 
@@ -116,13 +172,19 @@ async def check_message(message: discord.Message, modes: dict):
     if not ch:
         return
     e = discord.Embed(color=C.WARNING, timestamp=discord.utils.utcnow(),
-                      description=f"[Перейти к сообщению]({message.jump_url})")
-    e.set_author(name="🔗 Инвайт на чужой сервер")
+                      description=None if deleted else f"[Перейти к сообщению]({message.jump_url})")
+    e.set_author(name="🔗 Инвайт на чужой сервер" + (" — удалён" if deleted else ""))
     e.add_field(name="Автор", value=f"{message.author.mention} (`{message.author.id}`)", inline=True)
     e.add_field(name="Канал", value=message.channel.mention, inline=True)
     e.add_field(name="Куда ведёт", value=servers[:1000], inline=False)
     e.add_field(name="Сообщение", value=message.content[:500], inline=False)
-    e.set_footer(text="Witness Security · сообщение не удалено")
+    if deleted:
+        footer = "сообщение удалено"
+    elif why_not:
+        footer = f"сообщение не удалено: {why_not}"
+    else:
+        footer = "сообщение не удалено"
+    e.set_footer(text=f"Witness Security · {footer}")
     content, mentions = None, discord.AllowedMentions.none()
     if mode == "ping":
         roles = [r for r in (message.guild.get_role(int(x)) for x in modes.get("invite_ping_roles") or []
