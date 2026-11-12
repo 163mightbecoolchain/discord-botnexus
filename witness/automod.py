@@ -54,14 +54,21 @@ PHISHING_REGEX = [
     r"(?i)\bdiscord(?:app)?\.(?:com|gg|gift)\.[a-z]{2,}",
 ]
 
+# AutoMod не умеет проверять, куда ведёт ссылка, поэтому приманки ловим только
+# вместе со ссылкой в той же строке, а «free … steam» (бесплатные игры в Steam —
+# обычное дело) не ловим вовсе. Крипто-слова — только целиком (\b): без этого
+# «eth» находилось в «something», «method».
+# Ссылка, чей домен не начинается с «discord» (настоящие подарки — discord.gift;
+# подделки вроде discord-gift.xyz ловит PHISHING_REGEX). Lookahead в Rust нет.
+_LINK_NOT_DISCORD = (r"https?://(?:www\.)?(?:[^d\s]|d[^i\s]|di[^s\s]|dis[^c\s]|disc[^o\s]"
+                     r"|disco[^r\s]|discor[^d\s])")
 SUSPICIOUS_REGEX = [
-    r"(?i)(?:free|бесплатн)[^\n]{0,40}nitro|nitro[^\n]{0,40}(?:free|бесплатн)",
-    r"(?i)claim[^\n]{0,30}nitro|nitro[^\n]{0,30}claim",
-    r"(?i)free[^\n]{0,30}steam",
-    r"(?i)send.{1,20}(?:btc|eth|usdt|crypto).{1,20}(?:back|return|double)",
-    r"(?i)(?:double|2x|triple).{1,30}(?:bitcoin|eth|crypto)",
-    r"(?i)investment.{1,50}(?:profit|return|guarantee)",
-    r"(?i)(?:dm|message).{1,20}(?:profit|earn|make money)",
+    r"(?i)(?:free|бесплатн|claim)[^\n]{0,40}nitro[^\n]{0,200}" + _LINK_NOT_DISCORD,
+    r"(?i)" + _LINK_NOT_DISCORD + r"[^\n]{0,200}(?:free|бесплатн|claim)[^\n]{0,40}nitro",
+    r"(?i)nitro[^\n]{0,40}(?:free|бесплатн|claim)[^\n]{0,200}" + _LINK_NOT_DISCORD,
+    r"(?i)\bsend\b[^\n]{1,20}\b(?:btc|eth|usdt|bitcoin|crypto)\b[^\n]{1,20}\b(?:back|return|double)",
+    r"(?i)\b(?:double|2x|triple)\b[^\n]{1,30}\b(?:btc|eth|usdt|bitcoin|crypto)\b",
+    r"(?i)\binvest\w*[^\n]{1,50}\b(?:btc|eth|usdt|bitcoin|crypto)\b",
     # латиница вперемешку с похожими кириллическими/греческими буквами в адресе
     r"(?i)https?://[^\s/]*(?:[a-z][аеорсхуνωκρο]|[аеорсхуνωκρο][a-z])[^\s/]*",
 ]
