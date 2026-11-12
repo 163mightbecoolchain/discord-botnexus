@@ -806,11 +806,44 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
     # ── Слушатели событий ─────────────────────────────────────
 
+    @staticmethod
+    async def _modes_for(message: discord.Message):
+        """Режимы угроз из дашборда для сообщения, или None, если автор/канал
+        в исключениях: белый список, роли и каналы-исключения (как в AutoMod)."""
+        if _lists_cache[message.guild.id].get(message.author.id) == "white":
+            return None
+        from witness.database import get_threat_config
+        modes = await get_threat_config(message.guild.id)
+        ex_roles = set(modes["exempt_roles"])
+        if (str(message.channel.id) in modes["exempt_channels"]
+                or str(getattr(message.channel, "category_id", "")) in modes["exempt_channels"]
+                or any(str(r.id) in ex_roles for r in getattr(message.author, "roles", []))):
+            return None
+        return modes
+
+    @staticmethod
+    async def _check_invites(message: discord.Message, modes: dict, edited: bool = False):
+        """Инвайты на чужие серверы — алерт, пинг или удаление (witness/foreign_invites.py)."""
+        if not message.content or modes["invites"] == "off":
+            return
+        try:
+            from witness.foreign_invites import check_message
+            await check_message(message, modes, edited=edited)
+        except Exception as ex:
+            print(f"[INVITES] check: {ex}")
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
 
         gid, uid = message.guild.id, message.author.id
+
+        modes = await self._modes_for(message)
+        if modes is None:
+            return
+
+        # Инвайты проверяем всегда, даже у «команд»: иначе «-discord.gg/…» проходит мимо
+        await self._check_invites(message, modes)
 
         # Пропускаем команды — не анализируем как контент
         # НО не делаем return — process_commands должен их получить
@@ -818,33 +851,12 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
         if is_command:
             return  # просто не анализируем, process_commands в main.py сделает своё дело
 
-        # Проверяем whitelist
-        if _lists_cache[gid].get(uid) == "white": return
-
-        # Режимы угроз из дашборда: выключенное правило не проверяем,
-        # роли и каналы-исключения не проверяем вовсе (как в AutoMod)
-        from witness.database import get_threat_config
-        modes = await get_threat_config(gid)
-        ex_roles = set(modes["exempt_roles"])
-        if (str(message.channel.id) in modes["exempt_channels"]
-                or str(getattr(message.channel, "category_id", "")) in modes["exempt_channels"]
-                or any(str(r.id) in ex_roles for r in getattr(message.author, "roles", []))):
-            return
-
         # Проверка дублирования контента
         if message.content and modes["spam"] != "off":
             dup = await check_duplicate_content(gid, uid, message.content)
             if dup["is_duplicate"]:
                 await create_alert(gid, "duplicate_content", dup["severity"],
                                    uid, f"Дублирует контент {dup['count']} раз за час")
-
-        # Инвайты на чужие серверы — алерт, пинг или удаление (witness/foreign_invites.py)
-        if message.content and modes["invites"] != "off":
-            try:
-                from witness.foreign_invites import check_message
-                await check_message(message, modes)
-            except Exception as ex:
-                print(f"[INVITES] check: {ex}")
 
         # Проверка фишинга и скама
         if message.content:
@@ -873,6 +885,29 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                     if exif_warns:
                         await create_alert(gid, "image_gps_metadata", "MEDIUM", uid,
                                            "Изображение содержит GPS координаты в EXIF")
+
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        """Инвайт, добавленный правкой: «123» → «123 discord.gg/…». raw — чтобы ловить
+        и сообщения, которых уже нет в кэше бота."""
+        message = payload.message
+        if not message.guild or message.author.bot or not message.content:
+            return
+        from witness.foreign_invites import invite_codes
+        new_codes = set(invite_codes(message.content))
+        before = payload.cached_message
+        if before is not None:
+            # Старые инвайты уже проверены при отправке — интересны только добавленные
+            new_codes -= set(invite_codes(before.content))
+        elif (message.edited_at is None
+              or (discord.utils.utcnow() - message.edited_at).total_seconds() > 120):
+            # Discord шлёт обновление и когда подгружает превью ссылки — это не правка
+            return
+        if not new_codes:
+            return
+        modes = await self._modes_for(message)
+        if modes is not None:
+            await self._check_invites(message, modes, edited=True)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
