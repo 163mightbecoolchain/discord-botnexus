@@ -202,26 +202,37 @@ async def log_signed_action(guild_id: int, mod_id: int, action_type: str,
 #  СОЦИАЛЬНАЯ ИНЖЕНЕРИЯ
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Список подозрительных фишинговых паттернов
-PHISHING_PATTERNS = [
-    # discord.com.<домен>, discord.gg.<домен> — настоящие discord.gift/discord.com не трогаем
-    r"discord(?:app)?\.(?:com|gg|gift)\.[a-z]{2,}",
-    r"discordnitro\.(?!com)",
-    r"steamcommunity\.(?!com)",
-    r"free.*nitro",
-    r"nitro.*free",
-    r"claim.*nitro",
-    r"nitro.*claim",
-    r"@everyone.*http",
-    r"free.*steam",
+# Фишинг = сама ссылка поддельная (опечатки в discord/steamcommunity, discord.com.evil.xyz…).
+# Список общий с правилом AutoMod — witness/automod.py PHISHING_REGEX.
+#
+# Приманки («free nitro», «@everyone») без ссылки безвредны, а со ссылкой на
+# известный сайт (youtube, steampowered…) — обычные сообщения. Поэтому они
+# срабатывают только вместе со ссылкой на домен не из LURE_SAFE_DOMAINS.
+LURE_PATTERNS = [
+    r"(?:free|бесплатн)[^\n]{0,40}nitro|nitro[^\n]{0,40}(?:free|бесплатн)",
+    r"claim[^\n]{0,30}nitro|nitro[^\n]{0,30}claim",
+    r"\bfree[^\n]{0,30}\bsteam\b",
+    r"@everyone|@here",
+]
+LURE_SAFE_DOMAINS = {
+    "discord.com", "discord.gg", "discord.gift", "discordapp.com", "discordapp.net", "discord.media",
+    "steamcommunity.com", "steampowered.com", "youtube.com", "youtu.be", "twitch.tv", "github.com",
+    "google.com", "wikipedia.org", "reddit.com", "x.com", "twitter.com", "tenor.com", "giphy.com",
+    "imgur.com", "spotify.com", "t.me", "vk.com", "albiononline.com", "tiktok.com", "instagram.com",
+    "epicgames.com", "roblox.com", "gog.com", "humblebundle.com",
+}
+
+# Крипто-скам. \b обязательны: без них «eth» находилось в «something», «method».
+_CRYPTO = r"\b(?:btc|eth|usdt|bitcoin|crypto|крипт\w*)\b"
+SCAM_PATTERNS = [
+    r"\bsend\b[^\n]{1,20}" + _CRYPTO + r"[^\n]{1,20}\b(?:back|return|double)",
+    r"\b(?:double|2x|triple)\b[^\n]{1,30}" + _CRYPTO,
+    r"\binvest\w*[^\n]{1,50}" + _CRYPTO + r"|" + _CRYPTO + r"[^\n]{1,50}\binvest\w*",
 ]
 
-SCAM_PATTERNS = [
-    r"send.{1,20}(?:btc|eth|usdt|crypto).{1,20}(?:back|return|double)",
-    r"(?:double|2x|triple).{1,30}(?:bitcoin|eth|crypto)",
-    r"investment.{1,50}(?:profit|return|guarantee)",
-    r"(?:dm|message).{1,20}(?:profit|earn|make money)",
-]
+URL_HOST_RE = re.compile(r"(?:https?://|\bwww\.)([^\s/?#<>:@]+)", re.I)
+# латиница вперемешку с похожими кириллическими/греческими буквами в одной части домена
+_MIXED_LABEL_RE = re.compile(r"(?i)[a-z][аеорсхуνωκρο]|[аеорсхуνωκρο][a-z]")
 
 # Unicode символы которые выглядят как ASCII
 CONFUSABLES = {
@@ -282,22 +293,46 @@ def _similarity(a: str, b: str) -> float:
     return len(bg_a & bg_b) / len(bg_a | bg_b)
 
 
+def url_hosts(text: str) -> list[str]:
+    """Домены ссылок из текста (только ссылки с http(s):// или www.)."""
+    return list(dict.fromkeys(h.lower().rstrip(".") for h in URL_HOST_RE.findall(text or "")))
+
+
+def _is_safe_host(host: str) -> bool:
+    parts = host.split(".")
+    return any(".".join(parts[i:]) in LURE_SAFE_DOMAINS for i in range(len(parts) - 1))
+
+
 def check_phishing(text: str) -> list[dict]:
-    """Проверяет текст на фишинг/скам паттерны"""
+    """Фишинг/скам в тексте: [{type, ...}]. type — phishing (поддельная ссылка),
+    unicode_spoofing (домен с подменой букв), scam (приманка со сторонней ссылкой, крипто-скам)."""
+    from witness.automod import PHISHING_REGEX
     findings = []
-    text_lower = text.lower()
-    for pattern in PHISHING_PATTERNS:
-        if re.search(pattern, text_lower):
-            findings.append({"type": "phishing", "pattern": pattern, "severity": "HIGH"})
+    text_lower = (text or "").lower()
+    for pattern in PHISHING_REGEX:
+        m = re.search(pattern, text_lower)
+        if m:
+            findings.append({"type": "phishing", "match": m.group(0), "severity": "HIGH"})
+            break
+    hosts = url_hosts(text)
+    # Подмена букв — только в домене и только вперемешку с латиницей в одной части:
+    # кириллица в пути (ru.wikipedia.org/wiki/Москва) и домены .рф — норма.
+    for host in hosts:
+        if any(_MIXED_LABEL_RE.search(label) for label in host.split(".")):
+            findings.append({"type": "unicode_spoofing", "url": host, "severity": "CRITICAL"})
+            break
+    unknown = [h for h in hosts if not _is_safe_host(h)]
+    if unknown:
+        for pattern in LURE_PATTERNS:
+            m = re.search(pattern, text_lower)
+            if m:
+                findings.append({"type": "scam", "match": m.group(0), "url": unknown[0], "severity": "HIGH"})
+                break
     for pattern in SCAM_PATTERNS:
-        if re.search(pattern, text_lower):
-            findings.append({"type": "scam", "pattern": pattern, "severity": "HIGH"})
-    # Проверка unicode spoofing в URL
-    urls = re.findall(r'https?://[^\s]+', text)
-    for url in urls:
-        norm_url = normalize_text(url)
-        if norm_url != url:
-            findings.append({"type": "unicode_spoofing", "url": url, "severity": "CRITICAL"})
+        m = re.search(pattern, text_lower)
+        if m:
+            findings.append({"type": "scam", "match": m.group(0), "severity": "HIGH"})
+            break
     return findings
 
 
@@ -806,30 +841,88 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
 
     # ── Слушатели событий ─────────────────────────────────────
 
+    @staticmethod
+    async def _modes_for(message: discord.Message):
+        """Режимы угроз из дашборда для сообщения, или None, если автор/канал
+        в исключениях: белый список, роли и каналы-исключения (как в AutoMod)."""
+        if _lists_cache[message.guild.id].get(message.author.id) == "white":
+            return None
+        from witness.database import get_threat_config
+        modes = await get_threat_config(message.guild.id)
+        ex_roles = set(modes["exempt_roles"])
+        if (str(message.channel.id) in modes["exempt_channels"]
+                or str(getattr(message.channel, "category_id", "")) in modes["exempt_channels"]
+                or any(str(r.id) in ex_roles for r in getattr(message.author, "roles", []))):
+            return None
+        return modes
+
+    @staticmethod
+    async def _check_invites(message: discord.Message, modes: dict, edited: bool = False):
+        """Инвайты на чужие серверы — алерт, пинг или удаление (witness/foreign_invites.py)."""
+        if not message.content or modes["invites"] == "off":
+            return
+        try:
+            from witness.foreign_invites import check_message
+            await check_message(message, modes, edited=edited)
+        except Exception as ex:
+            print(f"[INVITES] check: {ex}")
+
+    @staticmethod
+    def _phishing_findings(text: str, modes: dict) -> list:
+        return [f for f in check_phishing(text)
+                if modes["phishing" if f["type"] == "phishing" else "suspicious"] != "off"]
+
+    async def _check_phishing(self, message: discord.Message, modes: dict,
+                              edited: bool = False, findings: list = None):
+        """Фишинг/скам — алерт и карточка в лог-канал."""
+        if not message.content:
+            return
+        if findings is None:
+            findings = self._phishing_findings(message.content, modes)
+        if not findings:
+            return
+        f = findings[0]
+        kind = {"phishing": "поддельная ссылка", "unicode_spoofing": "подмена букв в домене",
+                "scam": "скам"}.get(f["type"], f["type"])
+        await create_alert(message.guild.id, "phishing_detected", "HIGH", message.author.id,
+                           f"Обнаружен фишинг/скам: {kind}" + (" (добавлено правкой)" if edited else ""),
+                           {"findings": findings, "edited": edited})
+        from witness.database import get_log_ch
+        ch = await get_log_ch(message.guild)
+        if not ch:
+            return
+        e = self._make_embed("🎣 Обнаружен фишинг/скам!" + (" — добавлен правкой" if edited else ""),
+                             color=SC.CRITICAL)
+        e.add_field(name="Автор", value=message.author.mention, inline=True)
+        e.add_field(name="Канал", value=message.channel.mention, inline=True)
+        e.add_field(name="Тип", value=kind, inline=True)
+        hit = f.get("match") or f.get("url")
+        if hit:
+            e.add_field(name="Что сработало", value=f"`{str(hit)[:200]}`", inline=False)
+        e.add_field(name="Сообщение", value=f"{message.content[:500]}\n[Перейти]({message.jump_url})", inline=False)
+        try:
+            await ch.send(embed=e)
+        except discord.HTTPException as ex:
+            print(f"[PHISH] log channel: {ex}")
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
 
         gid, uid = message.guild.id, message.author.id
 
+        modes = await self._modes_for(message)
+        if modes is None:
+            return
+
+        # Инвайты проверяем всегда, даже у «команд»: иначе «-discord.gg/…» проходит мимо
+        await self._check_invites(message, modes)
+
         # Пропускаем команды — не анализируем как контент
         # НО не делаем return — process_commands должен их получить
         is_command = message.content.startswith(("-", "!"))
         if is_command:
             return  # просто не анализируем, process_commands в main.py сделает своё дело
-
-        # Проверяем whitelist
-        if _lists_cache[gid].get(uid) == "white": return
-
-        # Режимы угроз из дашборда: выключенное правило не проверяем,
-        # роли и каналы-исключения не проверяем вовсе (как в AutoMod)
-        from witness.database import get_threat_config
-        modes = await get_threat_config(gid)
-        ex_roles = set(modes["exempt_roles"])
-        if (str(message.channel.id) in modes["exempt_channels"]
-                or str(getattr(message.channel, "category_id", "")) in modes["exempt_channels"]
-                or any(str(r.id) in ex_roles for r in getattr(message.author, "roles", []))):
-            return
 
         # Проверка дублирования контента
         if message.content and modes["spam"] != "off":
@@ -838,31 +931,8 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                 await create_alert(gid, "duplicate_content", dup["severity"],
                                    uid, f"Дублирует контент {dup['count']} раз за час")
 
-        # Инвайты на чужие серверы — алерт, пинг или удаление (witness/foreign_invites.py)
-        if message.content and modes["invites"] != "off":
-            try:
-                from witness.foreign_invites import check_message
-                await check_message(message, modes)
-            except Exception as ex:
-                print(f"[INVITES] check: {ex}")
-
         # Проверка фишинга и скама
-        if message.content:
-            findings = [f for f in check_phishing(message.content)
-                        if modes["phishing" if f["type"] == "phishing" else "suspicious"] != "off"]
-            if findings:
-                await create_alert(gid, "phishing_detected", "HIGH", uid,
-                                   f"Обнаружен фишинг/скам: {findings[0]['type']}", {"findings": findings})
-                # Пробуем отправить алерт в лог-канал
-                from witness.database import get_log_ch
-                ch = await get_log_ch(message.guild)
-                if ch:
-                    e = self._make_embed("🎣 Обнаружен фишинг/скам!", color=SC.CRITICAL)
-                    e.add_field(name="Автор", value=message.author.mention, inline=True)
-                    e.add_field(name="Канал", value=message.channel.mention, inline=True)
-                    e.add_field(name="Тип", value=findings[0]["type"], inline=True)
-                    e.add_field(name="Сообщение", value=message.content[:500], inline=False)
-                    await ch.send(embed=e)
+        await self._check_phishing(message, modes)
 
         # Анализ изображений
         for attachment in message.attachments:
@@ -873,6 +943,39 @@ class AdvancedSecurityCog(commands.Cog, name="AdvancedSecurity"):
                     if exif_warns:
                         await create_alert(gid, "image_gps_metadata", "MEDIUM", uid,
                                            "Изображение содержит GPS координаты в EXIF")
+
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        """Ссылка, добавленная правкой: «123» → «123 discord.gg/…». raw — чтобы ловить
+        и сообщения, которых уже нет в кэше бота. Проверяем инвайты и фишинг."""
+        message = payload.message
+        if not message.guild or message.author.bot or not message.content:
+            return
+        from witness.foreign_invites import invite_codes
+        new_codes = set(invite_codes(message.content))
+        before = payload.cached_message
+        if before is not None:
+            if before.content == message.content:
+                return                               # подгрузилось превью ссылки — не правка
+            # Старые инвайты уже проверены при отправке — интересны только добавленные
+            new_codes -= set(invite_codes(before.content))
+        elif (message.edited_at is None
+              or (discord.utils.utcnow() - message.edited_at).total_seconds() > 120):
+            # Discord шлёт обновление и когда подгружает превью ссылки — это не правка
+            return
+        modes = await self._modes_for(message)
+        if modes is None:
+            return
+        if new_codes:
+            await self._check_invites(message, modes, edited=True)
+        findings = self._phishing_findings(message.content, modes)
+        if findings and before is not None:
+            # Алертим, только если правка добавила что-то новое
+            old = {(f["type"], f.get("match"), f.get("url"))
+                   for f in self._phishing_findings(before.content or "", modes)}
+            findings = [f for f in findings if (f["type"], f.get("match"), f.get("url")) not in old]
+        if findings:
+            await self._check_phishing(message, modes, edited=True, findings=findings)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

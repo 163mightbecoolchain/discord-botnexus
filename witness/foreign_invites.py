@@ -2,7 +2,8 @@
 Инвайты на чужие серверы в сообщениях.
 
 AutoMod так не умеет: он ищет текст, а не смотрит, куда ведёт ссылка. Поэтому
-проверяет сам бот (нужен Message Content Intent):
+проверяет сам бот (нужен Message Content Intent) — и новые сообщения, и правки
+(security_module.on_raw_message_edit: «123» → «123 discord.gg/…»):
   1) достаёт из сообщения коды discord.gg/…, discord.com/invite/…;
   2) код из кэша инвайтов сервера или его vanity — свой, дальше не смотрим;
   3) остальное спрашивает у Discord (fetch_invite) и запоминает ответ на час.
@@ -115,8 +116,9 @@ async def only_allowed_invites(text: str, allow_guilds) -> bool:
     return True
 
 
-async def check_message(message: discord.Message, modes: dict):
-    """Вызывается из security_module.on_message после исключений."""
+async def check_message(message: discord.Message, modes: dict, edited: bool = False):
+    """Вызывается из security_module (on_message и on_raw_message_edit) после исключений.
+    edited — инвайт появился правкой уже отправленного сообщения."""
     mode = modes.get("invites", "off")
     if mode == "off" or not message.content:
         return
@@ -147,10 +149,11 @@ async def check_message(message: discord.Message, modes: dict):
         from security_module import create_alert
         await create_alert(message.guild.id, "foreign_invite", "MEDIUM", message.author.id,
                            f"Инвайт на чужой сервер: {first['guild_name'] or first['guild_id']}"
+                           + (" (добавлен правкой)" if edited else "")
                            + (" — удалено" if deleted else ""),
                            {"source": "bot", "matched": " ".join(f"discord.gg/{f['code']}" for f in fresh),
                             "servers": fresh, "channel_id": message.channel.id,
-                            "message_id": message.id, "deleted": deleted})
+                            "message_id": message.id, "deleted": deleted, "edited": edited})
     except Exception as ex:
         print(f"[INVITES] alert: {ex}")
 
@@ -159,7 +162,8 @@ async def check_message(message: discord.Message, modes: dict):
         return
     e = discord.Embed(color=C.WARNING, timestamp=discord.utils.utcnow(),
                       description=None if deleted else f"[Перейти к сообщению]({message.jump_url})")
-    e.set_author(name="🔗 Инвайт на чужой сервер" + (" — удалён" if deleted else ""))
+    e.set_author(name="🔗 Инвайт на чужой сервер" + (" — добавлен правкой" if edited else "")
+                 + (" — удалён" if deleted else ""))
     e.add_field(name="Автор", value=f"{message.author.mention} (`{message.author.id}`)", inline=True)
     e.add_field(name="Канал", value=message.channel.mention, inline=True)
     e.add_field(name="Куда ведёт", value=servers[:1000], inline=False)
