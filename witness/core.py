@@ -395,11 +395,35 @@ _invite_cache: dict = {}
 # "guild_id:invite_code" → (max_uses, expires_at) — чтобы при входе отличать
 # израсходованную разовую ссылку от просто истёкшей (о ней Discord не сообщает)
 _invite_meta: dict = {}
+# "guild_id:invite_code" → (inviter_id, inviter_name). Не чистится при удалении ссылки:
+# разовая ссылка исчезает (и приходит on_invite_delete) раньше, чем вход разобран, а
+# спросить её создателя потом уже не у кого. Записей мало.
+_invite_owner: dict = {}
 
 
 def remember_invite(guild_id, inv):
     _invite_cache[f"{guild_id}:{inv.code}"] = inv.uses or 0
     _invite_meta[f"{guild_id}:{inv.code}"] = (inv.max_uses or 0, inv.expires_at)
+    if inv.inviter:
+        _invite_owner[f"{guild_id}:{inv.code}"] = (inv.inviter.id, inv.inviter.name)
+
+
+async def invite_creator_from_audit(guild, codes) -> dict:
+    """Создатели ссылок по журналу аудита (хранится 45 дней): {code: (id, name)}.
+    Нужен, когда ссылки уже нет, а в кэше её создателя не оказалось."""
+    want, found = set(codes), {}
+    if not want:
+        return found
+    try:
+        async for entry in guild.audit_logs(limit=None, action=discord.AuditLogAction.invite_create):
+            code = getattr(entry.changes.after, "code", None)
+            if code in want and entry.user:
+                found[code] = (entry.user.id, entry.user.name)
+                if len(found) == len(want):
+                    break
+    except discord.HTTPException as ex:
+        print(f"[INVITE] {guild.name}: журнал аудита недоступен — {ex}")
+    return found
 
 
 def invite_maybe_used_up(key, old_uses) -> bool:
