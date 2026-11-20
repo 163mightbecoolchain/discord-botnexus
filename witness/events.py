@@ -40,6 +40,8 @@ from .core import (
     intents,
     _invite_cache,
     _invite_meta,
+    _invite_owner,
+    invite_creator_from_audit,
     invite_maybe_used_up,
     remember_invite,
     notify_mute_over,
@@ -94,6 +96,7 @@ async def on_ready():
     _invite_cache.clear()
     for guild in bot.guilds:
         await refresh_invite_cache(guild)
+        asyncio.create_task(_backfill_oneuse_inviters(guild))
 
     # Без Server Members Intent входы распознаются по системному сообщению
     # «X присоединился» (см. on_message) — предупреждаем, где оно выключено
@@ -298,13 +301,44 @@ async def _track_invite(member, old_snapshot) -> dict:
     elif vanity_grown:
         info["code"], info["inviter_name"] = vanity, "vanity-ссылка сервера"
     elif used_up:
-        info["code"], info["inviter_name"] = used_up[0].split(":", 1)[1], "неизвестно (разовый инвайт)"
+        # Ссылка израсходована и уже удалена Discord — создателя берём из кэша,
+        # а если его там нет (ссылку создали, пока бот был отключён) — из журнала аудита
+        code = used_up[0].split(":", 1)[1]
+        owner = _invite_owner.get(used_up[0])
+        if not owner:
+            owner = (await invite_creator_from_audit(guild, [code])).get(code)
+        info["code"] = code
+        if owner:
+            info["inviter_id"], info["inviter_name"] = owner
+        else:
+            info["inviter_name"] = "неизвестно (разовый инвайт)"
 
     # Пишем в БД всегда — и когда инвайт не определён (пустой код): на сайте это
     # «источник не определён»
     await log_invite_use(gid, info["code"] or "", info["inviter_id"],
                          info["inviter_name"] if info["code"] else "", member.id, member.name)
     return info
+
+
+async def _backfill_oneuse_inviters(guild):
+    """Дозаполняет создателя у старых входов по разовым ссылкам (до исправления писалось
+    «неизвестно (разовый инвайт)»). Берём из журнала аудита — что старше 45 дней, не вернуть."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT DISTINCT invite_code FROM invite_log WHERE guild_id=? "
+                                  "AND invite_code != '' AND COALESCE(inviter_id, 0) = 0 "
+                                  "AND inviter_name = 'неизвестно (разовый инвайт)'", (guild.id,)) as c:
+                codes = [r[0] for r in await c.fetchall()]
+            if not codes:
+                return
+            found = await invite_creator_from_audit(guild, codes)
+            for code, (iid, iname) in found.items():
+                await db.execute("UPDATE invite_log SET inviter_id=?, inviter_name=? WHERE guild_id=? "
+                                 "AND invite_code=? AND COALESCE(inviter_id, 0) = 0", (iid, iname, guild.id, code))
+            await db.commit()
+        print(f"[INVITE] {guild.name}: создатели разовых ссылок восстановлены {len(found)}/{len(codes)}")
+    except Exception as ex:
+        print(f"[INVITE] {guild.name}: backfill — {ex}")
 
 
 @bot.event
