@@ -392,11 +392,74 @@ async def active_invites(guild, fresh=False):
     return out
 
 
-async def _punished_ids(db, gid) -> set:
+BAN_ACTIONS = ("BAN", "TEMPBAN", "AUTO_BAN", "AUTO_TEMPBAN")
+UNBAN_ACTIONS = ("UNBAN", "AUTO_UNBAN")
+
+
+async def _punish_state(db, guild) -> tuple[dict, set]:
+    """Наказания участников: (действует сейчас {uid: «в бане, варны: 2»}, наказывали когда-либо {uid}).
+    Сама запись в modlog не значит, что наказание действует: мут истекает, бан снимают,
+    варн убирают по апелляции. Поэтому «сейчас» — по текущему состоянию: тайм-аут в Discord,
+    роль карантина, оставшиеся варны, последний бан не перекрыт разбаном."""
+    gid = guild.id
+    now = datetime.datetime.utcnow().isoformat()
     marks = ",".join("?" * len(PUNISH_ACTIONS))
     async with db.execute(f"SELECT DISTINCT user_id FROM modlog WHERE guild_id=? AND action IN ({marks})",
                           (gid, *PUNISH_ACTIONS)) as c:
-        return {r[0] for r in await c.fetchall()}
+        ever = {r[0] for r in await c.fetchall()}
+    active: dict = {}
+
+    def mark(uid, what):
+        active.setdefault(uid, []).append(what)
+
+    # Бан: смотрим последнюю запись бан/разбан (отмена авто-бана — тоже разбан).
+    # Кто сейчас на сервере — точно не в бане
+    acts = BAN_ACTIONS + UNBAN_ACTIONS + ("UNDO",)
+    last_ban: dict = {}
+    async with db.execute(f"""SELECT user_id, action, reason FROM modlog WHERE guild_id=?
+                              AND action IN ({",".join("?" * len(acts))}) ORDER BY id""", (gid, *acts)) as c:
+        for uid, act, reason in await c.fetchall():
+            if act != "UNDO":
+                last_ban[uid] = act in BAN_ACTIONS
+            elif (reason or "").endswith(": ban"):
+                last_ban[uid] = False
+    async with db.execute("SELECT user_id FROM temp_bans WHERE guild_id=? AND unbanned=1", (gid,)) as c:
+        for (uid,) in await c.fetchall():
+            last_ban[uid] = False
+    for uid, banned in last_ban.items():
+        if banned and guild.get_member(uid) is None:
+            mark(uid, "в бане")
+
+    # Мут: у тех, кто на сервере, — тайм-аут в Discord; у ушедших — незакрытая запись
+    async with db.execute("SELECT user_id FROM active_mutes WHERE guild_id=? AND notified=0 AND until>?",
+                          (gid, now)) as c:
+        muted = {r[0] for r in await c.fetchall()}
+    for uid in ever | muted:
+        m = guild.get_member(uid)
+        if m.is_timed_out() if m else uid in muted:
+            mark(uid, "в муте")
+
+    # Карантин: роль могли снять руками — у тех, кто на сервере, смотрим саму роль
+    async with db.execute("SELECT role_id FROM quarantine_settings WHERE guild_id=?", (gid,)) as c:
+        row = await c.fetchone()
+    q_role = row[0] if row else None
+    async with db.execute("SELECT user_id FROM quarantine WHERE guild_id=? AND released=0 "
+                          "AND (release_at IS NULL OR release_at>?)", (gid, now)) as c:
+        q_users = {r[0] for r in await c.fetchall()}
+    for uid in ever | q_users:
+        m = guild.get_member(uid)
+        if (m.get_role(q_role) is not None if q_role else False) if m else uid in q_users:
+            mark(uid, "в карантине")
+
+    # Варны: снятые удаляются из таблицы, сгоревшие (warn_expiry_days) не считаются — как get_active_warnings
+    from .database import get_protection
+    days = (await get_protection(gid))["warn_expiry_days"]
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).isoformat() if days else ""
+    async with db.execute("SELECT user_id, COUNT(*) FROM warnings WHERE guild_id=? AND COALESCE(created_at,'')>=? "
+                          "GROUP BY user_id", (gid, cutoff)) as c:
+        for uid, n in await c.fetchall():
+            mark(uid, f"варны: {n}")
+    return {u: ", ".join(w) for u, w in active.items()}, ever
 
 
 async def invite_overview(guild, days: int = 30) -> dict:
@@ -415,7 +478,7 @@ async def invite_overview(guild, days: int = 30) -> dict:
             joins = await c.fetchall()
         async with db.execute("SELECT invite_code, reason FROM invite_flags WHERE guild_id=?", (gid,)) as c:
             flags = dict(await c.fetchall())
-        punished = await _punished_ids(db, gid)
+        punished, _ = await _punish_state(db, guild)
     rules = await get_invite_rules(gid)
 
     per: dict = {}
@@ -500,10 +563,11 @@ async def invite_details(guild, code: str, limit: int = 300) -> dict:
             iid, iname, note = await c.fetchone()
         async with db.execute("SELECT reason FROM invite_flags WHERE guild_id=? AND invite_code=?", (gid, code)) as c:
             flag = await c.fetchone()
-        punished = await _punished_ids(db, gid)
+        punished, ever = await _punish_state(db, guild)
     active = next((a for a in await active_invites(guild) or [] if a["code"] == code), None)
     members = [{"id": str(uid), "name": name or str(uid), "joined_at": at,
-                "on_server": guild.get_member(uid) is not None, "punished": uid in punished}
+                "on_server": guild.get_member(uid) is not None, "punished": uid in punished,
+                "punish_now": punished.get(uid, ""), "punished_before": uid in ever and uid not in punished}
                for uid, name, at in rows]
     from .database import get_protection
     return {"code": code, "active": active, "inviter_id": str(iid or ""), "inviter_name": iname or "",
