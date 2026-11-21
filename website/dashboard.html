@@ -2104,7 +2104,7 @@ html.theme-anim *::before, html.theme-anim *::after {
               <th>Ссылка</th><th>Создал</th>
               <th class="sortable" data-sort="joins" onclick="sortInv('joins')">Входы</th>
               <th class="sortable" data-sort="retention" onclick="sortInv('retention')">Остались</th>
-              <th class="sortable" data-sort="punished" onclick="sortInv('punished')">Наказаны</th>
+              <th class="sortable" data-sort="punished" onclick="sortInv('punished')" title="Сколько зашедших сейчас под действующим наказанием: бан, мут, карантин, варны">Наказаны</th>
               <th class="sortable" data-sort="uses" onclick="sortInv('uses')">В Discord</th>
               <th class="sortable" data-sort="last_join" onclick="sortInv('last_join')">Последний вход</th>
               <th>Заметка</th>
@@ -6286,7 +6286,8 @@ async function openInvite(code, focusUid = null) {
           ${userChip(m.id, m.name)}
           <span class="text-mono text-muted">${invDate(m.joined_at)}</span>
           ${m.on_server ? '<span class="chip ok">на сервере</span>' : '<span class="chip">ушёл</span>'}
-          ${m.punished ? '<span class="chip danger">наказан</span>' : ''}
+          ${m.punished ? `<span class="chip danger" title="Действует сейчас">${escapeHtml(m.punish_now || 'наказан')}</span>`
+            : m.punished_before ? '<span class="chip" title="Наказание было, но уже истекло или снято">был наказан</span>' : ''}
         </div>`).join('')}</div>` : '<div class="input-help">По этой ссылке пока никто не заходил</div>'}
     </div>
     <div class="modal-actions" style="justify-content:space-between;">
