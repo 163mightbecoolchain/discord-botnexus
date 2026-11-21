@@ -32,6 +32,7 @@ from .database import (
 )
 from .i18n import _guild_lang, t
 from .ui import build_embed, C
+from . import autothreads
 from .core import (
     antinuke_check,
     _audit_actor,
@@ -207,6 +208,7 @@ async def on_message(message):
             bot.dispatch("member_join", message.author)
         return
     if message.author.bot or not message.guild: return
+    asyncio.create_task(autothreads.on_message(message))
     if message.attachments:
         asyncio.create_task(_cache_attachments(message))
     gid, uid = message.guild.id, message.author.id

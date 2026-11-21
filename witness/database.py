@@ -317,6 +317,14 @@ async def db_init():
                 PRIMARY KEY (panel_id, role_id));
             CREATE INDEX IF NOT EXISTS idx_role_panel_roles_role ON role_panel_roles(guild_id, role_id);
 
+            -- Автоветки: на каждое сообщение в канале бот открывает ветку (witness/autothreads.py)
+            CREATE TABLE IF NOT EXISTS auto_threads (
+                guild_id    INTEGER NOT NULL,
+                channel_id  INTEGER NOT NULL,
+                name        TEXT DEFAULT '',
+                archive_minutes INTEGER DEFAULT 1440,
+                PRIMARY KEY (guild_id, channel_id));
+
             -- Лог таймаутов для лидерборда
             CREATE TABLE IF NOT EXISTS mute_log (
                 guild_id    INTEGER NOT NULL,
