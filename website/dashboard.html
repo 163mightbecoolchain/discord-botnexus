@@ -150,6 +150,7 @@ body {
 
 /* Формы */
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.at-row { display: grid; grid-template-columns: 1fr 1.4fr 9rem auto; gap: .75rem; align-items: end; }
 .form-group { margin-bottom: 1rem; }
 label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-2); margin-bottom: .4rem; }
 .input, .select, .textarea {
@@ -626,7 +627,7 @@ html.theme-anim *::before, html.theme-anim *::after {
   .main { padding: 4rem 1rem 1rem; }
   .seg { width: 100%; }
   .seg button { flex: 1; }
-  .form-row { grid-template-columns: 1fr; }
+  .form-row, .at-row { grid-template-columns: 1fr; }
 }
 
 /* Плашка «бот перезапускается» */
@@ -1298,6 +1299,24 @@ html.theme-anim *::before, html.theme-anim *::after {
           <div class="form-group" style="margin:0;">
             <label>Канал для поздравлений</label>
             <select class="select" id="auto-bdaych"><option value="">— выключено —</option></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Автоветки</div>
+            <div class="card-desc">На каждое сообщение участника в выбранном канале бот открывает ветку для обсуждения</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="addAutoThread()">+ Канал</button>
+        </div>
+        <div class="card-body">
+          <div id="autothreads-list"></div>
+          <div class="input-help" style="margin-top:.6rem;">
+            В названии можно использовать <code>{author}</code> — ник, <code>{text}</code> — начало сообщения,
+            <code>{date}</code> — дата. Пусто — <code>{author}: {text}</code>.
+            Боту нужно право «Создавать публичные ветки» в канале.
           </div>
         </div>
       </div>
@@ -2921,6 +2940,10 @@ function fillChannelSelects() {
       _channels.filter(c => c.type === 'text').map(c =>
         `<option value="${c.id}">#${escapeHtml(c.name)}</option>`).join('');
     if (current) el.value = current;
+  }
+  if (document.querySelector('#autothreads-list .at-row')) {
+    _autoThreads = readAutoThreads();
+    renderAutoThreads();
   }
 }
 
@@ -4778,8 +4801,66 @@ async function loadAutomation() {
     setSelect('auto-starch', a.starboard_channel);
     setVal('auto-starthr', a.starboard_threshold ?? 3);
     setSelect('auto-bdaych', a.birthday_channel);
+    _autoThreads = a.autothreads || [];
+    renderAutoThreads();
     csSync();
   } catch(e) {}
+}
+
+// ── Автоветки: список «канал + шаблон названия + архивация» ──
+let _autoThreads = [];
+const AT_ARCHIVE = [[60, '1 час'], [1440, '1 день'], [4320, '3 дня'], [10080, '1 неделя']];
+
+function readAutoThreads() {
+  const box = document.getElementById('autothreads-list');
+  if (!box || !box.children.length) return _autoThreads;
+  return Array.from(box.querySelectorAll('.at-row')).map(row => {
+    const sel = row.querySelector('.at-ch');
+    // Список каналов мог ещё не загрузиться — тогда в select нет нужного варианта, берём сохранённый
+    const known = Array.from(sel.options).some(o => o.value === row.dataset.ch);
+    return {
+    channel_id: sel.value || (known ? '' : row.dataset.ch || ''),
+    name: row.querySelector('.at-name').value.trim(),
+    archive: parseInt(row.querySelector('.at-arch').value) || 1440,
+  }; });
+}
+
+function renderAutoThreads() {
+  const box = document.getElementById('autothreads-list');
+  if (!box) return;
+  const text = (_channels || []).filter(c => c.type === 'text' || c.type === 'news');
+  box.innerHTML = _autoThreads.length ? _autoThreads.map((t, i) => `
+    <div class="at-row" data-ch="${escapeHtml(t.channel_id || '')}" style="${i ? 'margin-top:.75rem;' : ''}">
+      <div class="form-group" style="margin:0;">
+        <label>Канал</label>
+        <select class="select at-ch"><option value="">— выбери канал —</option>${text.map(c =>
+          `<option value="${c.id}"${c.id === t.channel_id ? ' selected' : ''}>#${escapeHtml(c.name)}</option>`).join('')}</select>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>Название ветки</label>
+        <input class="input at-name" maxlength="100" placeholder="{author}: {text}" value="${escapeHtml(t.name || '')}">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>Архивировать через</label>
+        <select class="select at-arch">${AT_ARCHIVE.map(([v, l]) =>
+          `<option value="${v}"${v === (t.archive || 1440) ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      </div>
+      <button class="btn btn-ghost btn-sm" aria-label="Убрать канал" onclick="removeAutoThread(${i})">✕</button>
+    </div>`).join('') : '<div class="input-help" style="margin:0;">Каналов нет — нажми «+ Канал»</div>';
+  csInit(); csSync();
+}
+
+function addAutoThread() {
+  _autoThreads = readAutoThreads();
+  if (_autoThreads.length >= 25) return showToast('Не больше 25 каналов', 'error');
+  _autoThreads.push({ channel_id: '', name: '', archive: 1440 });
+  renderAutoThreads();
+}
+
+function removeAutoThread(i) {
+  _autoThreads = readAutoThreads();
+  _autoThreads.splice(i, 1);
+  renderAutoThreads();
 }
 
 async function postAutomation(payload) {
@@ -4804,6 +4885,7 @@ function saveAutomation() {
     starboard_channel:   getVal('auto-starch') || 0,
     starboard_threshold: parseInt(getVal('auto-starthr')) || 3,
     birthday_channel:    getVal('auto-bdaych') || 0,
+    autothreads: readAutoThreads().filter(t => t.channel_id),
   });
 }
 

@@ -1500,6 +1500,9 @@ async def api_automation_get(request):
             out['starboard_channel']  = str(g[0]) if g and g[0] else ''
             out['starboard_threshold']= (g[1] if g and g[1] else 3)
             out['birthday_channel']   = str(g[2]) if g and g[2] else ''
+        from witness.autothreads import get_auto_threads
+        out['autothreads'] = [{'channel_id': str(ch), 'name': v['name'], 'archive': v['archive']}
+                              for ch, v in (await get_auto_threads(guild_id)).items()]
     except Exception as e:
         return _server_error(request, e)
     return web.json_response(out)
@@ -1558,6 +1561,14 @@ async def api_automation_post(request):
                         f"ON CONFLICT(guild_id) DO UPDATE SET {col}=excluded.{col}",
                         (guild_id, v))
             await db.commit()
+
+        if isinstance(data.get('autothreads'), list):
+            import discord
+            from witness.autothreads import set_auto_threads
+            # Только текстовые каналы этого сервера
+            rows = [r for r in data['autothreads'] if isinstance(r, dict) and str(r.get('channel_id', '')).isdigit()
+                    and isinstance(bg.get_channel(int(r['channel_id'])), discord.TextChannel)]
+            await set_auto_threads(guild_id, rows)
 
         cache = getattr(bot, '_settings_cache', None)
         if isinstance(cache, dict):
