@@ -669,6 +669,18 @@ html.theme-anim *::before, html.theme-anim *::after {
 .sr-role-main { flex: 1; min-width: 0; }
 .sr-role-main .sub { font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Тикеты */
+.tk-num { font-family: var(--mono); font-size: .8rem; color: var(--accent); flex: none; min-width: 3.4rem; }
+.tk-num.muted { color: var(--muted); }
+.tk-user { display: inline-flex; align-items: center; gap: .4rem; font-weight: 500; }
+.tk-av { width: 20px; height: 20px; border-radius: 50%; flex: none; }
+.tk-badge { display: inline-block; font-size: .7rem; padding: .1rem .45rem; border-radius: 999px; margin-left: .35rem;
+            background: rgba(88,101,242,.15); color: var(--text-2); vertical-align: middle; }
+.tk-badge.new { background: rgba(255,170,0,.14); }
+.tk-mention { background: rgba(88,101,242,.3); color: #c9cdfb; border-radius: 3px; padding: 0 .2rem; }
+.tk-fields { display: flex; gap: 1.5rem; margin-top: .5rem; flex-wrap: wrap; }
+.tk-fields b { display: block; color: #f2f3f5; font-size: .78rem; margin-bottom: .1rem; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
@@ -756,6 +768,9 @@ html.theme-anim *::before, html.theme-anim *::after {
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="roles" onclick="showPage('roles')">
         <span class="icon">🏷️</span> Роли
+      </div>
+      <div class="nav-item" data-perm="manage_guild" data-page="tickets" onclick="showPage('tickets')">
+        <span class="icon">🎫</span> Тикеты
       </div>
       <div class="nav-item" data-perm="manage_guild" data-page="security" onclick="showPage('security')">
         <span class="icon">🛡️</span> Безопасность
@@ -865,7 +880,7 @@ html.theme-anim *::before, html.theme-anim *::after {
       <div class="page-head">
         <div>
           <div class="page-title">Общие настройки</div>
-          <div class="page-subtitle">Язык, тикеты и базовые каналы</div>
+          <div class="page-subtitle">Язык и базовые каналы</div>
         </div>
         <button class="btn btn-primary" onclick="btnBusy(this, saveGeneral)">Сохранить</button>
       </div>
@@ -874,7 +889,7 @@ html.theme-anim *::before, html.theme-anim *::after {
         <div class="card-head">
           <div>
             <div class="card-title">Базовое</div>
-            <div class="card-desc">Язык, тикеты, каналы по умолчанию</div>
+            <div class="card-desc">Язык, каналы по умолчанию</div>
           </div>
         </div>
         <div class="card-body">
@@ -897,10 +912,10 @@ html.theme-anim *::before, html.theme-anim *::after {
 
           <div class="toggle-row">
             <div class="toggle-info">
-              <div class="toggle-label">Система тикетов</div>
-              <div class="toggle-desc">Позволяет участникам создавать тикеты поддержки</div>
+              <div class="toggle-label">Тикеты</div>
+              <div class="toggle-desc">Настройка — на отдельной странице</div>
             </div>
-            <div class="toggle" id="tog-tickets" onclick="this.classList.toggle('on')"></div>
+            <button class="btn btn-ghost btn-sm" onclick="showPage('tickets')">Открыть «Тикеты» →</button>
           </div>
         </div>
       </div>
@@ -1398,6 +1413,158 @@ html.theme-anim *::before, html.theme-anim *::after {
         </div>
 
         <div id="sr-panels"></div>
+      </div>
+    </div></div>
+
+    <!-- TICKETS -->
+    <div id="content-tickets" class="page"><div class="page-inner">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Тикеты</div>
+          <div class="page-subtitle">Приватные обращения в поддержку: панель с кнопкой, транскрипты, список открытых</div>
+        </div>
+        <button class="btn btn-primary" onclick="btnBusy(this, saveTickets)">Сохранить</button>
+      </div>
+
+      <div id="tk-notices"></div>
+
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Открыто сейчас</div><div class="stat-value" id="tk-stat-open">—</div></div>
+        <div class="stat-card"><div class="stat-label">В работе</div><div class="stat-value" id="tk-stat-claimed">—</div></div>
+        <div class="stat-card"><div class="stat-label">Всего создано</div><div class="stat-value" id="tk-stat-total">—</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Основное</div>
+            <div class="card-desc">Кто видит тикеты и куда сохраняется переписка</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Тикеты включены</div>
+              <div class="toggle-desc">Пока выключено, новые тикеты открыть нельзя. Уже открытые продолжают работать</div>
+            </div>
+            <div class="toggle" id="tog-tk-enabled" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="form-row" style="margin-top:1rem;">
+            <div class="form-group">
+              <label>Категория для каналов</label>
+              <select class="select" id="tk-category"></select>
+              <div class="input-help">Каналы тикетов создаются внутри неё</div>
+            </div>
+            <div class="form-group">
+              <label>Роль поддержки</label>
+              <select class="select" id="tk-role" onchange="tkPreview()"></select>
+              <div class="input-help">Видит все тикеты, может брать их в работу и закрывать</div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Канал для транскриптов</label>
+              <select class="select" id="tk-log"></select>
+              <div class="input-help">При закрытии сюда уходит файл со всей перепиской</div>
+            </div>
+            <div class="form-group">
+              <label>Открытых тикетов на участника</label>
+              <select class="select" id="tk-max">
+                <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                <option value="4">4</option><option value="5">5</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Упоминать роль поддержки</div>
+              <div class="toggle-desc">В новом тикете бот пингует роль, чтобы его сразу заметили</div>
+            </div>
+            <div class="toggle" id="tog-tk-ping" onclick="this.classList.toggle('on'); tkPreview()"></div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-label">Транскрипт автору в ЛС</div>
+              <div class="toggle-desc">После закрытия участник получит копию переписки (если у него открыты ЛС)</div>
+            </div>
+            <div class="toggle" id="tog-tk-dm" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Панель с кнопкой</div>
+            <div class="card-desc">Сообщение, через которое участники открывают тикеты. Изменения текста применяются к уже отправленной панели после «Сохранить»</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="sr-grid">
+            <div>
+              <div class="form-group">
+                <label>Заголовок</label>
+                <input class="input" id="tk-title" maxlength="256" oninput="tkPreview()">
+              </div>
+              <div class="form-group">
+                <label>Описание</label>
+                <textarea class="textarea" id="tk-desc" rows="3" maxlength="2000" oninput="tkPreview()"></textarea>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Текст кнопки</label>
+                  <input class="input" id="tk-button" maxlength="80" oninput="tkPreview()">
+                </div>
+                <div class="form-group">
+                  <label>Цвет</label>
+                  <input type="color" class="input" id="tk-color" value="#5865f2" style="height:38px; padding:.2rem;" oninput="tkPreview()">
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Приветствие в канале тикета</label>
+                <textarea class="textarea" id="tk-welcome" rows="2" maxlength="1000" oninput="tkPreview()"></textarea>
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:.78rem; color:var(--muted); margin-bottom:.4rem;">Панель в канале</label>
+              <div id="tk-preview-panel"></div>
+              <label style="display:block; font-size:.78rem; color:var(--muted); margin:.9rem 0 .4rem;">Канал тикета</label>
+              <div id="tk-preview-ticket"></div>
+            </div>
+          </div>
+          <div class="toggle-row" style="margin-top:1rem;">
+            <div class="toggle-info">
+              <div class="toggle-label" id="tk-panel-status">Панель не отправлена</div>
+              <div class="toggle-desc" id="tk-panel-sub">Выбери канал — бот отправит туда сообщение с кнопкой</div>
+            </div>
+            <div class="flex gap-1" style="align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+              <select class="select" id="tk-panel-ch" style="min-width:200px;"></select>
+              <button class="btn btn-primary btn-sm" id="tk-panel-send" onclick="btnBusy(this, sendTicketPanel)">Отправить</button>
+              <button class="btn btn-ghost btn-sm hidden" id="tk-panel-remove" onclick="btnBusy(this, removeTicketPanel)">Убрать</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Открытые тикеты</div>
+            <div class="card-desc">Закрыть можно отсюда — транскрипт сохранится так же, как при закрытии в Discord</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="btnBusy(this, loadTickets)">Обновить</button>
+        </div>
+        <div class="card-body" id="tk-open"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Недавно закрытые</div>
+            <div class="card-desc">Последние 20. Транскрипт — по ссылке на сообщение в лог-канале</div>
+          </div>
+        </div>
+        <div class="card-body" id="tk-closed"></div>
       </div>
     </div></div>
 
@@ -2902,6 +3069,7 @@ async function showPage(name) {
   if (currentGuild && _liveTimer) startLive();   // частота зависит от активной страницы
   if (name === 'automation') await loadAutomation();
   if (name === 'roles') await loadSelfRoles();
+  if (name === 'tickets') await loadTickets();
   if (name === 'security') await Promise.all([loadSecurity(), loadProtection(), loadLogWhitelist(), loadPrebans()]);
   if (name === 'moderation') await loadProtection();
   if (name === 'banreq') await loadBanRequests();
@@ -2925,6 +3093,7 @@ async function loadChannelsRoles() {
     fillChannelSelects();
     fillRoleSelects();
     fillTrapChannel(_prot ? _prot.trap_channel : undefined);
+    if (_tk) { tkFillSelects(false); tkPreview(); }
     csSync();
   } catch(e) {}
 }
@@ -3043,7 +3212,6 @@ async function loadSettings() {
 
     setVal('gen-lang', s.lang ?? 'ru');
     setSelect('gen-birthday-ch', s.birthday_channel);
-    setToggle('tog-tickets', s.tickets_enabled);
 
     setSelect('log-main', s.log_channel);
     setSelect('log-suggestion', s.suggestion_channel);
@@ -3133,7 +3301,6 @@ async function saveSettings(payload, silent=false) {
 function saveGeneral() {
   return saveSettings({
     lang: getVal('gen-lang'),
-    tickets_enabled: getToggle('tog-tickets'),
     birthday_channel: getVal('gen-birthday-ch') || 0,
   });
 }
@@ -4893,6 +5060,197 @@ function saveAutomation() {
 //  РОЛИ — панели самовыдачи (witness/selfroles.py)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 let _sr = null;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  ТИКЕТЫ (witness/tickets.py, /api/guild/:id/tickets)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _tk = null;
+
+async function loadTickets() {
+  if (!currentGuild) return;
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/tickets`);
+    if (!r.ok) return;
+    _tk = await r.json();
+    renderTickets(true);
+  } catch(e) {}
+}
+
+// Ответ API всегда содержит свежее состояние страницы
+async function tkPost(path, payload, okText) {
+  try {
+    const r = await apiFetch(`/api/guild/${currentGuild.id}/tickets${path}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload || {})
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.open) { _tk = d; renderTickets(path === ''); }
+    if (r.ok) {
+      showToast(d.warning ? '⚠ ' + d.warning : (okText || '✓ Сохранено'), d.warning ? 'error' : 'success');
+      return true;
+    }
+    showToast(d.error === 'Forbidden' ? 'Нет прав' : (d.error || 'Ошибка ' + r.status), 'error');
+  } catch(e) { showToast('Ошибка соединения', 'error'); }
+  return false;
+}
+
+function saveTickets() {
+  return tkPost('', {
+    enabled:       getToggle('tog-tk-enabled'),
+    category_id:   getVal('tk-category'),
+    support_role:  getVal('tk-role'),
+    log_channel:   getVal('tk-log'),
+    max_open:      +getVal('tk-max') || 1,
+    ping_support:  getToggle('tog-tk-ping'),
+    dm_transcript: getToggle('tog-tk-dm'),
+    welcome:       getVal('tk-welcome'),
+    panel_title:   getVal('tk-title'),
+    panel_desc:    getVal('tk-desc'),
+    panel_button:  getVal('tk-button'),
+    panel_color:   getVal('tk-color'),
+  });
+}
+
+function sendTicketPanel() {
+  const ch = getVal('tk-panel-ch');
+  if (!ch) { showToast('Выбери канал для панели', 'error'); return; }
+  return tkPost('/panel', {channel_id: ch}, _tk && _tk.panel_url ? '✓ Панель обновлена' : '✓ Панель отправлена');
+}
+
+async function removeTicketPanel() {
+  const ok = await askAction({title: 'Убрать панель?', sub: 'Сообщение с кнопкой удалится. Открытые тикеты не пострадают.',
+                              okText: 'Убрать', danger: true, reason: null});
+  if (ok) return tkPost('/panel', {remove: true}, '✓ Панель убрана');
+}
+
+async function closeTicketFromSite(id, number) {
+  const res = await askAction({title: `Закрыть тикет #${String(number).padStart(4, '0')}?`,
+    sub: 'Транскрипт уйдёт в лог-канал, канал тикета удалится.', okText: 'Закрыть', danger: true,
+    placeholder: 'Вопрос решён'});
+  if (res) return tkPost(`/${id}/close`, {reason: res.reason}, '✓ Тикет закрыт');
+}
+
+// Заполняет выпадающие списки, не сбрасывая то, что админ уже выбрал
+function tkFillSelects(fromServer) {
+  if (!_tk) return;
+  const fill = (id, empty, items, saved) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = fromServer ? saved : el.value;
+    el.innerHTML = empty + items.join('');
+    el.value = cur || '';
+    if (el.value !== (cur || '')) el.value = '';
+    csSyncOne(el);
+  };
+  const text = _channels.filter(c => c.type === 'text');
+  const cats = _channels.filter(c => c.type === 'category');
+  fill('tk-category', '<option value="">— без категории —</option><option value="new">➕ Создать «🎫 Tickets»</option>',
+       cats.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`), _tk.category_id);
+  fill('tk-role', '<option value="">— все с правом «Управлять сообщениями» —</option>',
+       _roles.map(r => `<option value="${r.id}">@${escapeHtml(r.name)}</option>`), _tk.support_role);
+  fill('tk-log', '<option value="">— не сохранять транскрипты —</option>',
+       text.map(c => `<option value="${c.id}">#${escapeHtml(c.name)}</option>`), _tk.log_channel);
+  fill('tk-panel-ch', '<option value="">— выбери канал —</option>',
+       text.map(c => `<option value="${c.id}">#${escapeHtml(c.name)}</option>`), _tk.panel_channel);
+}
+
+function tkPreview() {
+  if (!_tk) return;
+  const e = escapeHtml, d = _tk.defaults;
+  const color = getVal('tk-color') || '#5865f2';
+  document.getElementById('tk-preview-panel').innerHTML = `<div class="sr-preview">
+    <div class="sr-embed" style="--sr-color:${e(color)}">
+      <div class="sr-embed-title">${e(getVal('tk-title') || d.title)}</div>
+      <div class="sr-embed-desc">${e(getVal('tk-desc') || d.desc)}</div>
+    </div>
+    <div class="sr-buttons"><span class="sr-btn" style="background:#5865f2;">🎫 ${e(getVal('tk-button') || d.button)}</span></div>
+  </div>`;
+  const role = _roles.find(r => r.id === getVal('tk-role'));
+  const ping = getToggle('tog-tk-ping') && role ? ` <span class="tk-mention">@${e(role.name)}</span>` : '';
+  document.getElementById('tk-preview-ticket').innerHTML = `<div class="sr-preview">
+    <div style="margin-bottom:.45rem;"><span class="tk-mention">@участник</span>${ping}</div>
+    <div class="sr-embed" style="--sr-color:${e(color)}">
+      <div class="sr-embed-title">🎫 Тикет #${String((_tk.counter || 0) + 1).padStart(4, '0')}</div>
+      <div class="sr-embed-desc">${e(getVal('tk-welcome') || d.welcome)}</div>
+      <div class="tk-fields"><div><b>Участник</b><span class="tk-mention">@участник</span></div>
+        <div><b>Причина</b>Не приходит роль после оплаты</div></div>
+      <div class="sr-embed-foot">Закрыть тикет — кнопкой ниже или /ticket close</div>
+    </div>
+    <div class="sr-buttons"><span class="sr-btn">🙋 Взять в работу</span><span class="sr-btn" style="background:#da373c;">🔒 Закрыть</span></div>
+  </div>`;
+}
+
+function tkUser(u) {
+  if (!u) return '<span class="text-muted">—</span>';
+  return `<span class="tk-user">${u.avatar ? `<img class="tk-av" src="${escapeHtml(u.avatar)}" alt="">` : ''}${escapeHtml(u.name)}</span>`;
+}
+
+function tkNum(n) { return '#' + String(n).padStart(4, '0'); }
+
+function renderTickets(fromServer) {
+  if (!_tk) return;
+  const t = _tk;
+  if (fromServer) {
+    setToggle('tog-tk-enabled', t.enabled);
+    setToggle('tog-tk-ping', t.ping_support);
+    setToggle('tog-tk-dm', t.dm_transcript);
+    setVal('tk-max', String(t.max_open));
+    setVal('tk-title', t.panel_title);
+    setVal('tk-desc', t.panel_desc);
+    setVal('tk-button', t.panel_button);
+    setVal('tk-color', t.panel_color);
+    setVal('tk-welcome', t.welcome);
+    document.getElementById('tk-title').placeholder = t.defaults.title;
+    document.getElementById('tk-desc').placeholder = t.defaults.desc;
+    document.getElementById('tk-button').placeholder = t.defaults.button;
+    document.getElementById('tk-welcome').placeholder = t.defaults.welcome;
+  }
+  tkFillSelects(fromServer);
+  tkPreview();
+
+  const notes = [];
+  if (!t.premium) notes.push('Тикеты работают на тарифе <b>Premium</b>. Настройки сохранятся и заработают вместе с тарифом.');
+  if (t.problem) notes.push(escapeHtml(t.problem));
+  if (t.enabled && !t.panel_url) notes.push('Тикеты включены, но панель с кнопкой не отправлена — участники смогут открыть тикет только командой <span class="text-mono">/ticket open</span>.');
+  if (t.enabled && !t.log_channel) notes.push('Канал для транскриптов не выбран — после закрытия переписка не сохранится.');
+  document.getElementById('tk-notices').innerHTML = notes.map(n => `<div class="notice">⚠️<div>${n}</div></div>`).join('');
+
+  document.getElementById('tk-stat-open').textContent = t.open.length;
+  document.getElementById('tk-stat-claimed').textContent = t.open.filter(x => x.claimed_by).length;
+  document.getElementById('tk-stat-total').textContent = t.counter;
+
+  const hasPanel = !!t.panel_url;
+  const ch = _channels.find(c => c.id === t.panel_channel);
+  document.getElementById('tk-panel-status').innerHTML = hasPanel
+    ? `Панель в #${escapeHtml(ch ? ch.name : '?')} · <a href="${escapeHtml(t.panel_url)}" target="_blank" rel="noopener">открыть в Discord</a>`
+    : 'Панель не отправлена';
+  document.getElementById('tk-panel-sub').textContent = hasPanel
+    ? 'Другой канал — панель переедет туда; тот же канал — сообщение обновится'
+    : 'Выбери канал — бот отправит туда сообщение с кнопкой';
+  document.getElementById('tk-panel-send').textContent = hasPanel ? 'Переотправить' : 'Отправить';
+  document.getElementById('tk-panel-remove').classList.toggle('hidden', !hasPanel);
+
+  document.getElementById('tk-open').innerHTML = t.open.length ? t.open.map(x => `<div class="sr-role">
+      <span class="tk-num">${tkNum(x.number)}</span>
+      <div class="sr-role-main">
+        <div>${tkUser(x.user)} ${x.claimed_by ? `<span class="tk-badge">в работе: ${escapeHtml(x.claimed_by.name)}</span>` : '<span class="tk-badge new">ждёт ответа</span>'}</div>
+        <div class="sub" title="${escapeHtml(x.reason)}">${escapeHtml(x.reason || 'Без описания')} · ${escapeHtml(_fmtWhen(x.created_at))}</div>
+      </div>
+      ${x.alive ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Открыть</a>` : '<span class="text-muted" style="font-size:.78rem;">канал удалён</span>'}
+      <button class="btn btn-danger btn-sm" onclick="btnBusy(this, () => closeTicketFromSite(${x.id}, ${x.number}))">Закрыть</button>
+    </div>`).join('')
+    : `<div class="empty" style="padding:1.5rem;"><div class="empty-icon">🎫</div><div class="empty-title">Открытых тикетов нет</div></div>`;
+
+  document.getElementById('tk-closed').innerHTML = t.closed.length ? t.closed.map(x => `<div class="sr-role">
+      <span class="tk-num muted">${tkNum(x.number)}</span>
+      <div class="sr-role-main">
+        <div>${tkUser(x.user)} <span class="text-muted" style="font-size:.78rem;">закрыл ${x.closed_by ? escapeHtml(x.closed_by.name) : 'никто (канал удалён)'}${x.closed_at ? ' · ' + escapeHtml(_fmtWhen(x.closed_at)) : ''}</span></div>
+        <div class="sub" title="${escapeHtml(x.close_reason)}">${escapeHtml(x.reason || 'Без описания')}${x.close_reason ? ' → ' + escapeHtml(x.close_reason) : ''}</div>
+      </div>
+      ${x.log_url ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(x.log_url)}" target="_blank" rel="noopener">Транскрипт</a>` : ''}
+    </div>`).join('')
+    : `<div class="text-muted" style="font-size:.85rem;">Пока пусто.</div>`;
+}
 
 async function loadSelfRoles() {
   if (!currentGuild) return;

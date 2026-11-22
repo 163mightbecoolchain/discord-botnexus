@@ -1,5 +1,5 @@
 """
-Общие команды: help, профиль, экономика, утилиты, тикеты, предложения, роли за реакции.
+Общие команды: help, профиль, экономика, утилиты, предложения, роли за реакции. Тикеты — witness/tickets.py.
 """
 
 import discord
@@ -98,7 +98,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
                 ("🆓 Информация", "`/ping` `/userinfo` `/serverinfo` `/subinfo`"),
                 ("🆓 XP и экономика", "`/rank` `/leaderboard` `/coins`"),
                 ("🆓 Утилиты", "`/poll` (с таймером) · `/remind` (повторяющиеся) · `/lfg` (с Join кнопкой)\n`/weather` · `/translate`"),
-                ("🆓 Комьюнити", "`/birthday` `/suggestion` `/ticket` (вкл/выкл)"),
+                ("🆓 Комьюнити", "`/birthday` `/suggestion` `/ticket open`"),
                 ("🆓 Albion", "`/register` — привязать ник · `/watch` — алерты на игрока"),
                 ("⭐ Premium", "`/starboard` `/serverstats` `/giveaway` `/roast` `/summarize` `/imagine`"),
             ]
@@ -158,7 +158,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
                 ("🔐 Security", "`/tempban` `/unmute` `/modlog` `/punishments` `/quarantine`"),
                 ("🎮 Albion", "`/register` `/watch add/remove/list`"),
                 ("📨 Инвайты", "`/invnote` `/invnotes` `/invstats`"),
-                ("⚙️ Настройка", "`/setup` `/reactionrole` `/ticket disable/enable`"),
+                ("⚙️ Настройка", "`/setup` `/reactionrole` `/ticket setup`"),
                 ("🤖 Утилиты", "`/remind` (повтор) · `/poll` (таймер) · `/lfg` (Join кнопка)"),
                 ("📣 Бот", "`/invite` `/vote` `/botinfo`"),
             ]
@@ -497,115 +497,6 @@ async def birthday(interaction: discord.Interaction, action: str = "set", date: 
     await interaction.response.send_message(f"🎂 День рождения сохранён: **{formatted}**", ephemeral=True)
 
 
-
-
-@bot.tree.command(name="ticket", description="Система тикетов [Premium]")
-@app_commands.describe(action="open / close / setup / enable / disable", reason="Причина обращения")
-async def ticket(interaction: discord.Interaction, action: str = "open", reason: str = "Обращение в поддержку"):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
-
-    if action.lower() == "setup":
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
-        # Создаём категорию для тикетов
-        cat = await interaction.guild.create_category("🎫 Tickets")
-        await set_guild_setting(interaction.guild_id, "ticket_category", cat.id)
-        await set_guild_setting(interaction.guild_id, "tickets_enabled", 1)
-        e = discord.Embed(title="✅ Тикеты настроены", color=0x00E5FF)
-        e.add_field(name="Категория", value=cat.name, inline=True)
-        e.add_field(name="Статус", value="✅ Включены", inline=True)
-        e.add_field(name="Использование", value="`/ticket` — открыть · `close` — закрыть · `disable/enable` — вкл/выкл", inline=False)
-        return await interaction.response.send_message(embed=e)
-
-    if action.lower() in ("disable", "enable"):
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("❌ Нужны права администратора.", ephemeral=True)
-        enabled = action.lower() == "enable"
-        await set_guild_setting(interaction.guild_id, "tickets_enabled", 1 if enabled else 0)
-        status = "✅ Тикеты включены" if enabled else "🔒 Тикеты отключены"
-        desc = "Участники могут открывать тикеты." if enabled else "Новые тикеты открыть нельзя. Существующие не затронуты."
-        e = discord.Embed(title=status, description=desc, color=0x00E5FF if enabled else 0x36393F)
-        return await interaction.response.send_message(embed=e)
-
-    if action.lower() == "close":
-        # Закрываем тикет (удаляем канал)
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                "SELECT id FROM tickets WHERE guild_id=? AND channel_id=? AND status='open'",
-                (interaction.guild_id, interaction.channel_id)
-            ) as c:
-                row = await c.fetchone()
-        if not row:
-            return await interaction.response.send_message("❌ Это не тикет-канал.", ephemeral=True)
-        await interaction.response.send_message("🔒 Тикет закрывается...")
-        await asyncio.sleep(3)
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (interaction.channel_id,))
-            await db.commit()
-        await interaction.channel.delete()
-        return
-
-    # open — создаём новый тикет
-    settings = await get_guild_settings(interaction.guild_id)
-
-    # Проверяем включены ли тикеты
-    if not settings.get("tickets_enabled", 1):
-        return await interaction.response.send_message(
-            "❌ Система тикетов отключена на этом сервере.", ephemeral=True
-        )
-
-    cat_id = settings.get("ticket_category", 0)
-    category = interaction.guild.get_channel(cat_id) if cat_id else None
-
-    # Проверяем нет ли уже открытого тикета
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'",
-            (interaction.guild_id, interaction.user.id)
-        ) as c:
-            existing = await c.fetchone()
-
-    if existing:
-        ch = interaction.guild.get_channel(existing[0])
-        return await interaction.response.send_message(
-            f"❌ У тебя уже есть открытый тикет: {ch.mention if ch else 'канал удалён'}",
-            ephemeral=True
-        )
-
-    # Создаём канал тикета
-    overwrites = {
-        interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        interaction.guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-    }
-    # Даём доступ модераторам
-    for role in interaction.guild.roles:
-        if role.permissions.manage_messages:
-            overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-
-    ch_name = f"ticket-{interaction.user.name[:15].lower().replace(' ', '-')}"
-    try:
-        ticket_ch = await interaction.guild.create_text_channel(
-            ch_name, category=category, overwrites=overwrites
-        )
-    except Exception as ex:
-        return await interaction.response.send_message(f"❌ Не удалось создать канал: {ex}", ephemeral=True)
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO tickets (guild_id,user_id,channel_id,status,created_at) VALUES (?,?,?,?,?)",
-            (interaction.guild_id, interaction.user.id, ticket_ch.id, "open", datetime.datetime.utcnow().isoformat())
-        )
-        await db.commit()
-
-    e = discord.Embed(title="🎫 Тикет открыт", color=0x00E5FF, timestamp=datetime.datetime.utcnow())
-    e.add_field(name="Участник", value=interaction.user.mention, inline=True)
-    e.add_field(name="Причина", value=reason, inline=True)
-    e.add_field(name="Закрыть", value="`/ticket action:close`", inline=False)
-    e.set_footer(text="Модераторы скоро ответят")
-    await ticket_ch.send(embed=e)
-    await interaction.response.send_message(f"✅ Тикет создан: {ticket_ch.mention}", ephemeral=True)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

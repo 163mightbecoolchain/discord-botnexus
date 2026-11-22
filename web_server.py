@@ -17,6 +17,9 @@ Routes:
   POST /api/guild/:id/security   — Save security toggles
   GET|POST /api/guild/:id/log-whitelist — участники вне логов
   GET|POST /api/guild/:id/prebans — предбан: UID, которых бот забанит при входе
+  GET|POST /api/guild/:id/tickets — тикеты: настройки, открытые и недавно закрытые
+  POST /api/guild/:id/tickets/panel — отправить/убрать панель с кнопкой
+  POST /api/guild/:id/tickets/:tid/close — закрыть тикет с сайта
   GET  /api/guild/:id/channels   — Channels + roles
   GET  /api/guild/:id/modlog     — Mod log
   GET  /api/guild/:id/invites    — Invite stats + search
@@ -508,18 +511,20 @@ async def api_guild_settings_get(request):
         # С умолчаниями, как их видит бот (get_security) — иначе включённые
         # по умолчанию логи показывались в панели выключенными
         from witness.database import DEFAULT_SEC
+        from witness.tickets import get_settings as get_ticket_settings
+        tickets_cfg = await get_ticket_settings(guild_id)
         sec_settings = {**DEFAULT_SEC,
                         **(json.loads(sec_row[1] or '{}') if sec_row else {})}
 
         return web.json_response({
             # guild_settings
             'lang':               gs.get('lang', 'ru'),
-            'tickets_enabled':    gs.get('tickets_enabled', 1),
+            'tickets_enabled':    tickets_cfg['enabled'],
             'lockdown':           gs.get('lockdown', 0),
             'starboard_threshold':gs.get('starboard_threshold', 3),
             'starboard_channel':  gs.get('starboard_channel', 0),
             'suggestion_channel': gs.get('suggestion_channel', 0),
-            'ticket_category':    gs.get('ticket_category', 0),
+            'ticket_category':    tickets_cfg['category_id'],
             'birthday_channel':   gs.get('birthday_channel', 0),
             # security
             'log_channel':        sec_row[0] if sec_row else 0,
@@ -561,12 +566,10 @@ async def api_guild_settings_post(request):
             lang = data.get('lang')
             gs_fields = {
                 'lang': lang if lang in ('ru', 'en', 'de') else None,
-                'tickets_enabled': data.get('tickets_enabled'),
                 'lockdown': data.get('lockdown'),
                 'starboard_threshold': data.get('starboard_threshold'),
                 'starboard_channel': data.get('starboard_channel'),
                 'suggestion_channel': data.get('suggestion_channel'),
-                'ticket_category': data.get('ticket_category'),
                 'birthday_channel': data.get('birthday_channel'),
             }
             for key, val in gs_fields.items():
@@ -1717,6 +1720,175 @@ async def api_selfroles_panel_action(request):
         return _server_error(request, e)
 
 
+# ── API: тикеты (witness/tickets.py) ──────────────────────────
+
+def _tk_user(bg, uid):
+    if not uid:
+        return None
+    m = bg.get_member(int(uid))
+    return {'id': str(uid), 'name': m.display_name if m else f'ID {uid}',
+            'tag': str(m) if m else '', 'avatar': m.display_avatar.url if m else ''}
+
+
+async def _tickets_payload(bg) -> dict:
+    from witness import tickets as tk
+    cfg = await tk.get_settings(bg.id)
+    panel_ch = bg.get_channel(int(cfg['panel_channel'] or 0))
+    open_rows = []
+    for t in await tk.list_tickets(bg.id, 'open', 100):
+        ch = bg.get_channel(t['channel_id'] or 0)
+        open_rows.append({'id': t['id'], 'number': t['number'] or t['id'], 'user': _tk_user(bg, t['user_id']),
+                          'reason': t['reason'] or '', 'created_at': t['created_at'] or '',
+                          'claimed_by': _tk_user(bg, t['claimed_by']),
+                          'channel': ch.name if ch else '', 'alive': bool(ch),
+                          'url': f"https://discord.com/channels/{bg.id}/{t['channel_id']}"})
+    closed_rows = [{'id': t['id'], 'number': t['number'] or t['id'], 'user': _tk_user(bg, t['user_id']),
+                    'reason': t['reason'] or '', 'created_at': t['created_at'] or '',
+                    'closed_at': t['closed_at'] or '', 'closed_by': _tk_user(bg, t['closed_by']),
+                    'close_reason': t['close_reason'] or '', 'log_url': t['log_url'] or ''}
+                   for t in await tk.list_tickets(bg.id, 'closed', 20)]
+    return {
+        'enabled':       bool(cfg['enabled']),
+        'premium':       await tk.premium_ok(bg.id),
+        'problem':       tk.setup_problem(bg),
+        'category_id':   str(cfg['category_id'] or ''),
+        'support_role':  str(cfg['support_role'] or ''),
+        'log_channel':   str(cfg['log_channel'] or ''),
+        'max_open':      int(cfg['max_open'] or 1),
+        'ping_support':  bool(cfg['ping_support']),
+        'dm_transcript': bool(cfg['dm_transcript']),
+        'welcome':       cfg['welcome'] or '',
+        'panel_title':   cfg['panel_title'] or '',
+        'panel_desc':    cfg['panel_desc'] or '',
+        'panel_button':  cfg['panel_button'] or '',
+        'panel_color':   f"#{int(cfg['panel_color'] or tk.DEFAULT_COLOR):06x}",
+        'panel_channel': str(panel_ch.id) if panel_ch and cfg['panel_message'] else '',
+        'panel_url':     (f"https://discord.com/channels/{bg.id}/{panel_ch.id}/{cfg['panel_message']}"
+                          if panel_ch and cfg['panel_message'] else ''),
+        'defaults':      {'title': tk.DEFAULT_TITLE, 'desc': tk.DEFAULT_DESC, 'button': tk.DEFAULT_BUTTON,
+                          'welcome': tk.DEFAULT_WELCOME},
+        'counter':       int(cfg['counter'] or 0),
+        'open':          open_rows,
+        'closed':        closed_rows,
+    }
+
+
+@require_auth
+async def api_tickets(request):
+    """GET /api/guild/:id/tickets — настройки и списки.
+    POST — {"enabled", "category_id" ("new" — создать), "support_role", "log_channel", "max_open",
+            "ping_support", "dm_transcript", "welcome", "panel_title", "panel_desc", "panel_button", "panel_color"}"""
+    bg, me, err = await _selfroles_guard(request)
+    if err:
+        return err
+    import discord
+    from witness import tickets as tk
+    try:
+        warning = None
+        if request.method == 'POST':
+            data = await request.json()
+            if not isinstance(data, dict):
+                return web.json_response({'error': 'Bad request'}, status=400)
+            upd = {}
+
+            def _id(key, kind):
+                v = str(data.get(key) or '')
+                obj = (bg.get_role(int(v)) if kind == 'role' else bg.get_channel(int(v))) if v.isdigit() else None
+                if kind == 'text' and not isinstance(obj, discord.TextChannel):
+                    obj = None
+                if kind == 'category' and not isinstance(obj, discord.CategoryChannel):
+                    obj = None
+                if kind == 'role' and obj is not None and (obj.is_default() or obj.managed):
+                    obj = None
+                return obj.id if obj else 0
+
+            if 'enabled' in data:
+                upd['enabled'] = int(bool(data['enabled']))
+            if 'support_role' in data:
+                upd['support_role'] = _id('support_role', 'role')
+            if 'log_channel' in data:
+                upd['log_channel'] = _id('log_channel', 'text')
+            if 'category_id' in data and data['category_id'] != 'new':
+                upd['category_id'] = _id('category_id', 'category')
+            if 'max_open' in data:
+                try:
+                    upd['max_open'] = max(1, min(tk.MAX_OPEN_LIMIT, int(data['max_open'])))
+                except (TypeError, ValueError):
+                    pass
+            for k in ('ping_support', 'dm_transcript'):
+                if k in data:
+                    upd[k] = int(bool(data[k]))
+            for k, n in (('welcome', 1000), ('panel_title', 256), ('panel_desc', 2000), ('panel_button', 80)):
+                if k in data:
+                    upd[k] = str(data[k] or '').strip()[:n]
+            if 'panel_color' in data:
+                c = str(data['panel_color'] or '').lstrip('#')
+                upd['panel_color'] = int(c, 16) if len(c) == 6 and all(x in '0123456789abcdefABCDEF' for x in c) else 0
+            await tk.save_settings(bg.id, **upd)
+            if data.get('category_id') == 'new':
+                _, msg = await tk.ensure_category(bg, {'category_id': 0})
+                if msg:
+                    warning = msg
+            if any(k.startswith('panel_') for k in upd):
+                warning = await tk.refresh_panel(bg) or warning
+        payload = await _tickets_payload(bg)
+        if warning:
+            payload['warning'] = warning
+        return web.json_response(payload)
+    except Exception as e:
+        return _server_error(request, e)
+
+
+@require_auth
+async def api_tickets_panel(request):
+    """POST /api/guild/:id/tickets/panel — {"channel_id"} отправить/перенести панель; {"remove": true} — убрать"""
+    bg, me, err = await _selfroles_guard(request)
+    if err:
+        return err
+    import discord
+    from witness import tickets as tk
+    try:
+        data = await request.json()
+        data = data if isinstance(data, dict) else {}
+        if data.get('remove'):
+            await tk.remove_panel(bg)
+            return web.json_response({'ok': True, **(await _tickets_payload(bg))})
+        ch_id = str(data.get('channel_id') or '')
+        ch = bg.get_channel(int(ch_id)) if ch_id.isdigit() else None
+        if not isinstance(ch, discord.TextChannel):
+            return web.json_response({'error': 'Выбери текстовый канал'}, status=400)
+        msg = await tk.send_panel(bg, ch)
+        return web.json_response({'ok': not msg, 'error': msg or None, **(await _tickets_payload(bg))},
+                                 status=400 if msg else 200)
+    except Exception as e:
+        return _server_error(request, e)
+
+
+@require_auth
+async def api_ticket_close(request):
+    """POST /api/guild/:id/tickets/:tid/close — {"reason"}"""
+    bg, me, err = await _selfroles_guard(request)
+    if err:
+        return err
+    from witness import tickets as tk
+    try:
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        tid = request.match_info['tid']
+        t = await tk.get_ticket(int(tid)) if tid.isdigit() else None
+        if not t or t['guild_id'] != bg.id:
+            return web.json_response({'error': 'Тикет не найден'}, status=404)
+        reason = str(data.get('reason') or '').strip()[:300]
+        msg = await tk.close_ticket(bg, t, me, (reason + ' ' if reason else '') + '(закрыт с сайта)')
+        return web.json_response({'ok': not msg, 'error': msg or None, **(await _tickets_payload(bg))},
+                                 status=400 if msg else 200)
+    except Exception as e:
+        return _server_error(request, e)
+
+
 # ── API: поиск по участнику ───────────────────────────────────
 
 def _role_kind(role) -> str:
@@ -2677,6 +2849,10 @@ def create_app(bot) -> web.Application:
         ('POST', '/guild/{guild_id}/selfroles',             api_selfroles),
         ('POST', '/guild/{guild_id}/selfroles/panel',       api_selfroles_panel),
         ('POST', '/guild/{guild_id}/selfroles/panel/{pid}/{action}', api_selfroles_panel_action),
+        ('GET',  '/guild/{guild_id}/tickets',               api_tickets),
+        ('POST', '/guild/{guild_id}/tickets',               api_tickets),
+        ('POST', '/guild/{guild_id}/tickets/panel',         api_tickets_panel),
+        ('POST', '/guild/{guild_id}/tickets/{tid}/close',   api_ticket_close),
         ('GET',  '/guild/{guild_id}/members/search',        api_member_search),
         ('GET',  '/guild/{guild_id}/member/{uid}',          api_member_lookup),
         ('POST', '/guild/{guild_id}/member/{uid}/action',   api_member_action),
