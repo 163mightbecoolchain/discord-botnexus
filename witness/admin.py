@@ -279,12 +279,14 @@ async def setup_cmd(interaction: discord.Interaction):
     settings = await get_guild_settings(gid)
     log_ch_id, sec_settings = await get_security(gid)
     tier = await get_tier(gid)
+    from .tickets import get_settings as get_ticket_settings
+    tickets_on = (await get_ticket_settings(gid))["enabled"]
 
     # Статус настроек
     items = [
         ("Лог-канал",       "✅" if log_ch_id else "❌", "/security setlog #channel"),
         ("Язык",            "✅", f"/lang language:{settings.get('lang','ru')}"),
-        ("Тикеты",          "✅" if settings.get('ticket_category') else "❌", "/ticket action:setup"),
+        ("Тикеты",          "✅" if tickets_on else "❌", "/ticket setup"),
         ("Карантин",        "✅" if settings.get('quarantine_role') else "❌", "/quarantine action:setup role:@Role"),
         ("Reaction Roles",  "⚙️", "/reactionrole action:add"),
         ("Прогр. наказания","⚙️", "/punishments"),
@@ -304,21 +306,7 @@ async def setup_cmd(interaction: discord.Interaction):
             "**Рекомендуется:**\n"
             "4. `/quarantine action:setup role:@Quarantine hours:24 min_age:7`\n"
             "5. `/punishments` — настроить авто-наказания\n"
-            "6. `/ticket action:setup` — система тикетов"
-        ),
-        inline=False
-    )
-    e.add_field(
-        name="Следующий шаг",
-        value=(
-            "**Минимальная настройка:**\n"
-            "1. `/security setlog #logs` — куда слать логи\n"
-            "2. `/security toggle joins:on leaves:on bans:on` — включить события\n"
-            "3. `/lang language:ru` — выбрать язык\n\n"
-            "**Рекомендуется:**\n"
-            "4. `/quarantine action:setup role:@Quarantine hours:24 min_age:7`\n"
-            "5. `/punishments` — настроить авто-наказания\n"
-            "6. `/ticket action:setup` — система тикетов"
+            "6. `/ticket setup` — тикеты (настройка: дашборд → «Тикеты»)"
         ),
         inline=False
     )

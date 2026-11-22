@@ -173,7 +173,7 @@ async def memory_cleanup_loop(bot_instance):
                         await db.execute("""
                             DELETE FROM tickets
                             WHERE status = 'closed'
-                              AND created_at < datetime('now', '-60 days')
+                              AND COALESCE(NULLIF(closed_at, ''), created_at) < datetime('now', '-60 days')
                         """)
                         # reminders: выполненные > 7 дней
                         await db.execute("""

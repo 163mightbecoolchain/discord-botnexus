@@ -290,6 +290,26 @@ async def db_init():
                 joined_at     TEXT DEFAULT '',
                 PRIMARY KEY (guild_id, user_id));
 
+            -- Тикеты: настройки сервера (witness/tickets.py, дашборд «Тикеты»)
+            CREATE TABLE IF NOT EXISTS ticket_settings (
+                guild_id      INTEGER PRIMARY KEY,
+                enabled       INTEGER DEFAULT 0,
+                category_id   INTEGER DEFAULT 0,
+                support_role  INTEGER DEFAULT 0,
+                log_channel   INTEGER DEFAULT 0,
+                max_open      INTEGER DEFAULT 1,
+                ping_support  INTEGER DEFAULT 1,
+                dm_transcript INTEGER DEFAULT 0,
+                welcome       TEXT DEFAULT '',
+                panel_channel INTEGER DEFAULT 0,
+                panel_message INTEGER DEFAULT 0,
+                panel_title   TEXT DEFAULT '',
+                panel_desc    TEXT DEFAULT '',
+                panel_button  TEXT DEFAULT '',
+                panel_color   INTEGER DEFAULT 0,
+                counter       INTEGER DEFAULT 0,
+                questions     TEXT DEFAULT '[]');
+
             -- Панели самовыдачи ролей (кнопки / выпадающее меню), witness/selfroles.py
             CREATE TABLE IF NOT EXISTS role_panels (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -369,6 +389,24 @@ async def db_init():
             # Самовыдача ролей: по умолчанию выключена, включается тумблером в дашборде
             "ALTER TABLE guild_settings ADD COLUMN selfroles_enabled INTEGER DEFAULT 0",
             "ALTER TABLE guild_settings ADD COLUMN selfroles_manager_role INTEGER DEFAULT 0",
+            # Тикеты v2: номер, причина, кто взял/закрыл, ссылка на транскрипт
+            "ALTER TABLE tickets ADD COLUMN number INTEGER DEFAULT 0",
+            "ALTER TABLE tickets ADD COLUMN reason TEXT DEFAULT ''",
+            "ALTER TABLE tickets ADD COLUMN claimed_by INTEGER DEFAULT 0",
+            "ALTER TABLE tickets ADD COLUMN closed_by INTEGER DEFAULT 0",
+            "ALTER TABLE tickets ADD COLUMN closed_at TEXT DEFAULT ''",
+            "ALTER TABLE tickets ADD COLUMN close_reason TEXT DEFAULT ''",
+            "ALTER TABLE tickets ADD COLUMN log_url TEXT DEFAULT ''",
+            # Анкета при открытии тикета: вопросы сервера и ответы участника (JSON)
+            "ALTER TABLE ticket_settings ADD COLUMN questions TEXT DEFAULT '[]'",
+            "ALTER TABLE tickets ADD COLUMN answers TEXT DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_guild   ON tickets(guild_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id)",
+            # Перенос старых настроек: серверы, где делали /ticket setup, остаются включёнными.
+            # Остальные — выключены, пока админ не включит (раньше было включено по умолчанию).
+            "INSERT OR IGNORE INTO ticket_settings (guild_id, enabled, category_id) "
+            "SELECT guild_id, COALESCE(tickets_enabled, 1), ticket_category FROM guild_settings "
+            "WHERE ticket_category IS NOT NULL AND ticket_category != 0",
             # Индексы на таблицах с частыми выборками. Без них SQLite
             # сканирует таблицу целиком, и время растёт вместе с историей.
             "CREATE INDEX IF NOT EXISTS idx_invite_member ON invite_log(guild_id, member_id)",
