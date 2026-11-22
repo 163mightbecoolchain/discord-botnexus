@@ -1739,11 +1739,13 @@ async def _tickets_payload(bg) -> dict:
         ch = bg.get_channel(t['channel_id'] or 0)
         open_rows.append({'id': t['id'], 'number': t['number'] or t['id'], 'user': _tk_user(bg, t['user_id']),
                           'reason': t['reason'] or '', 'created_at': t['created_at'] or '',
+                          'answers': tk.parse_answers(t.get('answers')),
                           'claimed_by': _tk_user(bg, t['claimed_by']),
                           'channel': ch.name if ch else '', 'alive': bool(ch),
                           'url': f"https://discord.com/channels/{bg.id}/{t['channel_id']}"})
     closed_rows = [{'id': t['id'], 'number': t['number'] or t['id'], 'user': _tk_user(bg, t['user_id']),
                     'reason': t['reason'] or '', 'created_at': t['created_at'] or '',
+                    'answers': tk.parse_answers(t.get('answers')),
                     'closed_at': t['closed_at'] or '', 'closed_by': _tk_user(bg, t['closed_by']),
                     'close_reason': t['close_reason'] or '', 'log_url': t['log_url'] or ''}
                    for t in await tk.list_tickets(bg.id, 'closed', 20)]
@@ -1768,6 +1770,9 @@ async def _tickets_payload(bg) -> dict:
         'defaults':      {'title': tk.DEFAULT_TITLE, 'desc': tk.DEFAULT_DESC, 'button': tk.DEFAULT_BUTTON,
                           'welcome': tk.DEFAULT_WELCOME},
         'counter':       int(cfg['counter'] or 0),
+        'questions':     tk.clean_questions(cfg['questions']),
+        'max_questions': tk.MAX_QUESTIONS,
+        'default_question': tk.DEFAULT_QUESTION,
         'open':          open_rows,
         'closed':        closed_rows,
     }
@@ -1824,6 +1829,8 @@ async def api_tickets(request):
             if 'panel_color' in data:
                 c = str(data['panel_color'] or '').lstrip('#')
                 upd['panel_color'] = int(c, 16) if len(c) == 6 and all(x in '0123456789abcdefABCDEF' for x in c) else 0
+            if 'questions' in data:
+                upd['questions'] = json.dumps(tk.clean_questions(data['questions']), ensure_ascii=False)
             await tk.save_settings(bg.id, **upd)
             if data.get('category_id') == 'new':
                 _, msg = await tk.ensure_category(bg, {'category_id': 0})

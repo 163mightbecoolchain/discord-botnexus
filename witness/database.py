@@ -307,7 +307,8 @@ async def db_init():
                 panel_desc    TEXT DEFAULT '',
                 panel_button  TEXT DEFAULT '',
                 panel_color   INTEGER DEFAULT 0,
-                counter       INTEGER DEFAULT 0);
+                counter       INTEGER DEFAULT 0,
+                questions     TEXT DEFAULT '[]');
 
             -- Панели самовыдачи ролей (кнопки / выпадающее меню), witness/selfroles.py
             CREATE TABLE IF NOT EXISTS role_panels (
@@ -396,6 +397,9 @@ async def db_init():
             "ALTER TABLE tickets ADD COLUMN closed_at TEXT DEFAULT ''",
             "ALTER TABLE tickets ADD COLUMN close_reason TEXT DEFAULT ''",
             "ALTER TABLE tickets ADD COLUMN log_url TEXT DEFAULT ''",
+            # Анкета при открытии тикета: вопросы сервера и ответы участника (JSON)
+            "ALTER TABLE ticket_settings ADD COLUMN questions TEXT DEFAULT '[]'",
+            "ALTER TABLE tickets ADD COLUMN answers TEXT DEFAULT ''",
             "CREATE INDEX IF NOT EXISTS idx_tickets_guild   ON tickets(guild_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id)",
             # Перенос старых настроек: серверы, где делали /ticket setup, остаются включёнными.

@@ -1,7 +1,7 @@
 """
 Тикеты поддержки.
 
-  • панель с кнопкой «Открыть тикет» → окно с причиной → приватный канал;
+  • панель с кнопкой «Открыть тикет» → окно с вопросами сервера (анкета, до 5) → приватный канал;
   • в канале тикета кнопки «Взять в работу» и «Закрыть» (закрытие — с причиной);
   • при закрытии транскрипт переписки уходит в лог-канал (и автору в ЛС, если включено);
   • /ticket open|close|claim|add|remove|setup — то же самое командами;
@@ -15,6 +15,7 @@
 import asyncio
 import datetime
 import io
+import json
 
 import aiosqlite
 import discord
@@ -32,12 +33,17 @@ MAX_OPEN_LIMIT  = 5
 TRANSCRIPT_MAX  = 5000          # сообщений в транскрипте
 CLOSE_DELAY     = 5             # секунд до удаления канала
 
+MAX_QUESTIONS   = 5             # предел полей в окне Discord
+DEFAULT_QUESTION = {"label": "Что случилось?", "placeholder": "Коротко опиши вопрос — так ответят быстрее",
+                    "style": "long", "required": False}
+
 SETTING_KEYS = ("enabled", "category_id", "support_role", "log_channel", "max_open", "ping_support",
                 "dm_transcript", "welcome", "panel_channel", "panel_message", "panel_title",
-                "panel_desc", "panel_button", "panel_color", "counter")
+                "panel_desc", "panel_button", "panel_color", "counter", "questions")
 DEFAULTS = {"enabled": 0, "category_id": 0, "support_role": 0, "log_channel": 0, "max_open": 1,
             "ping_support": 1, "dm_transcript": 0, "welcome": "", "panel_channel": 0, "panel_message": 0,
-            "panel_title": "", "panel_desc": "", "panel_button": "", "panel_color": 0, "counter": 0}
+            "panel_title": "", "panel_desc": "", "panel_button": "", "panel_color": 0, "counter": 0,
+            "questions": "[]"}
 
 _opening: set = set()           # (guild_id, user_id) — защита от двойного нажатия
 _closing: set = set()           # id тикетов, которые сейчас закрываются
@@ -45,6 +51,42 @@ _closing: set = set()           # id тикетов, которые сейчас
 
 def _now() -> str:
     return datetime.datetime.utcnow().isoformat(timespec="seconds")
+
+
+def clean_questions(raw) -> list[dict]:
+    """Список вопросов анкеты в безопасном виде (лимиты Discord: подпись 45, подсказка 100)."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except ValueError:
+            raw = []
+    out = []
+    for q in raw if isinstance(raw, list) else []:
+        if not isinstance(q, dict):
+            continue
+        label = " ".join(str(q.get("label") or "").split())[:45]
+        if not label:
+            continue
+        out.append({"label": label,
+                    "placeholder": " ".join(str(q.get("placeholder") or "").split())[:100],
+                    "style": "long" if q.get("style") == "long" else "short",
+                    "required": bool(q.get("required"))})
+        if len(out) >= MAX_QUESTIONS:
+            break
+    return out
+
+
+def questions_for(cfg: dict) -> list[dict]:
+    """Вопросы сервера, а если их нет — один общий «Что случилось?»."""
+    return clean_questions(cfg.get("questions")) or [DEFAULT_QUESTION]
+
+
+def parse_answers(raw) -> list[dict]:
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [a for a in data if isinstance(a, dict) and "q" in a] if isinstance(data, list) else []
 
 
 # ── База ──────────────────────────────────────────────────────
@@ -258,8 +300,12 @@ async def ensure_category(guild: discord.Guild, cfg: dict | None = None) -> tupl
 
 # ── Открытие ──────────────────────────────────────────────────
 
-async def open_ticket(member: discord.Member, reason: str) -> tuple[discord.TextChannel | None, str | None]:
+async def open_ticket(member: discord.Member, answers: list[dict]) -> tuple[discord.TextChannel | None, str | None]:
+    """answers — [{"q": вопрос, "a": ответ}] из окна анкеты."""
     guild = member.guild
+    answers = [{"q": str(x.get("q") or "")[:45], "a": str(x.get("a") or "").strip()[:1000]} for x in answers][:MAX_QUESTIONS]
+    # Короткая «причина» для списков на сайте и в логе — первый непустой ответ
+    reason = next((" ".join(x["a"].split()) for x in answers if x["a"]), "")[:300] or "Без описания"
     if not await premium_ok(guild.id):
         return None, "Тикеты работают на тарифе **Premium**."
     cfg = await get_settings(guild.id)
@@ -326,15 +372,17 @@ async def open_ticket(member: discord.Member, reason: str) -> tuple[discord.Text
 
         async with aiosqlite.connect(DB_PATH) as db:
             cur = await db.execute(
-                "INSERT INTO tickets (guild_id, user_id, channel_id, status, created_at, number, reason) "
-                "VALUES (?,?,?,?,?,?,?)", (guild.id, member.id, ch.id, "open", _now(), number, reason[:500]))
+                "INSERT INTO tickets (guild_id, user_id, channel_id, status, created_at, number, reason, answers) "
+                "VALUES (?,?,?,?,?,?,?,?)", (guild.id, member.id, ch.id, "open", _now(), number, reason,
+                                             json.dumps(answers, ensure_ascii=False)))
             tid = cur.lastrowid
             await db.commit()
 
         e = discord.Embed(title=f"🎫 Тикет #{number:04d}", description=cfg["welcome"] or DEFAULT_WELCOME,
                           color=int(cfg["panel_color"] or DEFAULT_COLOR), timestamp=datetime.datetime.utcnow())
-        e.add_field(name="Участник", value=member.mention, inline=True)
-        e.add_field(name="Причина", value=reason[:1024] or "—", inline=True)
+        e.add_field(name="Участник", value=member.mention, inline=False)
+        for x in answers:
+            e.add_field(name=x["q"] or "Ответ", value=x["a"][:1024] or "—", inline=False)
         e.set_footer(text="Закрыть тикет — кнопкой ниже или /ticket close")
         ping = [member.mention]
         roles = []
@@ -356,7 +404,7 @@ async def open_ticket(member: discord.Member, reason: str) -> tuple[discord.Text
 
 # ── Закрытие ──────────────────────────────────────────────────
 
-async def build_transcript(channel: discord.TextChannel) -> tuple[bytes, int]:
+async def build_transcript(channel: discord.TextChannel, answers: list[dict] = ()) -> tuple[bytes, int]:
     lines, count = [], 0
     async for m in channel.history(limit=TRANSCRIPT_MAX, oldest_first=True):
         count += 1
@@ -371,6 +419,8 @@ async def build_transcript(channel: discord.TextChannel) -> tuple[bytes, int]:
             text += ("\n" if text else "") + f"[файл] {a.filename} {a.url}"
         lines.append(f"[{ts} UTC] {m.author} ({m.author.id}): {text}")
     head = f"Транскрипт #{channel.name} · {channel.guild.name} · сообщений: {count}\n" + "=" * 60 + "\n"
+    if answers:
+        head += "Анкета:\n" + "".join(f"  {a['q']}: {a.get('a') or '—'}\n" for a in answers) + "=" * 60 + "\n"
     return (head + "\n".join(lines)).encode("utf-8"), count
 
 
@@ -395,7 +445,7 @@ async def close_ticket(guild: discord.Guild, ticket: dict, closer: discord.abc.U
             except discord.HTTPException:
                 pass
             try:
-                data, count = await build_transcript(ch)
+                data, count = await build_transcript(ch, parse_answers(ticket.get("answers")))
             except discord.HTTPException as ex:
                 await report_error("TICKETS", ex, f"Сервер {guild.id}: не собрался транскрипт тикета #{ticket['number']}")
 
@@ -406,7 +456,12 @@ async def close_ticket(guild: discord.Guild, ticket: dict, closer: discord.abc.U
         e.add_field(name="Закрыл", value=closer.mention if closer else "—", inline=True)
         if ticket.get("claimed_by"):
             e.add_field(name="Взял в работу", value=f"<@{ticket['claimed_by']}>", inline=True)
-        e.add_field(name="Причина обращения", value=(ticket.get("reason") or "—")[:1024], inline=False)
+        answers = parse_answers(ticket.get("answers"))
+        if answers:
+            for a in answers:
+                e.add_field(name=a["q"] or "Ответ", value=(a.get("a") or "—")[:300], inline=False)
+        else:
+            e.add_field(name="Причина обращения", value=(ticket.get("reason") or "—")[:1024], inline=False)
         if reason:
             e.add_field(name="Причина закрытия", value=reason[:1024], inline=False)
         if ticket.get("created_at"):
@@ -466,15 +521,35 @@ async def claim_ticket(ticket: dict, member: discord.Member) -> str | None:
 
 # ── Компоненты ────────────────────────────────────────────────
 
-class OpenModal(discord.ui.Modal, title="Новый тикет"):
-    reason = discord.ui.TextInput(label="Что случилось?", style=discord.TextStyle.paragraph,
-                                  max_length=500, required=False,
-                                  placeholder="Коротко опиши вопрос — так ответят быстрее")
+class OpenModal(discord.ui.Modal):
+    """Окно анкеты: вопросы сервера (до 5) или один общий «Что случилось?»."""
+    def __init__(self, questions: list[dict]):
+        super().__init__(title="Новый тикет", timeout=900)
+        self.inputs = []
+        for q in questions[:MAX_QUESTIONS]:
+            long = q["style"] == "long"
+            ti = discord.ui.TextInput(label=q["label"], placeholder=q["placeholder"] or None,
+                                      style=discord.TextStyle.paragraph if long else discord.TextStyle.short,
+                                      max_length=900 if long else 200, required=q["required"])
+            self.add_item(ti)
+            self.inputs.append((q["label"], ti))
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
-        ch, err = await open_ticket(interaction.user, str(self.reason.value or "").strip() or "Без описания")
+        answers = [{"q": label, "a": str(ti.value or "").strip()} for label, ti in self.inputs]
+        ch, err = await open_ticket(interaction.user, answers)
         await interaction.followup.send(f"❌ {err}" if err else f"✅ Тикет открыт: {ch.mention}", ephemeral=True)
+
+
+async def _ask_and_open(interaction: discord.Interaction):
+    """Общая точка для кнопки и /ticket open: проверки → окно анкеты."""
+    cfg = await get_settings(interaction.guild_id)
+    if not await premium_ok(interaction.guild_id):
+        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
+    if not cfg["enabled"]:
+        return await interaction.response.send_message("❌ Тикеты на этом сервере сейчас выключены.",
+                                                       ephemeral=True)
+    await interaction.response.send_modal(OpenModal(questions_for(cfg)))
 
 
 class CloseModal(discord.ui.Modal, title="Закрыть тикет"):
@@ -508,13 +583,7 @@ class OpenButton(discord.ui.DynamicItem[discord.ui.Button], template=r"tkt:open"
         return cls(item.label or DEFAULT_BUTTON)
 
     async def callback(self, interaction: discord.Interaction):
-        cfg = await get_settings(interaction.guild_id)
-        if not cfg["enabled"]:
-            return await interaction.response.send_message("❌ Тикеты на этом сервере сейчас выключены.",
-                                                           ephemeral=True)
-        if not await premium_ok(interaction.guild_id):
-            return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
-        await interaction.response.send_modal(OpenModal())
+        await _ask_and_open(interaction)
 
 
 class ClaimButton(discord.ui.DynamicItem[discord.ui.Button], template=r"tkt:claim:(?P<tid>\d+)"):
@@ -620,14 +689,9 @@ async def _ticket_here(interaction: discord.Interaction) -> dict | None:
     return t
 
 
-@ticket_grp.command(name="open", description="Открыть тикет")
-@app_commands.describe(reason="Что случилось")
-async def t_open(interaction: discord.Interaction, reason: app_commands.Range[str, 1, 500] = "Без описания"):
-    if not await premium_ok(interaction.guild_id):
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    ch, err = await open_ticket(interaction.user, reason.strip())
-    await interaction.followup.send(f"❌ {err}" if err else f"✅ Тикет открыт: {ch.mention}", ephemeral=True)
+@ticket_grp.command(name="open", description="Открыть тикет (появится окно с вопросами)")
+async def t_open(interaction: discord.Interaction):
+    await _ask_and_open(interaction)
 
 
 @ticket_grp.command(name="close", description="Закрыть этот тикет (транскрипт уйдёт в лог-канал)")

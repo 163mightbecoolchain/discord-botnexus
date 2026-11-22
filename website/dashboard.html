@@ -680,6 +680,22 @@ html.theme-anim *::before, html.theme-anim *::after {
 .tk-mention { background: rgba(88,101,242,.3); color: #c9cdfb; border-radius: 3px; padding: 0 .2rem; }
 .tk-fields { display: flex; gap: 1.5rem; margin-top: .5rem; flex-wrap: wrap; }
 .tk-fields b { display: block; color: #f2f3f5; font-size: .78rem; margin-bottom: .1rem; }
+.tk-fields.col { flex-direction: column; gap: .5rem; }
+.tk-q { display: flex; flex-direction: column; gap: .45rem; padding: .7rem 0; border-top: 1px solid var(--border); }
+.tk-q:first-child { border-top: 0; padding-top: 0; }
+.tk-q-head { display: flex; align-items: center; gap: .4rem; }
+.tk-q-head .input { flex: 1; min-width: 0; }
+.tk-q-opts { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+.tk-check { display: inline-flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--text-2); cursor: pointer; }
+.tk-check input { accent-color: var(--accent); }
+.tk-modal { display: flex; flex-direction: column; gap: .7rem; }
+.tk-modal-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; color: #b5bac1; margin-bottom: .3rem; }
+.tk-modal-input { background: #1e1f22; border-radius: 4px; padding: .5rem .65rem; color: #6d6f78; min-height: 2.1rem; font-size: .82rem; }
+.tk-modal-input.long { min-height: 4.6rem; }
+.tk-answers { margin-top: .3rem; font-size: .78rem; color: var(--text-2); }
+.tk-answers summary { cursor: pointer; color: var(--muted); }
+.tk-answers div { padding: .15rem 0 0 .8rem; word-break: break-word; }
+.tk-answers b { color: var(--text); font-weight: 600; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -1541,6 +1557,25 @@ html.theme-anim *::before, html.theme-anim *::after {
               <select class="select" id="tk-panel-ch" style="min-width:200px;"></select>
               <button class="btn btn-primary btn-sm" id="tk-panel-send" onclick="btnBusy(this, sendTicketPanel)">Отправить</button>
               <button class="btn btn-ghost btn-sm hidden" id="tk-panel-remove" onclick="btnBusy(this, removeTicketPanel)">Убрать</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Вопросы при открытии</div>
+            <div class="card-desc">Участник отвечает на них в окне перед созданием тикета, ответы попадают в первое сообщение и в транскрипт. До 5 вопросов — предел Discord. Без вопросов спрашиваем «Что случилось?»</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="tk-q-add" onclick="tkAddQuestion()">+ Вопрос</button>
+        </div>
+        <div class="card-body">
+          <div class="sr-grid">
+            <div id="tk-questions"></div>
+            <div>
+              <label style="display:block; font-size:.78rem; color:var(--muted); margin-bottom:.4rem;">Окно у участника</label>
+              <div id="tk-preview-modal"></div>
             </div>
           </div>
         </div>
@@ -5108,6 +5143,7 @@ function saveTickets() {
     panel_desc:    getVal('tk-desc'),
     panel_button:  getVal('tk-button'),
     panel_color:   getVal('tk-color'),
+    questions:     _tkQ.filter(q => q.label.trim()),
   });
 }
 
@@ -5172,12 +5208,72 @@ function tkPreview() {
     <div class="sr-embed" style="--sr-color:${e(color)}">
       <div class="sr-embed-title">🎫 Тикет #${String((_tk.counter || 0) + 1).padStart(4, '0')}</div>
       <div class="sr-embed-desc">${e(getVal('tk-welcome') || d.welcome)}</div>
-      <div class="tk-fields"><div><b>Участник</b><span class="tk-mention">@участник</span></div>
-        <div><b>Причина</b>Не приходит роль после оплаты</div></div>
+      <div class="tk-fields col"><div><b>Участник</b><span class="tk-mention">@участник</span></div>
+        ${tkQuestions().map(q => `<div><b>${e(q.label)}</b><span class="text-muted">ответ участника</span></div>`).join('')}</div>
       <div class="sr-embed-foot">Закрыть тикет — кнопкой ниже или /ticket close</div>
     </div>
     <div class="sr-buttons"><span class="sr-btn">🙋 Взять в работу</span><span class="sr-btn" style="background:#da373c;">🔒 Закрыть</span></div>
   </div>`;
+  document.getElementById('tk-preview-modal').innerHTML = `<div class="sr-preview tk-modal">
+    <div class="sr-embed-title">Новый тикет</div>
+    ${tkQuestions().map(q => `<div class="tk-modal-field">
+      <div class="tk-modal-label">${e(q.label)}${q.required ? ' <span style="color:#f23f43;">*</span>' : ''}</div>
+      <div class="tk-modal-input${q.style === 'long' ? ' long' : ''}">${e(q.placeholder || '')}</div></div>`).join('')}
+    <div class="sr-buttons" style="justify-content:flex-end;"><span class="sr-btn" style="background:transparent;">Отмена</span><span class="sr-btn" style="background:#5865f2;">Отправить</span></div>
+  </div>`;
+}
+
+// ── Анкета: вопросы при открытии тикета ──
+let _tkQ = [];
+
+// То, что увидит участник: свои вопросы или общий «Что случилось?»
+function tkQuestions() {
+  const qs = _tkQ.filter(q => q.label.trim());
+  return qs.length ? qs : [_tk.default_question];
+}
+
+function tkAddQuestion() {
+  if (_tkQ.length >= (_tk ? _tk.max_questions : 5)) return;
+  _tkQ.push({label: '', placeholder: '', style: 'short', required: true});
+  tkRenderQuestions();
+  const inputs = document.querySelectorAll('#tk-questions .tk-q-label');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function tkQSet(i, key, val) {
+  _tkQ[i][key] = val;
+  if (key === 'style' || key === 'required') tkRenderQuestions(); else tkPreview();
+}
+
+function tkQMove(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= _tkQ.length) return;
+  [_tkQ[i], _tkQ[j]] = [_tkQ[j], _tkQ[i]];
+  tkRenderQuestions();
+}
+
+function tkQRemove(i) { _tkQ.splice(i, 1); tkRenderQuestions(); }
+
+function tkRenderQuestions() {
+  const e = escapeHtml, box = document.getElementById('tk-questions');
+  const max = _tk ? _tk.max_questions : 5;
+  document.getElementById('tk-q-add').disabled = _tkQ.length >= max;
+  box.innerHTML = _tkQ.length ? _tkQ.map((q, i) => `<div class="tk-q">
+      <div class="tk-q-head">
+        <span class="tk-num">${i + 1}</span>
+        <input class="input tk-q-label" id="tk-q-label-${i}" maxlength="45" placeholder="Вопрос, например: Ник в игре" value="${e(q.label)}" oninput="tkQSet(${i}, 'label', this.value)">
+        <button class="btn btn-ghost btn-sm" title="Выше" onclick="tkQMove(${i}, -1)" ${i ? '' : 'disabled'}>↑</button>
+        <button class="btn btn-ghost btn-sm" title="Ниже" onclick="tkQMove(${i}, 1)" ${i < _tkQ.length - 1 ? '' : 'disabled'}>↓</button>
+        <button class="btn btn-ghost btn-sm" title="Удалить" onclick="tkQRemove(${i})">✕</button>
+      </div>
+      <input class="input" id="tk-q-ph-${i}" maxlength="100" placeholder="Подсказка в поле (необязательно)" value="${e(q.placeholder)}" oninput="tkQSet(${i}, 'placeholder', this.value)">
+      <div class="tk-q-opts">
+        <label class="tk-check"><input type="checkbox" id="tk-q-long-${i}" ${q.style === 'long' ? 'checked' : ''} onchange="tkQSet(${i}, 'style', this.checked ? 'long' : 'short')"> Длинный ответ</label>
+        <label class="tk-check"><input type="checkbox" id="tk-q-req-${i}" ${q.required ? 'checked' : ''} onchange="tkQSet(${i}, 'required', this.checked)"> Обязательный</label>
+      </div>
+    </div>`).join('')
+    : `<div class="text-muted" style="font-size:.85rem;">Своих вопросов нет — участник увидит одно поле «Что случилось?». Нажми «+ Вопрос», чтобы задать свои: ник, номер заказа, скриншот и т.п.</div>`;
+  tkPreview();
 }
 
 function tkUser(u) {
@@ -5186,6 +5282,10 @@ function tkUser(u) {
 }
 
 function tkNum(n) { return '#' + String(n).padStart(4, '0'); }
+
+function tkAnswersText(x) {
+  return x.answers && x.answers.length ? x.answers.map(a => `${a.q}: ${a.a || '—'}`).join('\n') : (x.reason || '');
+}
 
 function renderTickets(fromServer) {
   if (!_tk) return;
@@ -5204,6 +5304,8 @@ function renderTickets(fromServer) {
     document.getElementById('tk-desc').placeholder = t.defaults.desc;
     document.getElementById('tk-button').placeholder = t.defaults.button;
     document.getElementById('tk-welcome').placeholder = t.defaults.welcome;
+    _tkQ = (t.questions || []).map(q => ({...q}));
+    tkRenderQuestions();
   }
   tkFillSelects(fromServer);
   tkPreview();
@@ -5234,7 +5336,9 @@ function renderTickets(fromServer) {
       <span class="tk-num">${tkNum(x.number)}</span>
       <div class="sr-role-main">
         <div>${tkUser(x.user)} ${x.claimed_by ? `<span class="tk-badge">в работе: ${escapeHtml(x.claimed_by.name)}</span>` : '<span class="tk-badge new">ждёт ответа</span>'}</div>
-        <div class="sub" title="${escapeHtml(x.reason)}">${escapeHtml(x.reason || 'Без описания')} · ${escapeHtml(_fmtWhen(x.created_at))}</div>
+        <div class="sub" title="${escapeHtml(tkAnswersText(x))}">${escapeHtml(x.reason || 'Без описания')} · ${escapeHtml(_fmtWhen(x.created_at))}</div>
+        ${x.answers && x.answers.length > 1 ? `<details class="tk-answers"><summary>Анкета (${x.answers.length})</summary>${
+          x.answers.map(a => `<div><b>${escapeHtml(a.q)}</b> ${escapeHtml(a.a || '—')}</div>`).join('')}</details>` : ''}
       </div>
       ${x.alive ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Открыть</a>` : '<span class="text-muted" style="font-size:.78rem;">канал удалён</span>'}
       <button class="btn btn-danger btn-sm" onclick="btnBusy(this, () => closeTicketFromSite(${x.id}, ${x.number}))">Закрыть</button>
