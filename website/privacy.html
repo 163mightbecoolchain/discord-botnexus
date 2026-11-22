@@ -118,7 +118,7 @@ footer a:hover { color: var(--accent); }
 
 <div data-lang="ru" lang="ru">
   <h1>Политика конфиденциальности</h1>
-  <div class="updated">Последнее обновление: 18 октября 2026</div>
+  <div class="updated">Последнее обновление: 22 ноября 2026</div>
 
   <p>
     Witness — бот для модерации Discord-серверов. Этот документ описывает, какие данные
@@ -199,9 +199,7 @@ footer a:hover { color: var(--accent); }
 
   <h3>Данные, которые участник вводит сам</h3>
   <ul>
-    <li>Тексты напоминаний, предложений, заметок к инвайтам</li>
-    <li>Дата рождения — только если участник указал её командой</li>
-    <li>Ники в играх — для игровых команд и привязки аккаунта Albion</li>
+    <li>Тексты заметок к инвайтам</li>
   </ul>
 
   <h3>Служебные данные</h3>
@@ -240,7 +238,6 @@ footer a:hover { color: var(--accent); }
     <tr><td>История правок сообщений</td><td>Срок, выбранный сервером: 7–730 дней (по умолчанию 180)</td></tr>
     <tr><td>Хеши и счётчики фильтров спама (в памяти)</td><td>До 5 минут / до суток</td></tr>
     <tr><td>Закрытые тикеты</td><td>60 дней</td></tr>
-    <tr><td>Выполненные напоминания</td><td>7 дней</td></tr>
     <tr><td>Настройки сервера</td><td>Пока бот находится на сервере</td></tr>
     <tr><td>Сессия веб-панели</td><td>30 дней</td></tr>
   </table>
@@ -264,7 +261,7 @@ footer a:hover { color: var(--accent); }
     <li><strong>Railway</strong> — хостинг, где размещены бот и база</li>
     <li>
       <strong>Groq, Google Gemini, Anthropic</strong> — ИИ-сервисы. Им отправляется только то,
-      что нужно для команды, которую вызвал пользователь: вопрос в <code>/ai</code> и <code>/askalbion</code>, текст
+      что нужно для команды, которую вызвал пользователь: вопрос в <code>/ai</code>, текст
       в <code>/translate</code>, последние сообщения канала (до 50, с отображаемыми именами)
       в <code>/summarize</code>, имя и роли участника в <code>/roast</code>.
       Если администратор сервера включил «ИИ-разбор жалоб», в Groq или Google Gemini отправляется
@@ -273,8 +270,7 @@ footer a:hover { color: var(--accent); }
     </li>
     <li><strong>Pollinations</strong> — описание картинки из <code>/imagine</code></li>
     <li>
-      <strong>Игровые API</strong> (Albion Online, Riot, Steam, Lost Ark, сервисы погоды) —
-      ник или запрос, введённый в игровой команде
+      <strong>OpenWeatherMap</strong> — название города из <code>/weather</code>
     </li>
   </ul>
 
@@ -312,7 +308,7 @@ footer a:hover { color: var(--accent); }
 
 <div data-lang="en" lang="en">
   <h1>Privacy Policy</h1>
-  <div class="updated">Last updated: October 18, 2026</div>
+  <div class="updated">Last updated: November 22, 2026</div>
 
   <p>
     Witness is a moderation bot for Discord servers. This document explains what data
@@ -393,9 +389,7 @@ footer a:hover { color: var(--accent); }
 
   <h3>Data members enter themselves</h3>
   <ul>
-    <li>Texts of reminders, suggestions and invite notes</li>
-    <li>Date of birth — only if the member set it with a command</li>
-    <li>In-game names — for game commands and Albion account linking</li>
+    <li>Texts of invite notes</li>
   </ul>
 
   <h3>Service data</h3>
@@ -434,7 +428,6 @@ footer a:hover { color: var(--accent); }
     <tr><td>Message edit history</td><td>The period chosen by the server: 7–730 days (180 by default)</td></tr>
     <tr><td>Spam filter hashes and counters (in memory)</td><td>Up to 5 minutes / up to a day</td></tr>
     <tr><td>Closed tickets</td><td>60 days</td></tr>
-    <tr><td>Completed reminders</td><td>7 days</td></tr>
     <tr><td>Server settings</td><td>While the bot is on the server</td></tr>
     <tr><td>Dashboard session</td><td>30 days</td></tr>
   </table>
@@ -458,7 +451,7 @@ footer a:hover { color: var(--accent); }
     <li><strong>Railway</strong> — hosting for the bot and its database</li>
     <li>
       <strong>Groq, Google Gemini, Anthropic</strong> — AI providers. They receive only what a command
-      the user ran needs: the question in <code>/ai</code> and <code>/askalbion</code>, the text in
+      the user ran needs: the question in <code>/ai</code>, the text in
       <code>/translate</code>, the last messages of the channel (up to 50, with display names) in
       <code>/summarize</code>, a member's name and roles in <code>/roast</code>.
       If a server administrator turns on “AI report triage”, the text of a message reported with
@@ -467,8 +460,7 @@ footer a:hover { color: var(--accent); }
     </li>
     <li><strong>Pollinations</strong> — the image description in <code>/imagine</code></li>
     <li>
-      <strong>Game APIs</strong> (Albion Online, Riot, Steam, Lost Ark, weather services) —
-      the name or query entered in a game command
+      <strong>OpenWeatherMap</strong> — the city name from <code>/weather</code>
     </li>
   </ul>
 

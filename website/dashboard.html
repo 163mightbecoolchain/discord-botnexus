@@ -918,12 +918,6 @@ html.theme-anim *::before, html.theme-anim *::after {
                 <option value="de">Deutsch</option>
               </select>
             </div>
-            <div class="form-group">
-              <label>Канал для дней рождения</label>
-              <select class="select" id="gen-birthday-ch">
-                <option value="">— нет —</option>
-              </select>
-            </div>
           </div>
 
           <div class="toggle-row">
@@ -974,21 +968,6 @@ html.theme-anim *::before, html.theme-anim *::after {
               <option value="">— выбери канал —</option>
             </select>
             <div class="input-help">Логи модерации, наказаний, апелляций, заявок на бан</div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label>Канал для предложений</label>
-              <select class="select" id="log-suggestion">
-                <option value="">— нет —</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Канал starboard</label>
-              <select class="select" id="log-starboard">
-                <option value="">— нет —</option>
-              </select>
-            </div>
           </div>
         </div>
       </div>
@@ -1294,42 +1273,6 @@ html.theme-anim *::before, html.theme-anim *::after {
               <label>Канал для отчёта</label>
               <select class="select" id="auto-invch"><option value="">— нет —</option></select>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Starboard</div>
-            <div class="card-desc">Сообщения с реакциями ⭐ попадают в отдельный канал</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Канал starboard</label>
-              <select class="select" id="auto-starch"><option value="">— выключено —</option></select>
-            </div>
-            <div class="form-group">
-              <label>Порог звёзд</label>
-              <input type="number" class="input" id="auto-starthr" value="3" min="1" max="100">
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Дни рождения</div>
-            <div class="card-desc">Бот поздравляет участников в 09:00 UTC</div>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="form-group" style="margin:0;">
-            <label>Канал для поздравлений</label>
-            <select class="select" id="auto-bdaych"><option value="">— выключено —</option></select>
           </div>
         </div>
       </div>
@@ -3134,8 +3077,7 @@ async function loadChannelsRoles() {
 }
 
 function fillChannelSelects() {
-  const ids = ['gen-birthday-ch', 'log-main', 'log-suggestion', 'log-starboard',
-               'auto-invch', 'auto-starch', 'auto-bdaych'];
+  const ids = ['log-main', 'auto-invch'];
   for (const id of ids) {
     const el = document.getElementById(id);
     if (!el) continue;
@@ -3246,11 +3188,8 @@ async function loadSettings() {
     const s = await r.json();
 
     setVal('gen-lang', s.lang ?? 'ru');
-    setSelect('gen-birthday-ch', s.birthday_channel);
 
     setSelect('log-main', s.log_channel);
-    setSelect('log-suggestion', s.suggestion_channel);
-    setSelect('log-starboard', s.starboard_channel);
 
     setVal('mod-mute1', s.mute1_days ?? 7);
     setVal('mod-mute2', s.mute2_days ?? 7);
@@ -3336,15 +3275,12 @@ async function saveSettings(payload, silent=false) {
 function saveGeneral() {
   return saveSettings({
     lang: getVal('gen-lang'),
-    birthday_channel: getVal('gen-birthday-ch') || 0,
   });
 }
 
 async function saveLogging() {
   const okSettings = await saveSettings({
     log_channel: getVal('log-main') || 0,
-    suggestion_channel: getVal('log-suggestion') || 0,
-    starboard_channel: getVal('log-starboard') || 0,
   }, true);   // тихо — тост покажем один раз в конце
   let okSec = true;
   if (_secDirty.size) {
@@ -5000,9 +4936,6 @@ async function loadAutomation() {
     setToggle('tog-invclean', a.invclean_enabled);
     setVal('auto-invdays', a.invclean_days ?? 14);
     setSelect('auto-invch',  a.invclean_channel);
-    setSelect('auto-starch', a.starboard_channel);
-    setVal('auto-starthr', a.starboard_threshold ?? 3);
-    setSelect('auto-bdaych', a.birthday_channel);
     _autoThreads = a.autothreads || [];
     renderAutoThreads();
     csSync();
@@ -5084,9 +5017,6 @@ function saveAutomation() {
     invclean_enabled: getToggle('tog-invclean'),
     invclean_days:    parseInt(getVal('auto-invdays')) || 14,
     invclean_channel: getVal('auto-invch') || 0,
-    starboard_channel:   getVal('auto-starch') || 0,
-    starboard_threshold: parseInt(getVal('auto-starthr')) || 3,
-    birthday_channel:    getVal('auto-bdaych') || 0,
     autothreads: readAutoThreads().filter(t => t.channel_id),
   });
 }

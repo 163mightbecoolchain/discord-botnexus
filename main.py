@@ -14,11 +14,6 @@ NEW IN v5:
     - /warn /warnings /clearwarn
     - /purge
 
-  💰 BLACKMARKET v2 (Pro):
-    - Предметы T6.0–T8.4 (все уровни зачаровки)
-    - % профит от городов И от Бреккилена отдельно
-    - Сортировка по % профиту
-
   🤖 FREE AI (Groq → Gemini → Claude):
     - GROQ_API_KEY  — бесплатно (console.groq.com)
     - GEMINI_API_KEY — бесплатно (aistudio.google.com)
@@ -48,7 +43,7 @@ from witness.config import TOKEN
 from witness.core import bot, flush_log_queue, intents
 from witness.tasks import graceful_shutdown
 # Импорт модулей регистрирует их слэш-команды и обработчики событий на общем объекте bot.
-from witness import moderation, admin, invites, general, ai_commands, games, albion, events, automod, protection, guard, edits, selfroles, tickets  # noqa: F401
+from witness import moderation, admin, invites, general, ai_commands, events, automod, protection, guard, edits, selfroles, tickets  # noqa: F401
 
 async def _graceful_shutdown():
     """

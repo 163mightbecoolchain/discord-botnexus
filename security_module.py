@@ -125,29 +125,6 @@ async def sec_db_init():
                 last_updated TEXT
             );
 
-            -- Поведенческие аномалии
-            CREATE TABLE IF NOT EXISTS behavior_anomalies (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id    INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                anomaly_type TEXT NOT NULL,
-                score       REAL DEFAULT 0,
-                details     TEXT DEFAULT '{}',
-                created_at  TEXT NOT NULL
-            );
-
-            -- NLP результаты
-            CREATE TABLE IF NOT EXISTS nlp_results (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id    INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                message_id  INTEGER,
-                toxicity    REAL DEFAULT 0,
-                threat      REAL DEFAULT 0,
-                spam        REAL DEFAULT 0,
-                result      TEXT DEFAULT '{}',
-                created_at  TEXT NOT NULL
-            );
         """)
         await db.commit()
 
