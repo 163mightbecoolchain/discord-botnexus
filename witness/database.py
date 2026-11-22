@@ -102,20 +102,10 @@ async def db_init():
                 enabled     INTEGER DEFAULT 0,
                 max_age_days INTEGER DEFAULT 7,
                 log_channel INTEGER DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS birthdays (
-                guild_id INTEGER, user_id INTEGER, birthday TEXT,
-                PRIMARY KEY (guild_id, user_id));
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL, channel_id INTEGER, status TEXT DEFAULT 'open',
                 created_at TEXT);
-            CREATE TABLE IF NOT EXISTS suggestions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL, text TEXT, votes_up INTEGER DEFAULT 0,
-                votes_down INTEGER DEFAULT 0, message_id INTEGER, created_at TEXT);
-            CREATE TABLE IF NOT EXISTS starboard (
-                guild_id INTEGER, message_id INTEGER, starboard_msg_id INTEGER,
-                PRIMARY KEY (guild_id, message_id));
             CREATE TABLE IF NOT EXISTS guild_settings (
                 guild_id INTEGER PRIMARY KEY,
                 starboard_channel INTEGER DEFAULT 0,
@@ -127,32 +117,6 @@ async def db_init():
                 price_watch TEXT DEFAULT '{}',
                 lang TEXT DEFAULT 'ru',
                 tickets_enabled INTEGER DEFAULT 1);
-            CREATE TABLE IF NOT EXISTS price_watch (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
-                channel_id INTEGER NOT NULL, item_id TEXT, threshold_pct REAL DEFAULT 5.0,
-                last_price INTEGER DEFAULT 0, created_at TEXT);
-
-            -- Привязка Discord → Albion ник
-            CREATE TABLE IF NOT EXISTS albion_registration (
-                guild_id    INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                player_name TEXT NOT NULL,
-                player_id   TEXT NOT NULL,
-                registered_at TEXT NOT NULL,
-                PRIMARY KEY (guild_id, user_id));
-
-            -- Reaction roles
-            CREATE TABLE IF NOT EXISTS reaction_roles (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id    INTEGER NOT NULL,
-                channel_id  INTEGER NOT NULL,
-                message_id  INTEGER NOT NULL,
-                emoji       TEXT NOT NULL,
-                role_id     INTEGER NOT NULL,
-                style       TEXT DEFAULT 'toggle');
-            CREATE INDEX IF NOT EXISTS idx_rr
-                ON reaction_roles(guild_id, message_id, emoji);
-
             -- Модлог (история действий над участником)
             CREATE TABLE IF NOT EXISTS modlog (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,17 +168,6 @@ async def db_init():
                 min_age_days   INTEGER DEFAULT 7,
                 enabled     INTEGER DEFAULT 0);
 
-            -- Albion watch (алерты на игрока)
-            CREATE TABLE IF NOT EXISTS albion_watch (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id    INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                channel_id  INTEGER NOT NULL,
-                player_name TEXT NOT NULL,
-                player_id   TEXT NOT NULL,
-                last_check  TEXT DEFAULT '',
-                created_at  TEXT NOT NULL);
-
             -- Прогрессивные наказания (настройки)
             CREATE TABLE IF NOT EXISTS punishment_settings (
                 guild_id     INTEGER PRIMARY KEY,
@@ -222,31 +175,6 @@ async def db_init():
                 mute2_days   INTEGER DEFAULT 7,   -- 2й варн: дней таймаута
                 ban3_days    INTEGER DEFAULT 30,  -- 3й варн: дней бана
                 updated_at   TEXT DEFAULT '');
-
-            -- Invite лидерборд
-            CREATE TABLE IF NOT EXISTS invite_stats (
-                guild_id    INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                total_invites INTEGER DEFAULT 0,
-                active_invites INTEGER DEFAULT 0,
-                left_count  INTEGER DEFAULT 0,
-                PRIMARY KEY (guild_id, user_id));
-
-            -- Напоминания (persistent, переживают перезапуск)
-            CREATE TABLE IF NOT EXISTS reminders (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id    INTEGER NOT NULL,
-                user_id     INTEGER NOT NULL,
-                channel_id  INTEGER NOT NULL,
-                message     TEXT NOT NULL,
-                fire_at     TEXT NOT NULL,
-                repeat_mins INTEGER DEFAULT 0,
-                repeat_count INTEGER DEFAULT 0,
-                max_repeats INTEGER DEFAULT 20,
-                done        INTEGER DEFAULT 0,
-                created_at  TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS idx_reminders
-                ON reminders(fire_at, done);
 
             CREATE TABLE IF NOT EXISTS appeals (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -281,14 +209,28 @@ async def db_init():
                 ON appeals(guild_id, user_id);
 
 
-            -- #21/22 Связь участник → пригласивший
-            CREATE TABLE IF NOT EXISTS member_inviter (
-                guild_id      INTEGER NOT NULL,
-                user_id       INTEGER NOT NULL,
-                inviter_id    INTEGER DEFAULT 0,
-                invite_code   TEXT DEFAULT '',
-                joined_at     TEXT DEFAULT '',
-                PRIMARY KEY (guild_id, user_id));
+            -- Счётчик вызовов слэш-команд (on_app_command_completion в events.py)
+            CREATE TABLE IF NOT EXISTS command_usage (
+                command     TEXT NOT NULL,
+                guild_id    INTEGER NOT NULL,
+                uses        INTEGER DEFAULT 0,
+                last_used   TEXT DEFAULT '',
+                PRIMARY KEY (command, guild_id));
+
+            -- Удалённые функции (Albion, напоминания, дни рождения, предложения,
+            -- starboard, роли за реакции) и таблицы, в которые код никогда не писал.
+            DROP TABLE IF EXISTS birthdays;
+            DROP TABLE IF EXISTS suggestions;
+            DROP TABLE IF EXISTS starboard;
+            DROP TABLE IF EXISTS price_watch;
+            DROP TABLE IF EXISTS albion_registration;
+            DROP TABLE IF EXISTS albion_watch;
+            DROP TABLE IF EXISTS reaction_roles;
+            DROP TABLE IF EXISTS reminders;
+            DROP TABLE IF EXISTS invite_stats;
+            DROP TABLE IF EXISTS member_inviter;
+            DROP TABLE IF EXISTS nlp_results;
+            DROP TABLE IF EXISTS behavior_anomalies;
 
             -- Тикеты: настройки сервера (witness/tickets.py, дашборд «Тикеты»)
             CREATE TABLE IF NOT EXISTS ticket_settings (

@@ -521,11 +521,7 @@ async def api_guild_settings_get(request):
             'lang':               gs.get('lang', 'ru'),
             'tickets_enabled':    tickets_cfg['enabled'],
             'lockdown':           gs.get('lockdown', 0),
-            'starboard_threshold':gs.get('starboard_threshold', 3),
-            'starboard_channel':  gs.get('starboard_channel', 0),
-            'suggestion_channel': gs.get('suggestion_channel', 0),
             'ticket_category':    tickets_cfg['category_id'],
-            'birthday_channel':   gs.get('birthday_channel', 0),
             # security
             'log_channel':        sec_row[0] if sec_row else 0,
             'security':           sec_settings,
@@ -567,10 +563,6 @@ async def api_guild_settings_post(request):
             gs_fields = {
                 'lang': lang if lang in ('ru', 'en', 'de') else None,
                 'lockdown': data.get('lockdown'),
-                'starboard_threshold': data.get('starboard_threshold'),
-                'starboard_channel': data.get('starboard_channel'),
-                'suggestion_channel': data.get('suggestion_channel'),
-                'birthday_channel': data.get('birthday_channel'),
             }
             for key, val in gs_fields.items():
                 if val is not None:
@@ -1494,15 +1486,6 @@ async def api_automation_get(request):
             out['invclean_enabled']  = bool(r[0]) if r else False
             out['invclean_days']     = (r[1] if r else 14)
             out['invclean_channel']  = str(r[2]) if r and r[2] else ''
-
-            async with db.execute("""
-                SELECT starboard_channel, starboard_threshold, birthday_channel
-                FROM guild_settings WHERE guild_id=?
-            """, (guild_id,)) as c:
-                g = await c.fetchone()
-            out['starboard_channel']  = str(g[0]) if g and g[0] else ''
-            out['starboard_threshold']= (g[1] if g and g[1] else 3)
-            out['birthday_channel']   = str(g[2]) if g and g[2] else ''
         from witness.autothreads import get_auto_threads
         out['autothreads'] = [{'channel_id': str(ch), 'name': v['name'], 'archive': v['archive']}
                               for ch, v in (await get_auto_threads(guild_id)).items()]
@@ -1548,21 +1531,6 @@ async def api_automation_post(request):
                         enabled=excluded.enabled, max_age_days=excluded.max_age_days,
                         log_channel=excluded.log_channel
                 """, (guild_id, en, dys, ch))
-
-            gs_map = {
-                'starboard_channel':   'starboard_channel',
-                'starboard_threshold': 'starboard_threshold',
-                'birthday_channel':    'birthday_channel',
-            }
-            for key, col in gs_map.items():
-                if key in data:
-                    v = data[key]
-                    v = int(v or 0)
-                    if key == 'starboard_threshold': v = max(1, min(100, v or 3))
-                    await db.execute(
-                        f"INSERT INTO guild_settings (guild_id, {col}) VALUES (?,?) "
-                        f"ON CONFLICT(guild_id) DO UPDATE SET {col}=excluded.{col}",
-                        (guild_id, v))
             await db.commit()
 
         if isinstance(data.get('autothreads'), list):

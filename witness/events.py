@@ -55,7 +55,6 @@ from .core import (
 )
 from .tasks import (
     backup_loop,
-    birthday_check_loop,
     expire_appeals,
     graceful_shutdown,
     health_check_server,
@@ -63,7 +62,6 @@ from .tasks import (
     memory_cleanup_loop,
     mute_expiry_loop,
     quarantine_loop,
-    reminder_check_loop,
     tempban_loop,
     tier_expiry_loop,
     topgg_stats_loop,
@@ -76,7 +74,6 @@ from .moderation import (
 )
 from .invites import invite_autoclean_loop
 from .ai_commands import count_message_activity
-from .albion import albion_watch_loop, price_watch_loop
 
 @bot.event
 async def on_ready():
@@ -106,8 +103,6 @@ async def on_ready():
             if not (guild.system_channel and guild.system_channel_flags.join_notifications):
                 print(f"⚠️ {guild.name}: системные сообщения о входе выключены — "
                       f"бот не увидит новых участников (антирейд, карантин, инвайты)")
-
-    # Семафор Albion API создаётся сам при первом запросе (albion_fetch).
 
     # ── Синхронизация команд ──────────────────────────────────
     # НЕ очищаем tree — это удаляет все зарегистрированные команды!
@@ -162,15 +157,11 @@ async def on_ready():
     # ── Запуск фоновых задач ─────────────────────────────────
     if not hasattr(bot, "_tasks_started"):
         bot._tasks_started = True
-        bot.loop.create_task(birthday_check_loop())
-        bot.loop.create_task(price_watch_loop())
         bot.loop.create_task(tempban_loop(bot))
         bot.loop.create_task(quarantine_loop(bot))
-        bot.loop.create_task(albion_watch_loop(bot))
         bot.loop.create_task(health_check_server())
         bot.loop.create_task(topgg_stats_loop(bot))
         bot.loop.create_task(memory_cleanup_loop(bot))
-        bot.loop.create_task(reminder_check_loop(bot))
         bot.loop.create_task(invite_autoclean_loop())
         bot.loop.create_task(mute_expiry_loop(bot))
         bot.loop.create_task(backup_loop(bot))
@@ -1082,8 +1073,8 @@ async def on_guild_join(guild):
                 "**2.** Run `/help` to see all commands\n"
                 "**3.** Run `/security setlog #channel` to enable logging\n"
                 "**4.** Run `/lang language:ru` if you prefer Russian\n\n"
-                "**Free:** Albion stats · All games · Basic security\n"
-                "**Premium €2.99:** AI · Black Market · Craft Calc\n"
+                "**Free:** Moderation · Tickets · Basic security\n"
+                "**Premium €2.99:** Giveaways · Server stats\n"
                 "**Security €4.99:** Advanced `/q` security tools\n\n"
                 "Use `/setpremium` if you have a license key."
             )
@@ -1183,6 +1174,20 @@ async def on_thread_create(thread):
     queue_log(ch, e)
 
 @bot.event
+async def on_app_command_completion(interaction, command):
+    """Счётчик вызовов команд: какие функции бота реально используют (/cmdstats)."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO command_usage (command, guild_id, uses, last_used) VALUES (?,?,1,?) "
+                "ON CONFLICT(command, guild_id) DO UPDATE SET uses=uses+1, last_used=excluded.last_used",
+                (command.qualified_name, interaction.guild_id or 0,
+                 datetime.datetime.utcnow().isoformat(timespec="seconds")))
+            await db.commit()
+    except Exception as ex:
+        print(f"[USAGE] {ex}")
+
+@bot.event
 async def on_interaction(interaction):
     if not EVENT_LOGS: return
     if not interaction.guild: return
@@ -1201,36 +1206,6 @@ async def on_interaction(interaction):
 @bot.event
 async def on_reaction_add(reaction, user):
     if user.bot or not reaction.message.guild: return
-    gid = reaction.message.guild.id
-
-    # Starboard logic
-    if str(reaction.emoji) == "⭐" and await get_tier(gid) >= TIER_PREMIUM:
-        settings = await get_guild_settings(gid)
-        sb_ch_id   = settings.get("starboard_channel", 0)
-        threshold  = settings.get("starboard_threshold", 3)
-        if sb_ch_id and reaction.count >= threshold:
-            sb_ch = reaction.message.guild.get_channel(sb_ch_id)
-            if not sb_ch: return
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute(
-                    "SELECT starboard_msg_id FROM starboard WHERE guild_id=? AND message_id=?",
-                    (gid, reaction.message.id)
-                ) as c:
-                    existing = await c.fetchone()
-            if existing: return  # уже добавлено
-            msg = reaction.message
-            e = discord.Embed(description=msg.content or "*(вложение)*", color=0xFFD700, timestamp=msg.created_at)
-            e.set_author(name=msg.author.display_name, icon_url=msg.author.display_avatar.url)
-            e.add_field(name="Источник", value=f"[Перейти]({msg.jump_url}) · {msg.channel.mention}", inline=False)
-            if msg.attachments:
-                e.set_image(url=msg.attachments[0].url)
-            sb_msg = await sb_ch.send(content=f"⭐ **{reaction.count}** · {msg.channel.mention}", embed=e)
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute(
-                    "INSERT INTO starboard (guild_id, message_id, starboard_msg_id) VALUES (?,?,?)",
-                    (gid, msg.id, sb_msg.id)
-                )
-                await db.commit()
 
     # Security reaction log (из существующего кода)
     if not reaction.message.guild: return
@@ -1243,51 +1218,6 @@ async def on_reaction_add(reaction, user):
     e.add_field(name="Сообщение", value=f"[Перейти]({reaction.message.jump_url})", inline=True)
     await ch.send(embed=e)
 
-
-
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    if payload.user_id == bot.user.id: return
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT role_id FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?",
-            (payload.guild_id, payload.message_id, str(payload.emoji))
-        ) as c:
-            row = await c.fetchone()
-    if not row: return
-    guild = bot.get_guild(payload.guild_id)
-    if not guild: return
-    # При добавлении реакции Discord сам присылает участника — кэш не нужен
-    member = payload.member or await resolve_member(guild, payload.user_id)
-    if not member: return
-    role = guild.get_role(row[0])
-    if role:
-        try:
-            await member.add_roles(role, reason="Reaction role")
-        except discord.Forbidden:
-            pass
-
-
-@bot.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    if payload.user_id == bot.user.id: return
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT role_id FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?",
-            (payload.guild_id, payload.message_id, str(payload.emoji))
-        ) as c:
-            row = await c.fetchone()
-    if not row: return
-    guild = bot.get_guild(payload.guild_id)
-    if not guild: return
-    member = await resolve_member(guild, payload.user_id)
-    if not member: return
-    role = guild.get_role(row[0])
-    if role:
-        try:
-            await member.remove_roles(role, reason="Reaction role removed")
-        except discord.Forbidden:
-            pass
 
 
 @bot.tree.error

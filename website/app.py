@@ -40,7 +40,7 @@ CSP = (
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
     "font-src 'self' https://fonts.gstatic.com; "
     f"connect-src 'self' {BOT_API_URL} https://discord.com https://cdn.discordapp.com; "
-    "img-src 'self' data: https://cdn.discordapp.com https://render.albiononline.com; "
+    "img-src 'self' data: https://cdn.discordapp.com; "
     "frame-ancestors 'none';"
 )
 

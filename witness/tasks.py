@@ -35,59 +35,6 @@ from .core import (
 )
 
 # ── Очистка кэшей (запускается каждые 10 минут) ───────────────
-async def reminder_check_loop(bot_instance):
-    """Проверяет и отправляет напоминания каждую минуту"""
-    await bot_instance.wait_until_ready()
-    while not bot_instance.is_closed():
-        try:
-            now = datetime.datetime.utcnow().isoformat()
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute(
-                    "SELECT id,user_id,channel_id,message,repeat_mins,repeat_count,max_repeats "
-                    "FROM reminders WHERE fire_at<=? AND done=0",
-                    (now,)
-                ) as c:
-                    rows = await c.fetchall()
-            for rid, uid, cid, message, repeat_mins, repeat_count, max_repeats in rows:
-                try:
-                    user = await bot_instance.fetch_user(uid)
-                    if user:
-                        e = discord.Embed(
-                            description=f"⏰ {message}",
-                            color=0x00B0F4,
-                            timestamp=datetime.datetime.utcnow()
-                        )
-                        e.set_author(name="Reminder")
-                        if repeat_mins > 0:
-                            e.set_footer(text=f"Repeat {repeat_count+1}/{max_repeats} · every {repeat_mins} min")
-                        await user.send(embed=e)
-                except Exception:
-                    try:
-                        ch = bot_instance.get_channel(cid)
-                        if ch:
-                            u = await bot_instance.fetch_user(uid)
-                            await ch.send(f"⏰ {u.mention if u else uid} {message}")
-                    except Exception as ex:
-                        print(f"[REMINDER] Не доставлено {uid}: {ex}")
-
-                # Обновляем или помечаем как выполненное
-                async with aiosqlite.connect(DB_PATH) as db:
-                    new_count = repeat_count + 1
-                    if repeat_mins > 0 and new_count < max_repeats:
-                        next_fire = (datetime.datetime.utcnow() +
-                                     datetime.timedelta(minutes=repeat_mins)).isoformat()
-                        await db.execute(
-                            "UPDATE reminders SET fire_at=?,repeat_count=? WHERE id=?",
-                            (next_fire, new_count, rid)
-                        )
-                    else:
-                        await db.execute("UPDATE reminders SET done=1 WHERE id=?", (rid,))
-                    await db.commit()
-        except Exception as ex:
-            print(f"[REMINDER] Error: {ex}")
-        await asyncio.sleep(60)
-
-
 async def memory_cleanup_loop(bot_instance):
     """Чистит устаревшие записи из всех in-memory кэшей"""
     await bot_instance.wait_until_ready()
@@ -174,12 +121,6 @@ async def memory_cleanup_loop(bot_instance):
                             DELETE FROM tickets
                             WHERE status = 'closed'
                               AND COALESCE(NULLIF(closed_at, ''), created_at) < datetime('now', '-60 days')
-                        """)
-                        # reminders: выполненные > 7 дней
-                        await db.execute("""
-                            DELETE FROM reminders
-                            WHERE done = 1
-                              AND fire_at < datetime('now', '-7 days')
                         """)
                         await db.commit()
                         # VACUUM — освобождаем удалённые страницы
@@ -595,40 +536,6 @@ async def expire_appeals(guild_id: int, user_id: int, action_types: tuple,
     except Exception as ex:
         print(f"[APPEAL] expire_appeals error: {ex}")
         return 0
-
-async def birthday_check_loop():
-    """Фоновая задача — проверяет дни рождения каждый день в 09:00 UTC."""
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            now = datetime.datetime.utcnow()
-            if now.hour == 9 and now.minute < 5:
-                today = f"{now.day:02d}.{now.month:02d}"
-                async with aiosqlite.connect(DB_PATH) as db:
-                    async with db.execute(
-                        "SELECT guild_id, user_id FROM birthdays WHERE birthday=?", (today,)
-                    ) as c:
-                        rows = await c.fetchall()
-                for gid, uid in rows:
-                    settings = await get_guild_settings(gid)
-                    ch_id = settings.get("birthday_channel", 0)
-                    guild = bot.get_guild(gid)
-                    if not guild: continue
-                    ch = guild.get_channel(ch_id) or discord.utils.get(guild.text_channels, name="general")
-                    if not ch: continue
-                    member = await resolve_member(guild, uid)
-                    if not member: continue
-                    e = discord.Embed(title="🎂 День рождения!", color=0xFF69B4)
-                    e.description = f"Сегодня день рождения у {member.mention}! 🎉\nПоздравьте его/её!"
-                    e.set_thumbnail(url=member.display_avatar.url)
-                    try:
-                        await ch.send(embed=e)
-                    except Exception as ex:
-                        print(f"[BIRTHDAY] Send error guild {gid}: {ex}")
-        except Exception as ex:
-            await report_error("BIRTHDAY", ex, "Сбой цикла дней рождения")
-        await asyncio.sleep(300)  # проверяем каждые 5 минут
-
 
 # ── Автообновление статистики на top.gg ──────────────────────
 async def topgg_stats_loop(bot_instance):

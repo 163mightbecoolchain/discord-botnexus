@@ -105,6 +105,40 @@ async def dbstats(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Ошибка: {ex}", ephemeral=True)
 
 
+@bot.tree.command(name="cmdstats", description="[OWNER] Какими командами пользуются")
+async def cmdstats(interaction: discord.Interaction):
+    if interaction.user.id not in OWNER_IDS:
+        return await interaction.response.send_message("❌ Нет доступа.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT command, SUM(uses), COUNT(DISTINCT guild_id), MAX(last_used) "
+            "FROM command_usage GROUP BY command ORDER BY 2 DESC") as c:
+            rows = await c.fetchall()
+    # Все зарегистрированные команды, включая подкоманды групп (/ticket open и т.п.)
+    names = set()
+    for cmd in bot.tree.get_commands():
+        if isinstance(cmd, app_commands.Group):
+            names.update(sub.qualified_name for sub in cmd.walk_commands()
+                         if not isinstance(sub, app_commands.Group))
+        else:
+            names.add(cmd.name)
+    used = {r[0] for r in rows}
+    unused = sorted(names - used)
+
+    e = build_embed(C.PRIMARY)
+    e.set_author(name="📊 Использование команд")
+    top = "\n".join(f"`/{n}` — {u} раз · серверов: {g} · {(last or '')[:10]}"
+                    for n, u, g, last in rows[:25])
+    e.add_field(name=f"Вызывали ({len(used)})", value=top[:1024] or "Пока ничего", inline=False)
+    rest = " ".join(f"`/{n}`" for n in unused)
+    if len(rest) > 1024:
+        rest = rest[:1000].rsplit(" ", 1)[0] + " …"
+    e.add_field(name=f"Ни разу не вызывали ({len(unused)})", value=rest or "—", inline=False)
+    e.set_footer(text="Считаются успешные вызовы со дня включения счётчика")
+    await interaction.followup.send(embed=e, ephemeral=True)
+
+
 @bot.tree.command(name="backupnow", description="[ADMIN] Сделать резервную копию сейчас")
 async def backupnow(interaction: discord.Interaction):
     if interaction.user.id not in OWNER_IDS and not interaction.user.guild_permissions.administrator:
@@ -288,7 +322,7 @@ async def setup_cmd(interaction: discord.Interaction):
         ("Язык",            "✅", f"/lang language:{settings.get('lang','ru')}"),
         ("Тикеты",          "✅" if tickets_on else "❌", "/ticket setup"),
         ("Карантин",        "✅" if settings.get('quarantine_role') else "❌", "/quarantine action:setup role:@Role"),
-        ("Reaction Roles",  "⚙️", "/reactionrole action:add"),
+        ("Панели ролей",    "⚙️", "/roles panel create"),
         ("Прогр. наказания","⚙️", "/punishments"),
         ("Подписка",        tier_badge(tier), "/subinfo"),
     ]
