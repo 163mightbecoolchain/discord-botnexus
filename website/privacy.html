@@ -260,17 +260,11 @@ footer a:hover { color: var(--accent); }
     <li><strong>Discord</strong> — платформа, через которую работает бот</li>
     <li><strong>Railway</strong> — хостинг, где размещены бот и база</li>
     <li>
-      <strong>Groq, Google Gemini, Anthropic</strong> — ИИ-сервисы. Им отправляется только то,
-      что нужно для команды, которую вызвал пользователь: вопрос в <code>/ai</code>, текст
-      в <code>/translate</code>, последние сообщения канала (до 50, с отображаемыми именами)
-      в <code>/summarize</code>, имя и роли участника в <code>/roast</code>.
+      <strong>Groq, Google Gemini</strong> — ИИ-сервисы. Им отправляется текст, который модератор
+      сам ввёл в <code>/q nlp</code> для проверки.
       Если администратор сервера включил «ИИ-разбор жалоб», в Groq или Google Gemini отправляется
       текст сообщения, на которое пожаловались командой <code>/report</code> (без имён и ID), —
       чтобы модераторы увидели оценку приоритета. Других автоматических отправок сообщений ИИ-сервисам нет.
-    </li>
-    <li><strong>Pollinations</strong> — описание картинки из <code>/imagine</code></li>
-    <li>
-      <strong>OpenWeatherMap</strong> — название города из <code>/weather</code>
     </li>
   </ul>
 
@@ -450,17 +444,11 @@ footer a:hover { color: var(--accent); }
     <li><strong>Discord</strong> — the platform the bot runs on</li>
     <li><strong>Railway</strong> — hosting for the bot and its database</li>
     <li>
-      <strong>Groq, Google Gemini, Anthropic</strong> — AI providers. They receive only what a command
-      the user ran needs: the question in <code>/ai</code>, the text in
-      <code>/translate</code>, the last messages of the channel (up to 50, with display names) in
-      <code>/summarize</code>, a member's name and roles in <code>/roast</code>.
+      <strong>Groq, Google Gemini</strong> — AI providers. They receive the text a moderator
+      enters in <code>/q nlp</code> to check it.
       If a server administrator turns on “AI report triage”, the text of a message reported with
       <code>/report</code> (without names or IDs) is sent to Groq or Google Gemini so moderators see a
       priority estimate. Messages are not sent to AI providers automatically in any other case.
-    </li>
-    <li><strong>Pollinations</strong> — the image description in <code>/imagine</code></li>
-    <li>
-      <strong>OpenWeatherMap</strong> — the city name from <code>/weather</code>
     </li>
   </ul>
 

@@ -1,5 +1,5 @@
 """
-ИИ-команды и статистика активности сервера.
+Статистика активности сервера (/serverstats).
 """
 
 import discord
@@ -10,67 +10,12 @@ from .config import TIER_PREMIUM
 from .database import get_leaderboard
 from .ui import build_embed, C
 from .core import (
-    ask_ai,
     bot,
     cooldown,
     get_tier,
     intents,
     upsell_embed,
 )
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  PREMIUM COMMANDS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@bot.tree.command(name="ai")
-@app_commands.describe(question="Вопрос")
-@cooldown(5)
-async def ai_cmd(interaction: discord.Interaction, question: str):
-    if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
-    await interaction.response.defer()
-    try:
-        answer = await ask_ai(question)
-        e = build_embed(C.PREMIUM, description=answer[:4000])
-        e.set_author(name="Witness AI", icon_url=interaction.user.display_avatar.url)
-        e.add_field(name="Запрос", value=f"`{question[:100]}`", inline=False)
-        await interaction.followup.send(embed=e)
-    except Exception as ex: await interaction.followup.send(f"❌ {ex}")
-
-@bot.tree.command(name="summarize")
-@app_commands.describe(count="Сообщений (макс 50)")
-@cooldown(30)
-async def summarize(interaction: discord.Interaction, count: int = 20):
-    if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
-    if not intents.message_content:
-        # Без Message Content Intent Discord отдаёт историю с пустым текстом
-        return await interaction.response.send_message(
-            "⚠️ `/summarize` временно недоступна: боту не выдан доступ к тексту сообщений "
-            "(Message Content Intent).", ephemeral=True)
-    await interaction.response.defer()
-    msgs = []
-    async for msg in interaction.channel.history(limit=min(count,50)):
-        if not msg.author.bot: msgs.append(f"{msg.author.display_name}: {msg.content}")
-    msgs.reverse()
-    try:
-        summary = await ask_ai("\n".join(msgs), system="Summarize this Discord chat in 3-5 bullet points. Be concise.")
-        await interaction.followup.send(embed=discord.Embed(title=f"📋 Резюме ({count} сообщений)", description=summary, color=0x00E5FF))
-    except Exception as ex: await interaction.followup.send(f"❌ {ex}")
-
-@bot.tree.command(name="roast")
-@app_commands.describe(member="Кого роастить")
-@cooldown(10)
-async def roast(interaction: discord.Interaction, member: discord.Member):
-    if await get_tier(interaction.guild_id)<TIER_PREMIUM: return await interaction.response.send_message(embed=upsell_embed("Premium"),ephemeral=True)
-    await interaction.response.defer()
-    roles=[r.name for r in member.roles[1:]]
-    days=(datetime.datetime.utcnow()-member.joined_at.replace(tzinfo=None)).days
-    try:
-        text = await ask_ai(f"Funny 2-3 sentence roast: Name={member.display_name}, Roles={','.join(roles) or 'None'}, Days={days}. Playful, not offensive.", system="Write friendly roasts for Discord.")
-        e = discord.Embed(title=f"🔥 {member.display_name}", description=text, color=0xFF6B35)
-        e.set_thumbnail(url=member.display_avatar.url)
-        await interaction.followup.send(embed=e)
-    except Exception as ex: await interaction.followup.send(f"❌ {ex}")
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  📊 SERVER STATS
@@ -132,51 +77,3 @@ async def serverstats(interaction: discord.Interaction):
 
     e.add_field(name="📈 Активность (сегодня)", value=activity_str, inline=False)
     await interaction.followup.send(embed=e)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  🖼️ AI IMAGE GENERATION (Pollinations.ai — бесплатно)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@bot.tree.command(name="imagine", description="Генерация изображения по описанию [Premium]")
-@app_commands.describe(prompt="Описание изображения на английском", style="realistic / anime / pixel / oil-painting")
-@cooldown(15)
-async def imagine(interaction: discord.Interaction, prompt: str, style: str = "realistic"):
-    if await get_tier(interaction.guild_id) < TIER_PREMIUM:
-        return await interaction.response.send_message(embed=upsell_embed("Premium"), ephemeral=True)
-    await interaction.response.defer()
-
-    styles = {
-        "realistic": "photorealistic, high quality, 8k",
-        "anime": "anime style, manga, illustration",
-        "pixel": "pixel art, 16-bit, retro game",
-        "oil-painting": "oil painting, classical art, detailed brushwork"
-    }
-    style_prompt = styles.get(style.lower(), styles["realistic"])
-    full_prompt = f"{prompt}, {style_prompt}"
-    encoded = full_prompt.replace(" ", "%20").replace(",", "%2C")
-
-    # Pollinations.ai — полностью бесплатный API генерации изображений
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=768&height=768&nologo=true"
-
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url, timeout=aiohttp.ClientTimeout(total=60)) as r:
-                if r.status != 200:
-                    return await interaction.followup.send(f"❌ Ошибка генерации (HTTP {r.status})")
-                img_data = await r.read()
-
-        file = discord.File(
-            fp=__import__("io").BytesIO(img_data),
-            filename="generated.png"
-        )
-        e = discord.Embed(title="🎨 Сгенерированное изображение", color=0x7C3AED)
-        e.add_field(name="Запрос", value=prompt[:200], inline=False)
-        e.add_field(name="Стиль", value=style, inline=True)
-        e.set_footer(text=f"Запросил: {interaction.user.display_name} · Pollinations.ai (free)")
-        e.set_image(url="attachment://generated.png")
-        await interaction.followup.send(embed=e, file=file)
-    except asyncio.TimeoutError:
-        await interaction.followup.send("❌ Таймаут генерации (>60 сек). Попробуй более простой запрос.")
-    except Exception as ex:
-        await interaction.followup.send(f"❌ Ошибка: {ex}")

@@ -1074,7 +1074,7 @@ async def on_guild_join(guild):
                 "**3.** Run `/security setlog #channel` to enable logging\n"
                 "**4.** Run `/lang language:ru` if you prefer Russian\n\n"
                 "**Free:** Moderation · Tickets · Basic security\n"
-                "**Premium €2.99:** AI · Giveaways · Server stats\n"
+                "**Premium €2.99:** Giveaways · Server stats\n"
                 "**Security €4.99:** Advanced `/q` security tools\n\n"
                 "Use `/setpremium` if you have a license key."
             )

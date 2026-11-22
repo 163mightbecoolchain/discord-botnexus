@@ -14,11 +14,6 @@ NEW IN v5:
     - /warn /warnings /clearwarn
     - /purge
 
-  🤖 FREE AI (Groq → Gemini → Claude):
-    - GROQ_API_KEY  — бесплатно (console.groq.com)
-    - GEMINI_API_KEY — бесплатно (aistudio.google.com)
-    - Claude как платный fallback
-
   📦 БЕЗОПАСНОСТЬ ХРАНЕНИЯ ДАННЫХ:
     - Все таблицы имеют guild_id как первичный/составной ключ
     - Данные серверов физически изолированы по guild_id
@@ -121,7 +116,7 @@ if __name__ == "__main__":
         print("   что не осталось кнопки 'Save Changes' внизу экрана.")
         print()
         print("3. Временный запуск без части функций (переменные Railway):")
-        print("   INTENT_MESSAGE_CONTENT=0  — отключит текст в логах, антифишинг, /summarize")
+        print("   INTENT_MESSAGE_CONTENT=0  — отключит текст в логах, антифишинг")
         print("   INTENT_MEMBERS=0          — отключит карантин и DM при наказаниях")
         print("=" * 62)
         raise SystemExit(1)

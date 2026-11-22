@@ -12,10 +12,6 @@ GROQ_KEY      = os.getenv("GROQ_API_KEY")
 GEMINI_KEY    = os.getenv("GEMINI_API_KEY")
 # Названия моделей меняются у провайдеров — держим их настраиваемыми,
 # чтобы при устаревании не нужно было править код
-GROQ_MODEL    = os.getenv("GROQ_MODEL",   "llama-3.3-70b-versatile")
-GEMINI_MODEL  = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
-WEATHER_KEY   = os.getenv("WEATHER_API_KEY")
 DB_PATH       = os.getenv("DB_PATH", "witnessbot.db")
 # Security module
 HMAC_SECRET     = os.getenv("HMAC_SECRET", "")           # любая случайная строка, фиксированная!

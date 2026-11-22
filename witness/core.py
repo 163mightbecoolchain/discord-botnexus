@@ -9,13 +9,8 @@ import aiosqlite
 import os, asyncio, random, time, json, datetime
 from functools import wraps
 from .config import (
-    ANTHROPIC_KEY,
     DB_PATH,
     EVENT_LOGS,
-    GEMINI_KEY,
-    GEMINI_MODEL,
-    GROQ_KEY,
-    GROQ_MODEL,
     TIER_FREE,
     TIER_NAMES,
     TIER_PREMIUM,
@@ -299,94 +294,6 @@ def upsell_embed(req):
         color=C.DANGER
     )
     return e
-
-# ── AI: Groq (free) → Gemini (free) → Claude (paid) ──────────
-async def ask_ai(prompt, system="You are Witness, a helpful Discord assistant. Be concise."):
-    """
-    Цепочка провайдеров: Groq → Gemini → Anthropic.
-    Раньше любая ошибка глушилась и пользователь видел «добавь ключ в .env»,
-    даже когда ключ был на месте, а запрос падал по другой причине.
-    Теперь причины пишутся в лог, а пользователю возвращается понятный текст.
-    """
-    tried = []          # какие провайдеры пробовали и чем закончилось
-
-    # ── Groq ──────────────────────────────────────────────────
-    if GROQ_KEY:
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post("https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {GROQ_KEY}",
-                             "Content-Type": "application/json"},
-                    json={"model": GROQ_MODEL,
-                          "messages": [{"role": "system", "content": system},
-                                       {"role": "user", "content": prompt}],
-                          "max_tokens": 600},
-                    timeout=aiohttp.ClientTimeout(total=20)) as r:
-                    data = await r.json()
-            if r.status == 200 and "choices" in data:
-                return data["choices"][0]["message"]["content"]
-            err = (data.get("error") or {}).get("message") or str(data)[:200]
-            tried.append(f"Groq: HTTP {r.status} · {err}")
-            print(f"[AI] Groq отказал: HTTP {r.status} · {err}")
-        except Exception as ex:
-            tried.append(f"Groq: {type(ex).__name__}")
-            print(f"[AI] Groq недоступен: {ex}")
-    else:
-        tried.append("Groq: ключ не задан")
-
-    # ── Gemini ────────────────────────────────────────────────
-    if GEMINI_KEY:
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}",
-                    json={"contents": [{"parts": [{"text": f"{system}\n\n{prompt}"}]}]},
-                    timeout=aiohttp.ClientTimeout(total=20)) as r:
-                    data = await r.json()
-            if r.status == 200 and data.get("candidates"):
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            err = (data.get("error") or {}).get("message") or str(data)[:200]
-            tried.append(f"Gemini: HTTP {r.status} · {err}")
-            print(f"[AI] Gemini отказал: HTTP {r.status} · {err}")
-        except Exception as ex:
-            tried.append(f"Gemini: {type(ex).__name__}")
-            print(f"[AI] Gemini недоступен: {ex}")
-    else:
-        tried.append("Gemini: ключ не задан")
-
-    # ── Anthropic ─────────────────────────────────────────────
-    if ANTHROPIC_KEY:
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post("https://api.anthropic.com/v1/messages",
-                    headers={"x-api-key": ANTHROPIC_KEY,
-                             "anthropic-version": "2023-06-01",
-                             "content-type": "application/json"},
-                    json={"model": "claude-haiku-4-5-20251001", "max_tokens": 600,
-                          "system": system,
-                          "messages": [{"role": "user", "content": prompt}]},
-                    timeout=aiohttp.ClientTimeout(total=30)) as r:
-                    data = await r.json()
-            if r.status == 200 and data.get("content"):
-                return data["content"][0]["text"]
-            err = (data.get("error") or {}).get("message") or str(data)[:200]
-            tried.append(f"Anthropic: HTTP {r.status} · {err}")
-            print(f"[AI] Anthropic отказал: HTTP {r.status} · {err}")
-        except Exception as ex:
-            tried.append(f"Anthropic: {type(ex).__name__}")
-            print(f"[AI] Anthropic недоступен: {ex}")
-
-    # ── Ни один не ответил ────────────────────────────────────
-    have_key = bool(GROQ_KEY or GEMINI_KEY or ANTHROPIC_KEY)
-    if not have_key:
-        return ("❌ AI не настроен: задай `GROQ_API_KEY` или `GEMINI_API_KEY` "
-                "в переменных окружения (оба бесплатны).")
-    detail = " · ".join(t for t in tried if "ключ не задан" not in t)
-    return ("❌ Не удалось получить ответ от AI.\n"
-            f"```{detail[:600]}```\n"
-            "Ключ есть, но запрос не прошёл — проверь, что он действителен "
-            "и не исчерпан лимит.")
 
 # ── Invite cache — инициализируем сразу на уровне бота ───────
 # Ключ: "guild_id:invite_code" → uses (int)

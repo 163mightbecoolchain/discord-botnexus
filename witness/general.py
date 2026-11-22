@@ -12,7 +12,6 @@ from .config import (
     SUPPORT_URL,
     TIER_COLORS,
     TIER_PREMIUM,
-    WEATHER_KEY,
 )
 from .database import (
     get_coins,
@@ -27,7 +26,6 @@ from .ui import (
     tier_badge,
 )
 from .core import (
-    ask_ai,
     bot,
     cooldown,
     get_tier,
@@ -43,7 +41,6 @@ class HelpView(discord.ui.View):
     PAGES = {
         "general":  "📖 Основные",
         "security": "🛡️ Безопасность",
-        "ai":       "🤖 AI",
         "new":      "🆕 Новинки",
     }
 
@@ -90,9 +87,9 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
             "fields": [
                 ("🆓 Информация", "`/ping` `/userinfo` `/serverinfo` `/subinfo`"),
                 ("🆓 XP и экономика", "`/rank` `/leaderboard` `/coins`"),
-                ("🆓 Утилиты", "`/poll` (с таймером) · `/lfg` (с Join кнопкой)\n`/weather` · `/translate`"),
+                ("🆓 Утилиты", "`/poll` (с таймером)"),
                 ("🆓 Комьюнити", "`/ticket open`"),
-                ("⭐ Premium", "`/serverstats` `/giveaway` `/roast` `/summarize` `/imagine`"),
+                ("⭐ Premium", "`/serverstats` `/giveaway`"),
             ]
         },
         "security": {
@@ -118,17 +115,8 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
                 ("🔐 Security", "`/tempban` `/unmute` `/modlog` `/punishments` `/quarantine`"),
                 ("📨 Инвайты", "`/invnote` `/invnotes` `/invstats`"),
                 ("⚙️ Настройка", "`/setup` `/roles panel` `/ticket setup`"),
-                ("🤖 Утилиты", "`/poll` (таймер) · `/lfg` (Join кнопка)"),
+                ("🤖 Утилиты", "`/poll` (таймер)"),
                 ("📣 Бот", "`/invite` `/vote` `/botinfo`"),
-            ]
-        },
-        "ai": {
-            "title": "🤖 AI команды",
-            "color": C.PREMIUM,
-            "fields": [
-                ("ⓘ AI движок", "Бот использует **Groq** (Llama 3.3 70B) и **Gemini** — бесплатно."),
-                ("⭐ Текст", "`/ai` `/summarize`"),
-                ("⭐ Развлечения", "`/roast` — роаст участника\n`/imagine` — генерация изображений (Pollinations.ai)"),
             ]
         },
     }
@@ -149,7 +137,7 @@ def build_help_embed(page: str, guild_tier: int) -> discord.Embed:
 
 
 @bot.tree.command(name="help", description="Все команды бота")
-@app_commands.describe(page="Раздел: general / security / ai / new")
+@app_commands.describe(page="Раздел: general / security / new")
 async def help_cmd(interaction: discord.Interaction, page: str = "general"):
     tier = await get_tier(interaction.guild_id)
     embed = build_help_embed(page.lower(), tier)
@@ -285,86 +273,6 @@ async def poll(interaction: discord.Interaction, question: str, option1: str, op
         except Exception:
             pass
 
-@bot.tree.command(name="lfg")
-@app_commands.describe(game="Игра", slots="Нужно игроков", note="Дополнительно")
-async def lfg(interaction: discord.Interaction, game: str, slots: int = 1, note: str = ""):
-    e = discord.Embed(title=f"🎮 LFG — {game}", color=0x00FF9D)
-    e.description = f"**{interaction.user.display_name}** ищет **{slots}** игрока(-ов)"
-    if note:
-        e.add_field(name="📝", value=note, inline=False)
-    e.set_footer(text="Нажми Join чтобы вступить · авто-удаление через 2 часа")
-
-    class LFGJoinView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=7200)
-            self.joined = [interaction.user]
-
-        @discord.ui.button(label=f"Join (1/{slots})", style=discord.ButtonStyle.success)
-        async def join_btn(self, inter: discord.Interaction, button: discord.ui.Button):
-            if inter.user in self.joined:
-                return await inter.response.send_message("Ты уже в группе.", ephemeral=True)
-            self.joined.append(inter.user)
-            button.label = f"Join ({len(self.joined)}/{slots})"
-            if len(self.joined) >= slots:
-                button.disabled = True
-                button.label = f"Full ({len(self.joined)}/{slots})"
-                try:
-                    names = ", ".join(m.display_name for m in self.joined)
-                    await interaction.user.send(f"✅ Группа собрана! Участники: {names}")
-                except Exception:
-                    pass
-            await inter.response.edit_message(view=self)
-            await inter.followup.send(f"✅ Вступил в группу!", ephemeral=True)
-
-        async def on_timeout(self):
-            try:
-                msg = await interaction.original_response()
-                await msg.delete()
-            except Exception:
-                pass
-
-    await interaction.response.send_message(embed=e, view=LFGJoinView())
-
-@bot.tree.command(name="weather")
-@app_commands.describe(city="Город")
-@cooldown(10)
-async def weather(interaction: discord.Interaction, city: str):
-    await interaction.response.defer()
-    if not WEATHER_KEY: return await interaction.followup.send("❌ Функция временно недоступна.")
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_KEY}&units=metric") as r:
-                if r.status!=200: return await interaction.followup.send(f"❌ Город **{city}** не найден.")
-                d = await r.json()
-        desc = d["weather"][0]["description"].capitalize()
-        temp = d["main"]["temp"]
-        feels = d["main"]["feels_like"]
-        humidity = d["main"]["humidity"]
-        wind = d["wind"]["speed"]
-        e = build_embed(C.INFO)
-        e.set_author(name=f"{d['name']}, {d['sys']['country']}")
-        e.add_field(name="Температура", value=f"**{temp:.1f}°C** (ощущается {feels:.1f}°C)", inline=True)
-        e.add_field(name="Описание",    value=desc,                                          inline=True)
-        e.add_field(name="Влажность",   value=f"**{humidity}%**",                            inline=True)
-        e.add_field(name="Ветер",       value=f"**{wind} м/с**",                             inline=True)
-        await interaction.followup.send(embed=e)
-    except Exception as ex: await interaction.followup.send(f"❌ {ex}")
-
-@bot.tree.command(name="translate")
-@app_commands.describe(text="Текст", to="Язык: en/de/ru/ua")
-@cooldown(5)
-async def translate(interaction: discord.Interaction, text: str, to: str = "en"):
-    await interaction.response.defer()
-    langs = {"en":"English","de":"German","ru":"Russian","ua":"Ukrainian"}
-    target = langs.get(to.lower(),"English")
-    try:
-        result = await ask_ai(f"Translate to {target}. Reply ONLY with translation:\n\n{text}", system="Precise translator. Output only translated text.")
-        e = discord.Embed(title=f"🌍 → {target}", color=0x00E5FF)
-        e.add_field(name="Оригинал", value=text[:1024], inline=False)
-        e.add_field(name="Перевод", value=result[:1024], inline=False)
-        await interaction.followup.send(embed=e)
-    except Exception as ex: await interaction.followup.send(f"❌ {ex}")
-
 @bot.tree.command(name="giveaway")
 @app_commands.describe(prize="Приз", duration="Минут")
 async def giveaway(interaction: discord.Interaction, prize: str, duration: int = 60):
@@ -391,7 +299,7 @@ async def invite_cmd(interaction: discord.Interaction):
         f"**[Нажми здесь чтобы добавить]({invite_url})**"
     )
     e.add_field(name="Free",     value="Moderation · Tickets · Basic Security", inline=True)
-    e.add_field(name="Premium",  value="AI · Giveaways · €2.99/mo",      inline=True)
+    e.add_field(name="Premium",  value="Giveaways · Server stats · €2.99/mo",inline=True)
     e.add_field(name="Security", value="Advanced /q security tools · €4.99/mo", inline=True)
 
     view = discord.ui.View()
