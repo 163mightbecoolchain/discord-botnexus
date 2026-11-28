@@ -495,6 +495,23 @@ async def on_member_unban(guild, user):
     e.add_field(name=t(gid4, "member"), value=user.mention, inline=False)
     await ch.send(embed=e)
 
+async def _automod_timeout_reason(guild, target_id, window: int = 15):
+    """Причина таймаута от AutoMod Discord из журнала аудита или None."""
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        async for entry in guild.audit_logs(
+                limit=5, action=discord.AuditLogAction.automod_timeout_member):
+            if getattr(entry.target, "id", None) != target_id:
+                continue
+            if (now - entry.created_at).total_seconds() > window:
+                continue
+            rule = getattr(entry.extra, "automod_rule_name", None)
+            return f"AutoMod Discord: {rule}" if rule else "AutoMod Discord"
+    except Exception as ex:
+        print(f"[AUDIT] automod: {ex}")
+    return None
+
+
 @bot.event
 async def on_member_update(before, after):
     if before.nick != after.nick:
@@ -519,6 +536,12 @@ async def on_member_update(before, after):
             if removed: e.add_field(name=t(gid6, "removed"), value=", ".join(r.mention for r in removed), inline=False)
             await ch.send(embed=e)
     if before.timed_out_until != after.timed_out_until:
+        # Discord не обнуляет timed_out_until, когда таймаут истекает: у того,
+        # кого уже мутили, в «до» лежит прошедшая дата, а не None. Без этой
+        # проверки повторный мут считался «продлением» — не писался в modlog
+        # (не видно, кто замутил), в /muteboard и без DM с апелляцией.
+        was_muted = bool(before.timed_out_until and before.timed_out_until >
+                         datetime.datetime.now(datetime.timezone.utc))
         ch = await sec_check(after.guild, "timeouts")
         if ch:
             gid7 = after.guild.id
@@ -564,10 +587,21 @@ async def on_member_update(before, after):
 
                 # Мут мог быть выдан вручную через Discord — тогда записи в
                 # modlog нет и на сайте действие не отображается
-                if before.timed_out_until is None:
+                if not was_muted:
                     try:
                         mod_id, ar = await _audit_actor(
                             after.guild, discord.AuditLogAction.member_update, after.id)
+                        if mod_id == 0:
+                            # Запись в журнале аудита могла ещё не появиться
+                            await asyncio.sleep(2)
+                            mod_id, ar = await _audit_actor(
+                                after.guild, discord.AuditLogAction.member_update, after.id)
+                        if mod_id == 0:
+                            # Таймаут от AutoMod Discord пишется в аудит другим действием
+                            auto_reason = await _automod_timeout_reason(after.guild, after.id)
+                            if auto_reason:
+                                await add_modlog(after.guild.id, after.id, 0, "AUTO_MUTE",
+                                                 auto_reason, "")
                         if mod_id:
                             already = False
                             async with aiosqlite.connect(DB_PATH) as db:
@@ -589,7 +623,7 @@ async def on_member_update(before, after):
                             await antinuke_check(after.guild, mod_id, "mute")
                     except Exception as ex:
                         print(f"[MUTE_LOG] audit: {ex}")
-            elif before.timed_out_until is not None:
+            elif was_muted:
                 # Мут сняли досрочно — уведомляем и закрываем апелляции.
                 # Если запись уже закрыта (сняли с сайта) — участник уже уведомлён
                 async with aiosqlite.connect(DB_PATH) as db:
@@ -605,7 +639,7 @@ async def on_member_update(before, after):
             print(f"[MUTE_TRACK] {ex}")
 
         # mute_log — записываем для /muteboard
-        if (before.timed_out_until is None and after.timed_out_until is not None):
+        if not was_muted and after.timed_out_until is not None:
             try:
                 duration = (after.timed_out_until.replace(tzinfo=None) -
                             datetime.datetime.utcnow()).total_seconds()
